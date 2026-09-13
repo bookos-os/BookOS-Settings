@@ -1,8 +1,9 @@
+import * as desktop from './pages/desktop.js';
 import{
     tauriInvoke,getAssetUrl,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,invalidateHwCache,
-    esc,addInterval,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
-    renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,
+    esc,addInterval,addSystemListener,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
+    renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,
     renderError,renderEmptyState,renderNavRow,
     _tr,renderRowItem,renderToggle,renderSlider,renderHeader,renderSection,
     popoverSelect,themeColor,setupToggle,setupSlider,wifiIcon,btIcon,chevron,lockIcon
@@ -19,16 +20,23 @@ export{renderSddmEditor};
 import{installPaletteCss,previewPaletteCss,paletteToCss}from'./dynamic-color.js';
 export{getRoutines,saveRoutines,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,executeRoutine,snapshotForRoutine,restoreSnapshot};
 
+function parseServiceResult(raw){
+    const value=typeof raw==='string'?JSON.parse(raw):raw;
+    if(value?.ok===false)throw new Error(value.error||'Servicio BookOS no disponible');
+    return value;
+}
+
 // ── Conexiones main page ──
 export async function renderConexiones(c){
     c.innerHTML=renderHeader(t('hdr_connections'))+renderSkeleton(3);
     let w={enabled:false,ssid:''},bt={enabled:false},air={enabled:false},eth={present:false,connected:false};
     try{[w,bt,air,eth]=await Promise.all([
-        tauriInvoke('get_wifi_status').then(JSON.parse).catch(()=>({enabled:false,ssid:''})),
-        tauriInvoke('get_bluetooth_status').then(JSON.parse).catch(()=>({enabled:false})),
-        tauriInvoke('get_airplane_mode').then(JSON.parse).catch(()=>({enabled:false})),
-        tauriInvoke('get_ethernet_status').then(JSON.parse).catch(()=>({present:false,connected:false}))
-    ]);}catch(e){}
+        tauriInvoke('get_wifi_status').then(parseServiceResult).catch(()=>null),
+        tauriInvoke('get_bluetooth_status').then(parseServiceResult).catch(()=>null),
+        tauriInvoke('get_airplane_mode').then(parseServiceResult).catch(()=>null),
+        tauriInvoke('get_ethernet_status').then(parseServiceResult).catch(()=>null)
+    ]);}catch(e){toast(String(e),'❌');return;}
+    if(!w||!bt||!air||!eth){c.innerHTML=renderHeader(t('hdr_connections'))+renderServiceError('Servicio BookOS no disponible','conectividad');return;}
 
     let h=renderHeader(t('hdr_connections'));
     // Ethernet (wired) — only shown when an interface exists
@@ -73,27 +81,27 @@ export async function renderConexiones(c){
     document.getElementById('go-eth')?.addEventListener('click',()=>{if(window.pushSubNav)window.pushSubNav(()=>renderConexiones(c));window.clearPageIntervals?.();renderEthernetDetailPage(c);});
 
     setupToggle('wifi',async a=>{
-        try{await tauriInvoke('toggle_wifi',{enable:a});}catch(e){}
+        await tauriInvoke('toggle_wifi',{enable:a});
         const sub=document.getElementById('conn-wifi-sub');
         if(sub){sub.textContent=a?t('enabled'):t('disabled');sub.classList.remove('conn-sub-active');}
         toast(a?'Wi-Fi activado':'Wi-Fi desactivado');
     });
     setupToggle('bt',async a=>{
-        try{await tauriInvoke('toggle_bluetooth',{enable:a});}catch(e){}
+        await tauriInvoke('toggle_bluetooth',{enable:a});
         const sub=document.getElementById('conn-bt-sub');
         if(sub)sub.textContent=a?t('enabled'):t('disabled');
         toast(a?'Bluetooth activado':'Bluetooth desactivado');
     });
-    setupToggle('air',async a=>{try{await tauriInvoke('toggle_airplane_mode',{enable:a})}catch(e){}toast(a?'Modo Avión activado':'Modo Avión desactivado');});
+    setupToggle('air',async a=>{await tauriInvoke('toggle_airplane_mode',{enable:a});toast(a?'Modo Avión activado':'Modo Avión desactivado');});
 
-    // Refresh state every 5s — SSID + toggle sync (catch external changes)
-    addInterval(async()=>{
+    // Synchronize controls on service events, including external changes.
+    addSystemListener(async()=>{
         const sub=document.getElementById('conn-wifi-sub');if(!sub)return;
         try{
             const [w2,bt2,air2]=await Promise.all([
-                tauriInvoke('get_wifi_status').then(JSON.parse).catch(()=>null),
-                tauriInvoke('get_bluetooth_status').then(JSON.parse).catch(()=>null),
-                tauriInvoke('get_airplane_mode').then(JSON.parse).catch(()=>null)
+                tauriInvoke('get_wifi_status').then(parseServiceResult).catch(()=>null),
+                tauriInvoke('get_bluetooth_status').then(parseServiceResult).catch(()=>null),
+                tauriInvoke('get_airplane_mode').then(parseServiceResult).catch(()=>null)
             ]);
             if(w2){
                 sub.textContent=w2.enabled?(w2.ssid?esc(w2.ssid):t('enabled')):t('disabled');
@@ -114,12 +122,12 @@ export async function renderConexiones(c){
             const esub=document.getElementById('conn-eth-sub');
             if(esub){
                 try{
-                    const e2=JSON.parse(await tauriInvoke('get_ethernet_status'));
+                    const e2=parseServiceResult(await tauriInvoke('get_ethernet_status'));
                     esub.textContent=e2.connected?(e2.connection||_tr('Conectado')):_tr('Desconectado');
                     esub.classList.toggle('conn-sub-active',!!e2.connected);
-                }catch(e){}
+                }catch(e){toast(String(e),'❌');return;}
             }
-        }catch(e){}
+        }catch(e){toast(String(e),'❌');return;}
     },5000);
 }
 
@@ -138,7 +146,7 @@ async function renderEthernetDetailPage(c){
 
     const load=async()=>{
         let d;
-        try{ d=JSON.parse(await tauriInvoke('get_ethernet_details')); }
+        try{ d=parseServiceResult(await tauriInvoke('get_ethernet_details')); }
         catch(e){ document.getElementById('eth-details').innerHTML=renderInfoItem(_tr('No se pudieron cargar los detalles')); return; }
         const statusEl=document.getElementById('eth-status');
         if(!d.present){
@@ -174,14 +182,15 @@ async function renderEthernetDetailPage(c){
         });
     };
     await load();
-    addInterval(()=>{if(!document.getElementById('eth-details'))return;load();},5000);
+    addSystemListener(()=>{if(!document.getElementById('eth-details'))return;load();},5000);
 }
 
 // ── Wi-Fi subpage ──
-export async function renderWifiPage(c){
+export async function renderWifiPage(c,subscribe=true){
+    if(subscribe)addSystemListener(()=>document.getElementById('wl')?loadWifi():renderWifiPage(c,false));
     c.innerHTML=renderHeader(t('hdr_wifi'))+renderSkeleton(2);
     let w={enabled:false,ssid:''};
-    try{w=JSON.parse(await tauriInvoke('get_wifi_status'));}catch(e){}
+    try{w=parseServiceResult(await tauriInvoke('get_wifi_status'));}catch(e){c.innerHTML=renderHeader('Wi-Fi')+renderServiceError(e,'Wi-Fi');return;}
 
     let h=renderHeader(t('hdr_wifi'));
     // Toggle card
@@ -200,35 +209,34 @@ export async function renderWifiPage(c){
     const rescanAndLoad=async()=>{
         const btn=document.getElementById('btn-wifi-refresh');
         if(btn){btn.disabled=true;btn.classList.add('spinning');}
-        try{await tauriInvoke('wifi_rescan');}catch(e){}
-        await loadWifi();
-        if(btn){btn.disabled=false;btn.classList.remove('spinning');}
+        try{await tauriInvoke('wifi_rescan');await loadWifi();}catch(e){toast(String(e),'❌');}finally{if(btn){btn.disabled=false;btn.classList.remove('spinning');}}
     };
     const loadAll=()=>{loadWifi();tauriInvoke('wifi_rescan').catch(()=>{});};
-    if(w.enabled)loadAll();
+    if(w.enabled)loadAll();else loadWifi();
     document.getElementById('btn-wifi-refresh')?.addEventListener('click',()=>rescanAndLoad());
 
     setupToggle('wifi-page',async a=>{
-        try{await tauriInvoke('toggle_wifi',{enable:a});}catch(e){}
+        await tauriInvoke('toggle_wifi',{enable:a});
         const label=document.querySelector('[data-toggle="wifi-page"]')?.previousElementSibling;
         if(label)label.textContent=a?t('enabled'):t('disabled');
         if(a)loadAll();
         else{
             const cur=document.getElementById('wifi-current');const el=document.getElementById('wl');
-            if(cur)cur.innerHTML=renderInfoItem('Wi-Fi desactivado','');
+            if(cur)cur.innerHTML=renderInfoItem('Dispositivo Wi-Fi apagado','Activa Wi-Fi para buscar redes');
             if(el)el.innerHTML='';
         }
         toast(a?'Wi-Fi activado':'Wi-Fi desactivado');
     });
 
-    addInterval(()=>{if(!document.getElementById('wl'))return;loadWifi();},10000);
+
 }
 
 // ── Bluetooth subpage ──
-export async function renderBTPage(c){
+export async function renderBTPage(c,subscribe=true){
+    if(subscribe)addSystemListener(()=>document.getElementById('bl')?loadBT():renderBTPage(c,false));
     c.innerHTML=renderHeader(t('hdr_bluetooth'))+renderSkeleton(2);
     let bt={enabled:false};
-    try{bt=JSON.parse(await tauriInvoke('get_bluetooth_status'));}catch(e){}
+    try{bt=parseServiceResult(await tauriInvoke('get_bluetooth_status'));}catch(e){c.innerHTML=renderHeader('Bluetooth')+renderServiceError(e,'Bluetooth');return;}
 
     let h=renderHeader(t('hdr_bluetooth'));
     h+=`<div class="detail-card">
@@ -237,36 +245,38 @@ export async function renderBTPage(c){
             ${renderToggle('bt-page',bt.enabled)}
         </div>
     </div>`;
-    if(bt.enabled)h+=`<p class="conn-bt-hint">Este equipo es visible para dispositivos cercanos mientras Bluetooth está activado.</p>`;
-    h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Dispositivos vinculados</p>${bt.enabled?`<button class="refresh-btn" id="btn-bt-scan" title="Buscar dispositivos"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Escanear</button>`:''}</div>`;
+    if(bt.enabled)h+=`<p class="conn-bt-hint">Busca dispositivos cercanos para emparejarlos con este equipo.</p>`;
+    h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Dispositivos vinculados</p>${`<button class="refresh-btn" id="btn-bt-scan" title="Buscar dispositivos"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Escanear</button>`}</div>`;
     h+=`<div class="detail-card" id="bl">${renderLoading('Cargando...')}</div>`;
     c.innerHTML=h;
 
-    if(bt.enabled)loadBT();
+    loadBT();
     document.getElementById('btn-bt-scan')?.addEventListener('click',async()=>{
         const btn=document.getElementById('btn-bt-scan');
         if(btn){btn.disabled=true;btn.classList.add('spinning');}
-        try{await tauriInvoke('bluetooth_scan').catch(()=>{});}catch(e){}
-        await loadBT();
-        if(btn){btn.disabled=false;btn.classList.remove('spinning');}
+        try{await tauriInvoke('bluetooth_scan');await loadBT();}catch(e){toast(String(e),'❌');}finally{if(btn){btn.disabled=false;btn.classList.remove('spinning');}}
     });
 
     setupToggle('bt-page',async a=>{
-        try{await tauriInvoke('toggle_bluetooth',{enable:a});}catch(e){}
+        await tauriInvoke('toggle_bluetooth',{enable:a});
         const label=document.querySelector('[data-toggle="bt-page"]')?.previousElementSibling;
         if(label){label.textContent=a?t('enabled'):t('disabled');label.style.color=a?'var(--blue)':'var(--tx2)';}
         if(a)loadBT();
         toast(a?'Bluetooth activado':'Bluetooth desactivado');
     });
 
-    addInterval(()=>{if(!document.getElementById('bl'))return;loadBT();},15000);
+
 }
 
 async function loadWifi(){
     const cur=document.getElementById('wifi-current'),el=document.getElementById('wl');
     if(!el)return;
     try{
-        const nets=JSON.parse(await tauriInvoke('get_wifi_list'));
+        const status=parseServiceResult(await tauriInvoke('get_wifi_status'));
+        const toggle=document.querySelector('[data-toggle="wifi-page"]');
+        if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label)label.textContent=status.enabled?t('enabled'):t('disabled');}
+        if(!status.enabled){if(cur)cur.innerHTML=renderInfoItem('Dispositivo Wi-Fi apagado','Activa Wi-Fi para buscar redes');el.innerHTML='';return;}
+        const nets=status.networks;
         const active=nets.find(n=>n.active);
         if(cur){
             cur.innerHTML=active
@@ -312,7 +322,7 @@ async function loadWifi(){
                 document.getElementById('wp').addEventListener('keydown',e=>{if(e.key==='Enter'){cWifi(ssid,document.getElementById('wp').value);d.remove();}});
             });
         });
-    }catch(e){if(el)el.innerHTML=renderInfoItem('Error al buscar redes');}
+    }catch(e){if(el)el.innerHTML=renderServiceError(e,'redes Wi-Fi');}
 }
 async function cWifi(s,p){
     toast('Conectando...','📶');
@@ -323,7 +333,12 @@ async function cWifi(s,p){
 async function loadBT(){
     const el=document.getElementById('bl');if(!el)return;
     try{
-        const devs=JSON.parse(await tauriInvoke('get_bluetooth_devices'));
+        const status=parseServiceResult(await tauriInvoke('get_bluetooth_status'));
+        const toggle=document.querySelector('[data-toggle="bt-page"]');
+        if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label){label.textContent=status.enabled?t('enabled'):t('disabled');label.style.color=status.enabled?'var(--blue)':'var(--tx2)';}}
+        const scan=document.getElementById('btn-bt-scan');if(scan)scan.disabled=!status.enabled;
+        if(!status.enabled){el.innerHTML=renderInfoItem('Dispositivo Bluetooth apagado','Activa Bluetooth para buscar dispositivos');return;}
+        const devs=status.devices;
         if(!devs.length){el.innerHTML=renderInfoItem('No hay dispositivos vinculados','Activa el modo vinculación en el otro dispositivo');return;}
         el.innerHTML=devs.map(d=>`
             <div class="conn-bt-item ${d.connected?'conn-bt-connected':''}">
@@ -332,7 +347,7 @@ async function loadBT(){
                     <span class="conn-bt-name">${esc(d.name)}</span>
                     <span class="conn-bt-sub">${d.connected?'Conectado':'Desconectado'}</span>
                 </div>
-                <button class="conn-gear-btn conn-bt-action" data-mac="${esc(d.mac)}" data-c="${d.connected}">
+                <button class="conn-gear-btn conn-bt-action" data-mac="${esc(d.mac)}" data-c="${d.connected}" data-paired="${d.paired}">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--tx2)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
             </div>`).join('');
@@ -340,14 +355,14 @@ async function loadBT(){
             b.addEventListener('click',async()=>{
                 try{
                     if(b.dataset.c==='true')await tauriInvoke('disconnect_bluetooth',{mac:b.dataset.mac});
-                    else await tauriInvoke('connect_bluetooth',{mac:b.dataset.mac});
+                    else {if(b.dataset.paired!=='true')await tauriInvoke('pair_bluetooth',{mac:b.dataset.mac});await tauriInvoke('connect_bluetooth',{mac:b.dataset.mac});}
                     loadBT();toast(b.dataset.c==='true'?'Desconectado':'Conectado','🔵');
                 }catch(e){toast('Error','❌');}
             });
         });
     }catch(e){
         console.error('[BT] loadBT parse error',e);
-        el.innerHTML=renderInfoItem('Error al cargar dispositivos',String(e).slice(0,160));
+        el.innerHTML=renderServiceError(e,'dispositivos Bluetooth');
     }
 }
 
@@ -430,17 +445,11 @@ async function renderWifiDetailPage(c,{ssid,security,band}){
             if(cpy)cpy.style.display=hidden?'flex':'none';
             return;
         }
-        // Try without sudo
-        let res=JSON.parse(await tauriInvoke('get_wifi_password',{ssid,sudoPassword:''}));
-        if(res.ok&&res.password){_pw=res.password;_showPw();return;}
-        if(!res.needs_auth){el.textContent='—';return;}
-        // Needs sudo
-        const pwd=await showRootAuth(_tr('Contraseña requerida'),`${_tr('Para ver la contraseña de')} "${esc(ssid)}", ${_tr('introduce la contraseña del equipo.')}`);
-        if(!pwd)return;
-        res=JSON.parse(await tauriInvoke('get_wifi_password',{ssid,sudoPassword:pwd}));
-        if(res.ok&&res.password){_pw=res.password;_showPw();}
-        else if(res.error==='wrong_password')toast('Contraseña incorrecta','❌');
-        else el.textContent='—';
+        try{
+            const res=JSON.parse(await tauriInvoke('get_wifi_password',{ssid,sudoPassword:''}));
+            if(res.ok&&res.password){_pw=res.password;_showPw();}
+            else el.textContent='—';
+        }catch(e){toast(String(e),'❌');}
     });
     document.getElementById('wd-copy-pw')?.addEventListener('click',()=>{
         if(_pw==null)return;
@@ -460,27 +469,17 @@ async function renderWifiDetailPage(c,{ssid,security,band}){
 
 
 // ════════════════════════════════════════════════════════════════════════
-// ── Puente con BookOS Desktop (sustituye a KScreen en sesión BookOS) ────
+// ── Pantallas gestionadas por BookOS Desktop ────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
-// Regla que no se rompe: **o BookOS Desktop, o KScreen, nunca los dos**. Si el
-// compositor de BookOS está en el bus, KWin no está gobernando estas pantallas
-// y llamar a kscreen-doctor no haría nada (o algo peor, si hay una sesión de
-// Plasma abierta en otro TTY). La detección es lo primero que se pregunta y
-// decide la rama entera.
+// Las acciones van siempre por la API del compositor BookOS.
 //
 // El contrato de la interfaz D-Bus lo documenta bookos-comp/src/ajustes.rs.
 
 // La disponibilidad se cachea para la vida de la página: el escritorio no
 // cambia de compositor a media sesión, y preguntarlo en cada render sería una
 // ida y vuelta al bus por cada popover que se abre.
-let _bkDisponible=null;
-export async function bookosDesktopReady(){
-    if(_bkDisponible===null){
-        try{_bkDisponible=await tauriInvoke('bookos_desktop_available');}
-        catch(e){_bkDisponible=false;}
-    }
-    return _bkDisponible;
-}
+
+
 
 async function bkCapabilities(){
     try{return JSON.parse(await tauriInvoke('bookos_get_capabilities'));}
@@ -556,398 +555,9 @@ function bkAvisoFluidez(escala,hz){
 // ── Pantalla ────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderPantalla(c){
-    c.innerHTML=renderHeader(t('hdr_display'))+renderSkeleton(5);
-    let br=75,nl={active:false,temperature:4500},displays=[],theme={is_dark:false,scheme:''};
-    let lockTimeout=5;
-    let savedVb=false,savedHdr=false,savedDpst=false;
-    let hw=null;
-    let kscrOutputs=[];
-    let styleThemes={kvantum_dark:'bookos-dark-blue',kvantum_light:'bookos-light-blue',plasma_dark:'bookos-dark',plasma_light:'bookos-light'};
-    try{
-        const[b,n,d,t,lt,_hw,st,ks]=await Promise.all([
-            tauriInvoke('get_brightness').then(JSON.parse).catch(()=>({brightness:75})),
-            tauriInvoke('get_nightlight').then(JSON.parse).catch(()=>({active:false,temperature:4500})),
-            ci('get_display_info').then(JSON.parse).catch(()=>[]),
-            ci('get_current_theme').then(JSON.parse).catch(()=>({is_dark:false,scheme:''})),
-            tauriInvoke('get_lock_timeout').then(r=>JSON.parse(r).timeout).catch(()=>5),
-            getCachedHwState(),
-            ci('get_style_themes').then(JSON.parse).catch(()=>({})),
-            ci('kscreen_get').then(JSON.parse).then(j=>j.outputs||[]).catch(()=>[]),
-        ]);
-        br=b.brightness;nl=n;displays=d;theme=t;lockTimeout=lt;hw=_hw;kscrOutputs=ks;
-        if(st&&st.kvantum_dark) styleThemes={...styleThemes,...st};
-        if(hw&&typeof hw==='string'){try{hw=JSON.parse(hw);}catch{hw=null;}}
-        if(hw){
-            savedHdr=!!hw.hdr_activo;
-            savedVb=!hw.hdr_activo&&hw.brillo_porcentaje>=99;
-            savedDpst=hw.platform_profile==='quiet'||(!hw.hdr_activo&&hw.brillo_porcentaje<=42&&hw.modo_termico==='silencioso');
-        } else {
-            [savedVb,savedHdr,savedDpst]=await Promise.all([
-                getSetting('VisionBooster','false').then(v=>v==='true'),
-                getSetting('HdrActive','false').then(v=>v==='true'),
-                getSetting('AhorroPantalla','false').then(v=>v==='true'),
-            ]);
-        }
-    }catch(e){console.error('[Pantalla]',e);}
-
-    // En sesión BookOS el censo lo da el compositor y kscreen-doctor no pinta
-    // nada. Se traduce a la misma forma que usaba la página para no tocar el
-    // resto del render: `name` pasa a ser el identificador estable del monitor,
-    // que es lo que hay que mandar de vuelta al aplicar.
-    const nativo=await bookosDesktopReady();
-    let bkOuts=[],bkCaps={};
-    if(nativo){
-        [bkOuts,bkCaps]=await Promise.all([bkGetOutputs(),bkCapabilities()]);
-        const activas=bkOuts.filter(o=>o.activa);
-        displays=activas.map(o=>{
-            const m=bkModoActual(o);
-            const vistos=new Set();
-            const modes=(o.modos||[]).map(x=>`${x.ancho}x${x.alto}@${bkHz(x)}`).filter(x=>{
-                if(vistos.has(x))return false;vistos.add(x);return true;
-            });
-            return {name:o.id,current:m?`${bkRes(m)}@${bkHz(m)}`:'',modes};
-        });
-        kscrOutputs=activas.map(o=>({name:o.id,scale:o.escala,enabled:true}));
-    }
-
-    const savedRR=await getSetting('RefreshRate','120');
-    const nlFrom=await getSetting('NightLightFrom','22:00');
-    const nlTo=await getSetting('NightLightTo','07:00');
-
-    const hasHwDisplayFeatures=hw!==null;
-    let savedIcc='SDC4189.icm',savedIccAdaptive=false;
-    if(hasHwDisplayFeatures){
-        [savedIcc,savedIccAdaptive]=await Promise.all([
-            getSetting('IccProfile','SDC4189.icm'),
-            getSetting('IccAdaptive','false').then(v=>v==='true'),
-        ]);
-    }
-
-    // Display helpers
-    const resMap={"2880x1800":"WQXGA+","1920x1200":"WUXGA","1440x900":"WXGA+","1280x800":"WXGA","2560x1600":"WQXGA","1920x1080":"FHD"};
-    const getResName=m=>{const b=m.split('@')[0].trim();return resMap[b]||b;};
-    // hw !== null → el dispositivo tiene controles de pantalla avanzados (HDR, Vision Booster, ICC)
-
-    const curRes=displays.length?getResName(displays[0].current||''):'';
-    const curScale=displays.length?(kscrOutputs.find(o=>o.name===displays[0].name)?.scale||1):1;
-    const curHz=savedRR==='60'?'60 Hz':'120 Hz';
-    const nlLabel=nl.active?`${nlFrom} – ${nlTo}`:_tr('Desactivada');
-    const iccProfiles=[
-        {file:'SDC4189.icm',name:'sRGB',color:'#8e8e93'},
-        {file:'SDC4189S.icm',name:'Vivaz',color:'#ff9f0a'},
-        {file:'SDC4189A.icm',name:'Natural',color:'#30d158'},
-        {file:'SDC4189P.icm',name:'P3',color:'#0a84ff'},
-        {file:'auto',name:'Automático',color:'var(--blue)'},
-    ];
-    const effectiveIcc=savedIccAdaptive?'auto':savedIcc;
-    const curIccName=iccProfiles.find(p=>p.file===effectiveIcc)?.name||'sRGB';
-    const toMins=lockTimeout;
-    const _lang_ml=(localStorage.getItem('bookos_lang')||'es')==='en';
-    const toLabel=toMins<=1?(_lang_ml?'1 minute':'1 minuto'):toMins>=60?`${Math.round(toMins/60)} ${_lang_ml?(toMins>60?'hours':'hour'):(toMins>60?'horas':'hora')}`:`${toMins} ${_lang_ml?'minutes':'minutos'}`;
-
-    let h=renderHeader(t('hdr_display'));
-
-    // ① Dark/Light mode card
-    h+=`<div class="detail-card" style="padding:16px 16px 0;gap:0">
-        <div class="display-mode-row" style="margin-bottom:0">
-            <div class="display-mode-card ${!theme.is_dark?'active':''}" data-mode="light">
-                <div class="display-mode-preview light-preview"><svg width="24" height="18" viewBox="0 0 24 18" fill="none"><rect x="1" y="1" width="22" height="3" rx="1.5" fill="rgba(0,0,0,.15)"/><rect x="1" y="6" width="14" height="2" rx="1" fill="rgba(0,0,0,.1)"/><rect x="1" y="10" width="10" height="2" rx="1" fill="rgba(0,0,0,.08)"/></svg></div>
-                <span class="display-mode-label">${_tr('Claro')}</span>
-                <div class="display-mode-radio"></div>
-            </div>
-            <div class="display-mode-card ${theme.is_dark?'active':''}" data-mode="dark">
-                <div class="display-mode-preview dark-preview"><svg width="24" height="18" viewBox="0 0 24 18" fill="none"><rect x="1" y="1" width="22" height="3" rx="1.5" fill="rgba(255,255,255,.15)"/><rect x="1" y="6" width="14" height="2" rx="1" fill="rgba(255,255,255,.1)"/><rect x="1" y="10" width="10" height="2" rx="1" fill="rgba(255,255,255,.08)"/></svg></div>
-                <span class="display-mode-label">${_tr('Oscuro')}</span>
-                <div class="display-mode-radio"></div>
-            </div>
-        </div>
-        <div style="border-top:1px solid var(--div);margin:14px -16px 0">
-            <div class="detail-item" style="cursor:pointer;padding:12px 20px" id="btn-dark-mode-settings">
-                <span class="dt" id="dark-mode-settings-label">${_tr(theme.is_dark?'Ajustes del modo Oscuro':'Ajustes del modo Claro')}</span>
-                ${chevron()}
-            </div>
-        </div>
-    </div>`;
-
-    // ② Brightness card
-    h+=renderCard([`<div class="detail-item"><span class="dt">${_tr('Brillo')}</span>${renderSlider('br',br)}</div>`]);
-
-    // ③ Display options card (each row → sub-page)
-    const dispRows=[];
-    dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-fluidez">
-        <span class="dt">${_tr('Fluidez de movimientos')}</span>
-        <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-fluidez">${curHz}</span>${chevron()}</div>
-    </div>`);
-    dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-nightlight">
-        <span class="dt">${_tr('Protección de la vista')}</span>
-        <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-nightlight">${nlLabel}</span>${chevron()}</div>
-    </div>`);
-    if(hasHwDisplayFeatures){
-        dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-display-mode">
-            <span class="dt">${_tr('Modo de pantalla')}</span>
-            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-displaymode">${curIccName}</span>${chevron()}</div>
-        </div>`);
-    }
-    if(displays.length){
-        dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-resolution">
-            <span class="dt">${_tr('Resolución de la pantalla')}</span>
-            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-resolution">${curRes}</span>${chevron()}</div>
-        </div>`);
-        dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-scale">
-            <span class="dt">${_tr('Escala')}</span>
-            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-scale">${Math.round(curScale*100)}%</span>${chevron()}</div>
-        </div>`);
-    }
-    // En sesión BookOS la sub-página lista todas las pantallas, no solo las
-    // externas: es el compositor quien las gobierna y la interna es una más.
-    dispRows.push(`<div class="detail-item" style="cursor:pointer" id="btn-ext-displays">
-        <span class="dt">${_tr(nativo?'Pantallas':'Pantallas externas')}</span>
-        <div style="display:flex;align-items:center;gap:6px">${chevron()}</div>
-    </div>`);
-    h+=renderCard(dispRows);
-
-    // ④ Timeout card
-    h+=renderCard([`<div class="detail-item" style="cursor:pointer" id="btn-timeout">
-        <span class="dt">${_tr('Tiempo de espera de pantalla')}</span>
-        <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-timeout">${toLabel}</span>${chevron()}</div>
-    </div>`]);
-
-    // ⑤ Samsung Display extras (if hw)
-    if(hasHwDisplayFeatures){
-        h+=renderSection(t('sec_samsung_display'));
-        h+=renderCard([
-            renderRowItem('Vision Booster','Brillo máximo · Gama amplia P3',renderToggle('vb',savedVb)),
-            renderRowItem('HDR','HDR10 nativo · Gama dinámica alta',renderToggle('hdr',savedHdr)),
-            renderRowItem('Ahorro de pantalla','90 Hz · GPU en reposo · Brillo al 40%',renderToggle('dpst',savedDpst)),
-        ]);
-    }
-
-    c.innerHTML=h;
-
-    // Dark/light mode toggle
-    document.querySelectorAll('.display-mode-card').forEach(card=>{
-        card.addEventListener('click',async()=>{
-            const isDark=card.dataset.mode==='dark';
-            const kcsT=await tauriInvoke('get_kde_light_dark_themes').then(JSON.parse).catch(()=>({light:'',dark:'',is_global:false}));
-            const name=isDark?(kcsT.dark||'BookOS-Dark'):(kcsT.light||'BookOS-Light');
-            try{await tauriInvoke('apply_kde_theme',{name,isGlobal:kcsT.is_global});}catch(e){}
-            document.documentElement.className=isDark?'dark-mode':'light-mode';
-            document.querySelectorAll('.display-mode-card').forEach(x=>x.classList.remove('active'));
-            card.classList.add('active');
-            const lbl=document.getElementById('dark-mode-settings-label');
-            if(lbl)lbl.textContent=_tr(isDark?'Ajustes del modo Oscuro':'Ajustes del modo Claro');
-            toast(isDark?'Cambiando a modo oscuro':'Cambiando a modo claro');
-        });
-    });
-
-    // Brightness slider
-    setupSlider('br',async v=>{try{await tauriInvoke('set_brightness',{value:parseInt(v)})}catch(e){}},true,
-        v=>{try{tauriInvoke('set_brightness',{value:parseInt(v)})}catch(e){}});
-
-    // Samsung Display toggles
-    if(hasHwDisplayFeatures){
-        const save=(key,val)=>setSetting(key,String(val));
-        const hwToggle=(id,key,onFn,offFn)=>setupToggle(id,async a=>{
-            try{
-                const msg=await (a?onFn():offFn());
-                invalidateHwCache();
-                const hasWarn=msg&&(msg.includes('advertencias')||msg.includes('no crítico'));
-                toast(msg,hasWarn?'⚠️':'✓');
-                save(key,a);
-            }catch(e){
-                const el=document.querySelector(`[data-toggle="${id}"]`);
-                if(el)el.classList.toggle('active');
-                toast(String(e),'❌');
-            }
-        });
-        hwToggle('vb','VisionBooster',()=>tauriInvoke('activar_vision_booster'),()=>tauriInvoke('desactivar_vision_booster'));
-        hwToggle('hdr','HdrActive',()=>tauriInvoke('activar_hdr'),()=>tauriInvoke('desactivar_hdr'));
-        hwToggle('dpst','AhorroPantalla',()=>tauriInvoke('activar_ahorro_pantalla'),()=>tauriInvoke('desactivar_ahorro_pantalla'));
-    }
-
-    // Sub-page navigation
-    document.getElementById('btn-dark-mode-settings')?.addEventListener('click',()=>{
-        window.pushSubNav?.(()=>renderPantalla(c));
-        const isDark=document.documentElement.classList.contains('dark-mode');
-        _pantallaSubDarkMode(c,isDark,styleThemes);
-    });
-    // ── Quick anchored popovers (no sub-page navigation) ──
-    // Mutable selection state so reopening a popover marks the fresh choice.
-    const _sel={rr:savedRR,icc:effectiveIcc,res:(displays[0]?.current||'').split('@')[0].trim(),to:lockTimeout,nl:nl.active,scale:Math.round(curScale*100)};
-    const _setLbl=(id,txt)=>{const el=document.getElementById(id);if(el)el.textContent=txt;};
-
-    document.getElementById('btn-fluidez')?.addEventListener('click',e=>{
-        popoverSelect(e.currentTarget,{
-            title:_tr('Fluidez de movimientos'),
-            options:[
-                {val:'120',label:_tr('Fluido'),right:'120 Hz',sub:_tr('Animaciones más suaves. Mayor consumo.')},
-                {val:'60', label:_tr('Estándar'),right:'60 Hz',sub:_tr('Menor consumo de batería.')},
-            ],
-            current:_sel.rr,
-            onSelect:async mode=>{
-                _sel.rr=mode;
-                setSetting('RefreshRate',mode);
-                if(nativo){
-                    const o=bkOuts.find(x=>x.activa&&x.principal)||bkOuts.find(x=>x.activa);
-                    if(!o)return;
-                    const m=bkModoActual(o),objetivo=parseInt(mode);
-                    // Se conserva la resolución y se busca el refresco más alto
-                    // que no pase del pedido: en un panel de 90/120 elegir
-                    // «estándar» tiene que dar 60, no fallar por no haber 60
-                    // exactos.
-                    const cand=(o.modos||[]).filter(x=>x.ancho===m.ancho&&x.alto===m.alto&&bkHz(x)<=objetivo+2)
-                        .sort((a,b)=>b.refresco_mhz-a.refresco_mhz)[0];
-                    if(!cand){bkToast('error',_tr('Esta pantalla no tiene ese refresco'));return;}
-                    bkToast('pendiente',_tr('Aplicando')+'…');
-                    const r=await bkApply(bkPeticiones(bkOuts,o.id,{
-                        ancho:cand.ancho,alto:cand.alto,refresco_mhz:cand.refresco_mhz,
-                        vrr:o.vrr_capaz&&objetivo>=120,
-                    }));
-                    if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
-                    bkOuts=await bkGetOutputs();
-                    _setLbl('lbl-fluidez',bkHz(cand)+' Hz');
-                    const aviso=bkAvisoFluidez(o.escala,bkHz(cand));
-                    bkToast('aplicado',aviso||(bkHz(cand)+' Hz'));
-                    return;
-                }
-                if(displays.length){
-                    const disp=displays[0];
-                    const curResOnly=(disp.current||'').split('@')[0].trim();
-                    const targetHz=parseInt(mode);
-                    const matches=(disp.modes||[]).filter(m=>m.startsWith(curResOnly)&&Math.abs(parseInt(m.split('@')[1]||'0')-targetHz)<=2);
-                    const targetMode=matches.sort((a,b)=>parseFloat(b.split('@')[1])-parseFloat(a.split('@')[1]))[0];
-                    if(targetMode){try{await tauriInvoke('set_resolution',{output:disp.name,resolution:targetMode});disp.current=targetMode;}catch(e){}}
-                    await tauriInvoke('set_vrr_policy',{output:disp.name,policy:mode==='120'?'Automatic':'Never'}).catch(()=>{});
-                }
-                _setLbl('lbl-fluidez',mode+' Hz');
-                toast(mode==='120'?'Modo fluido activado (120 Hz · VRR)':'Modo estándar activado (60 Hz)');
-            },
-        });
-    });
-    document.getElementById('btn-nightlight')?.addEventListener('click',e=>{
-        popoverSelect(e.currentTarget,{
-            title:_tr('Protección de la vista'),
-            options:[
-                {val:'on', label:_tr('Activada'), sub:_tr('Tonos cálidos que reducen la fatiga visual')},
-                {val:'off',label:_tr('Desactivada')},
-            ],
-            current:_sel.nl?'on':'off',
-            onSelect:async v=>{
-                _sel.nl=v==='on';
-                try{await tauriInvoke('set_nightlight',{active:_sel.nl,temperature:null});}catch(e){}
-                _setLbl('lbl-nightlight',_sel.nl?_tr('Activada'):_tr('Desactivada'));
-                toast(_sel.nl?'Protección de la vista activada':'Protección de la vista desactivada');
-            },
-            footer:{label:_tr('Programación y temperatura…'),onClick:()=>{
-                window.pushSubNav?.(()=>renderPantalla(c));
-                _pantallaSubNightLight(c,{...nl,active:_sel.nl},nlFrom,nlTo);
-            }},
-        });
-    });
-    if(hasHwDisplayFeatures){
-        document.getElementById('btn-display-mode')?.addEventListener('click',e=>{
-            popoverSelect(e.currentTarget,{
-                title:_tr('Modo de pantalla'),
-                options:iccProfiles.map(p=>({val:p.file,label:p.name,color:p.color})),
-                current:_sel.icc,
-                onSelect:async file=>{
-                    _sel.icc=file;
-                    const p=iccProfiles.find(x=>x.file===file);
-                    if(file==='auto'){setSetting('IccAdaptive','true');toast('Perfil automático activado');}
-                    else{setSetting('IccAdaptive','false');try{toast(await tauriInvoke('aplicar_perfil_color',{nombreArchivo:file}));setSetting('IccProfile',file);}catch(e){toast(String(e),'❌');}}
-                    _setLbl('lbl-displaymode',p?.name||file);
-                },
-            });
-        });
-    }
-    document.getElementById('btn-ext-displays')?.addEventListener('click',()=>{
-        if(window.pushSubNav)window.pushSubNav(()=>renderPantalla(c));
-        window.clearPageIntervals?.();
-        renderExternalDisplays(c);
-    });
-    if(displays.length){
-        document.getElementById('btn-resolution')?.addEventListener('click',e=>{
-            const d=displays[0];
-            const uniqueRes=[...new Set((d.modes||[]).map(m=>m.split('@')[0].trim()))];
-            const resMap={"2880x1800":"WQXGA+","1920x1200":"WUXGA","1440x900":"WXGA+","1280x800":"WXGA","2560x1600":"WQXGA","1920x1080":"FHD"};
-            popoverSelect(e.currentTarget,{
-                title:_tr('Resolución de la pantalla'),
-                options:uniqueRes.map(r=>({val:r,label:resMap[r]||r,right:r})),
-                current:_sel.res,
-                onSelect:async res=>{
-                    _sel.res=res;
-                    const curHzNow=(d.current||'').split('@')[1]||'60';
-                    if(nativo){
-                        const o=bkOuts.find(x=>x.id===d.name);
-                        if(!o)return;
-                        const [w,h]=res.split('x').map(Number);
-                        // Se intenta conservar el refresco actual; si esa
-                        // resolución no lo tiene, el más alto que haya.
-                        const cand=(o.modos||[]).filter(m=>m.ancho===w&&m.alto===h)
-                            .sort((a,b)=>(bkHz(b)===parseInt(curHzNow)?1:0)-(bkHz(a)===parseInt(curHzNow)?1:0)||b.refresco_mhz-a.refresco_mhz)[0];
-                        if(!cand){bkToast('error',_tr('Ese modo no existe en esta pantalla'));return;}
-                        bkToast('pendiente',_tr('Aplicando')+'…');
-                        const r=await bkApply(bkPeticiones(bkOuts,o.id,{ancho:cand.ancho,alto:cand.alto,refresco_mhz:cand.refresco_mhz}));
-                        if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
-                        bkOuts=await bkGetOutputs();
-                        d.current=`${res}@${bkHz(cand)}`;
-                        _setLbl('lbl-resolution',resMap[res]||res);
-                        bkToast('aplicado','Resolución: '+(resMap[res]||res));
-                        return;
-                    }
-                    const targetMode=(d.modes||[]).find(m=>m.startsWith(res+'@'+curHzNow))||(d.modes||[]).find(m=>m.startsWith(res))||res;
-                    try{await tauriInvoke('set_resolution',{output:d.name,resolution:targetMode});d.current=targetMode;}catch(e){}
-                    _setLbl('lbl-resolution',resMap[res]||res);
-                    toast('Resolución: '+(resMap[res]||res));
-                },
-            });
-        });
-        document.getElementById('btn-scale')?.addEventListener('click',e=>{
-            const d=displays[0];
-            // Las escalas las dice el compositor: no están cableadas aquí para
-            // que la interfaz no ofrezca una que el backend vaya a rechazar.
-            const o=nativo?bkOuts.find(x=>x.id===d.name):null;
-            const escalas=(o?.escalas?.length?o.escalas:[1,1.25,1.5,1.75,2]).map(x=>Math.round(x*100));
-            popoverSelect(e.currentTarget,{
-                title:_tr('Escala'),
-                options:escalas.map(v=>({val:v,label:v+'%'})),
-                current:_sel.scale,
-                onSelect:async v=>{
-                    _sel.scale=v;
-                    if(nativo&&o){
-                        bkToast('pendiente',_tr('Aplicando')+'…');
-                        const r=await bkApply(bkPeticiones(bkOuts,o.id,{escala:v/100}));
-                        if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
-                        bkOuts=await bkGetOutputs();
-                        _setLbl('lbl-scale',v+'%');
-                        const aviso=bkAvisoFluidez(v/100,bkHz(bkModoActual(bkOuts.find(x=>x.id===o.id)||o)));
-                        bkToast('aplicado',aviso||(_tr('Escala')+': '+v+'%'));
-                        return;
-                    }
-                    try{await tauriInvoke('kscreen_set',{args:[`output.${d.name}.scale.${(v/100).toFixed(2)}`]});}catch(e){}
-                    _setLbl('lbl-scale',v+'%');
-                    toast(_tr('Escala')+': '+v+'%');
-                },
-            });
-        });
-    }
-    document.getElementById('btn-timeout')?.addEventListener('click',e=>{
-        const opts=[{mins:1,label:'1 minuto'},{mins:2,label:'2 minutos'},{mins:5,label:'5 minutos'},
-                    {mins:10,label:'10 minutos'},{mins:15,label:'15 minutos'},{mins:30,label:'30 minutos'}];
-        popoverSelect(e.currentTarget,{
-            title:_tr('Tiempo de espera de pantalla'),
-            options:opts.map(o=>({val:o.mins,label:_tr(o.label)})),
-            current:_sel.to,
-            onSelect:async v=>{
-                const mins=parseInt(v);
-                _sel.to=mins;
-                try{await tauriInvoke('set_lock_timeout',{minutes:mins});}catch(e){}
-                const lbl=opts.find(o=>o.mins===mins)?.label||mins+' min';
-                _setLbl('lbl-timeout',_tr(lbl));
-                toast('Tiempo de espera: '+_tr(lbl));
-            },
-        });
-    });
+await renderPantallasBookOS(c);
+    const card=document.createElement('div');card.innerHTML=renderCard([renderRowItem('Brillo','',renderSlider('native-brightness',0))]);c.prepend(card);
+    try{const d=JSON.parse(await tauriInvoke('get_brightness'));const slider=c.querySelector('#native-brightness');if(slider)slider.value=d.brightness;setupSlider('native-brightness',async value=>{try{await tauriInvoke('set_brightness',{value:Number(value)});}catch(e){toast(String(e),'❌');}});}catch{card.remove();}
 }
 
 // ── Pantalla sub-pages ──────────────────────────────────────────────────
@@ -955,379 +565,23 @@ function _ckmark(){
     return `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--blue)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 }
 
-async function _pantallaSubDarkMode(c,isDark,styleThemes){
-    const mode=isDark?'Oscuro':'Claro';
-    const kvCurrent=isDark?styleThemes.kvantum_dark:styleThemes.kvantum_light;
-    const ptCurrent=isDark?styleThemes.plasma_dark:styleThemes.plasma_light;
-    const bookosKv=[{id:'bookos-dark-blue',name:'BookOS Oscuro'},{id:'bookos-light-blue',name:'BookOS Claro'}];
-    const bookosPlasma=[{id:'bookos-dark',name:'BookOS Oscuro'},{id:'bookos-light',name:'BookOS Claro'}];
-    const mkRow=(item,current,dtype)=>`<div class="detail-item" style="cursor:pointer;justify-content:space-between" data-${dtype}="${esc(item.id)}">
-        <span class="dt">${esc(item.name)}</span>${current===item.id?_ckmark():''}
-    </div>`;
-    let h=renderHeader(`Ajustes del modo ${mode}`);
-    h+=renderSection(t('sec_kvantum'));
-    h+=renderCard(bookosKv.map(i=>mkRow(i,kvCurrent,'kv')));
-    h+=renderSection(t('sec_plasma_theme'));
-    h+=renderCard(bookosPlasma.map(i=>mkRow(i,ptCurrent,'pt')));
-    c.innerHTML=h;
 
-    let curKv=kvCurrent,curPt=ptCurrent;
-    const save=async()=>{
-        const updated={
-            kvantumDark:isDark?curKv:styleThemes.kvantum_dark,
-            kvantumLight:isDark?styleThemes.kvantum_light:curKv,
-            plasmaDark:isDark?curPt:styleThemes.plasma_dark,
-            plasmaLight:isDark?styleThemes.plasma_light:curPt,
-        };
-        try{await tauriInvoke('set_style_themes',updated);_icInvalidate('get_style_themes');_icInvalidate('get_current_theme');toast('Estilo guardado');}catch(e){toast(String(e),'❌');}
-        styleThemes={
-            kvantum_dark:updated.kvantumDark,kvantum_light:updated.kvantumLight,
-            plasma_dark:updated.plasmaDark,plasma_light:updated.plasmaLight,
-        };
-    };
-    document.querySelectorAll('[data-kv]').forEach(row=>row.addEventListener('click',async()=>{
-        curKv=row.dataset.kv;await save();_pantallaSubDarkMode(c,isDark,styleThemes);
-    }));
-    document.querySelectorAll('[data-pt]').forEach(row=>row.addEventListener('click',async()=>{
-        curPt=row.dataset.pt;await save();_pantallaSubDarkMode(c,isDark,styleThemes);
-    }));
-}
 
-function _pantallaSubFluidez(c,savedRR,displays){
-    const options=[
-        {rr:'120',name:'Fluido',hz:'120 Hz',desc:'Desplazamiento y animaciones más suaves. Mayor consumo de batería.'},
-        {rr:'60',name:'Estándar',hz:'60 Hz',desc:'Menor consumo de batería. Adecuado para uso general.'},
-    ];
-    const mkRow=opt=>`<div class="detail-item" style="cursor:pointer;flex-direction:column;align-items:flex-start;gap:2px;padding:14px 20px" data-rr="${opt.rr}">
-        <div style="display:flex;width:100%;align-items:center;justify-content:space-between">
-            <div><span class="dt">${opt.name}</span>&nbsp;<span style="color:var(--tx2);font-size:13px">${opt.hz}</span></div>
-            ${savedRR===opt.rr?_ckmark():''}
-        </div>
-        <span class="ds">${opt.desc}</span>
-    </div>`;
-    let h=renderHeader(t('hdr_motion_smoothness'));
-    h+=renderCard(options.map(mkRow));
-    c.innerHTML=h;
-    document.querySelectorAll('[data-rr]').forEach(row=>row.addEventListener('click',async()=>{
-        const mode=row.dataset.rr;
-        try{
-            setSetting('RefreshRate',mode);
-            if(displays.length){
-                const disp=displays[0];
-                const curRes=(disp.current||'').split('@')[0].trim();
-                const targetHz=parseInt(mode);
-                // Pick the highest available rate near the target — useful when
-                // the panel only exposes 119.93 / 120.00 etc.
-                const matches=(disp.modes||[]).filter(m=>m.startsWith(curRes)&&Math.abs(parseInt(m.split('@')[1]||'0')-targetHz)<=2);
-                const targetMode=matches.sort((a,b)=>parseFloat(b.split('@')[1])-parseFloat(a.split('@')[1]))[0];
-                if(targetMode)await tauriInvoke('set_resolution',{output:disp.name,resolution:targetMode});
-                // VRR (Adaptive Sync): KDE 6 expects Never / Automatic / Always.
-                // 120Hz mode → Automatic (kicks in for fullscreen apps that benefit).
-                // 60Hz mode → Never (panel can't go below 60 anyway, no benefit).
-                const vrrPolicy=mode==='120'?'Automatic':'Never';
-                await tauriInvoke('set_vrr_policy',{output:disp.name,policy:vrrPolicy}).catch(()=>{});
-            }
-            toast(mode==='120'?'Modo fluido activado (120 Hz · VRR)':'Modo estándar activado (60 Hz)');
-        }catch(e){}
-        _pantallaSubFluidez(c,mode,displays);
-    }));
-}
 
-async function _pantallaSubNightLight(c,nl,nlFrom,nlTo){
-    const tempPct=Math.round(((nl.temperature||4500)-1000)/55);
-    let h=renderHeader(t('hdr_eye_protection'));
-    h+=renderCard([renderRowItem('Protección de la vista',nl.active?'Activada':'Desactivada',renderToggle('nl',nl.active))]);
-    h+=`<div id="nl-opts"${nl.active?'':' style="display:none"'}>`;
-    h+=renderSection(t('sec_auto_schedule'));
-    h+=renderCard([
-        `<div class="detail-item"><span class="dt">Desde las</span><input type="time" class="time-input" id="nl-from" value="${nlFrom}"></div>`,
-        `<div class="detail-item"><span class="dt">Hasta las</span><input type="time" class="time-input" id="nl-to" value="${nlTo}"></div>`,
-    ]);
-    h+=renderSection(t('sec_color_warmth'));
-    h+=renderCard([`<div class="detail-item"><span class="dt">Temperatura</span>${renderSlider('nlt',tempPct,0,100)}</div>`]);
-    h+=`</div>`;
-    c.innerHTML=h;
-    const nlOpts=document.getElementById('nl-opts');
-    setupToggle('nl',async a=>{
-        try{await tauriInvoke('set_nightlight',{active:a,temperature:null});}catch(e){}
-        if(nlOpts)nlOpts.style.display=a?'block':'none';
-        nl={...nl,active:a};
-        toast(a?'Protector de vista activado':'Protector de vista desactivado');
-    });
-    setupSlider('nlt',async v=>{
-        const temp=1000+Math.round(parseInt(v)*55);
-        try{await tauriInvoke('set_nightlight',{active:true,temperature:temp});}catch(e){}
-    });
-    const saveHours=async()=>{
-        const from=document.getElementById('nl-from')?.value||'22:00';
-        const to=document.getElementById('nl-to')?.value||'07:00';
-        setSetting('NightLightFrom',from);setSetting('NightLightTo',to);
-        try{
-            await tauriInvoke('set_nightlight_schedule',{scheduled:true,evening:from,morning:to,temperature:null});
-        }catch(e){}
-        toast('Horario guardado');
-    };
-    document.getElementById('nl-from')?.addEventListener('change',saveHours);
-    document.getElementById('nl-to')?.addEventListener('change',saveHours);
-}
 
-function _pantallaSubDisplayMode(c,iccProfiles,effectiveIcc){
-    let h=renderHeader(t('hdr_screen_mode'));
-    h+=renderCard(iccProfiles.map(p=>`
-        <div class="detail-item" style="cursor:pointer;justify-content:space-between" data-icc="${p.file}">
-            <div style="display:flex;align-items:center;gap:10px">
-                <div style="width:9px;height:9px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
-                <span class="dt">${p.name}</span>
-            </div>
-            ${effectiveIcc===p.file?_ckmark():''}
-        </div>
-    `));
-    c.innerHTML=h;
-    document.querySelectorAll('[data-icc]').forEach(row=>row.addEventListener('click',async()=>{
-        const file=row.dataset.icc;
-        if(file==='auto'){setSetting('IccAdaptive','true');toast('Perfil automático activado');}
-        else{setSetting('IccAdaptive','false');try{toast(await tauriInvoke('aplicar_perfil_color',{nombreArchivo:file}));setSetting('IccProfile',file);}catch(e){toast(String(e),'❌');}}
-        _pantallaSubDisplayMode(c,iccProfiles,file);
-    }));
-}
 
-function _pantallaSubResolution(c,displays){
-    const d=displays[0];
-    const curResOnly=(d.current||'').split('@')[0].trim();
-    const uniqueRes=[...new Set((d.modes||[]).map(m=>m.split('@')[0].trim()))];
-    const resMap={"2880x1800":"WQXGA+","1920x1200":"WUXGA","1440x900":"WXGA+","1280x800":"WXGA","2560x1600":"WQXGA","1920x1080":"FHD"};
-    const getResName=m=>{const b=m.split('@')[0].trim();return resMap[b]||b;};
-    let h=renderHeader(t('hdr_resolution'));
-    h+=renderCard(uniqueRes.map(r=>`
-        <div class="detail-item" style="cursor:pointer;justify-content:space-between" data-res="${r}">
-            <span class="dt">${getResName(r)}</span>
-            <div style="display:flex;align-items:center;gap:8px">
-                <span style="color:var(--tx2);font-size:13px">${r}</span>
-                ${r===curResOnly?_ckmark():''}
-            </div>
-        </div>
-    `));
-    c.innerHTML=h;
-    document.querySelectorAll('[data-res]').forEach(row=>row.addEventListener('click',async()=>{
-        const res=row.dataset.res;
-        const curHz=(d.current||'').split('@')[1]||'60';
-        const targetMode=(d.modes||[]).find(m=>m.startsWith(res+'@'+curHz))||(d.modes||[]).find(m=>m.startsWith(res))||res;
-        try{await tauriInvoke('set_resolution',{output:d.name,resolution:targetMode});}catch(e){}
-        toast('Resolución: '+getResName(res));
-        _pantallaSubResolution(c,[{...d,current:targetMode}]);
-    }));
-}
 
-function _pantallaSubTimeout(c,lockTimeout){
-    const options=[
-        {mins:1,label:'1 minuto'},{mins:2,label:'2 minutos'},{mins:5,label:'5 minutos'},
-        {mins:10,label:'10 minutos'},{mins:15,label:'15 minutos'},{mins:30,label:'30 minutos'},
-    ];
-    let h=renderHeader(t('hdr_screen_timeout'));
-    h+=renderCard(options.map(opt=>`
-        <div class="detail-item" style="cursor:pointer;justify-content:space-between" data-mins="${opt.mins}">
-            <span class="dt">${opt.label}</span>
-            ${lockTimeout===opt.mins?_ckmark():''}
-        </div>
-    `));
-    c.innerHTML=h;
-    document.querySelectorAll('[data-mins]').forEach(row=>row.addEventListener('click',async()=>{
-        const mins=parseInt(row.dataset.mins);
-        try{await tauriInvoke('set_lock_timeout',{minutes:mins});}catch(e){}
-        toast('Tiempo de espera: '+row.querySelector('.dt').textContent);
-        _pantallaSubTimeout(c,mins);
-    }));
-}
+
+
+
+
+
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Sonido ──────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderSonido(c){
-    c.innerHTML=renderHeader(t('hdr_sound'))+renderSkeleton(2);
-    let vol=50,muted=false,notifSnd=true,uiSnd=true,devices={sinks:[],sources:[],defaultSink:'',defaultSource:''},apps=[],descs=[],balance=0;
-    try{[{volume:vol,muted},{value:notifSnd},{value:uiSnd},devices,apps,descs,{balance}]=await Promise.all([
-        tauriInvoke('get_volume').then(JSON.parse).catch(()=>({volume:50,muted:false})),
-        tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','Sound','--default','true']}).then(r=>{const v=typeof r==='string'?r:(r.output||'');return{value:v.trim()!=='false'};}).catch(()=>({value:true})),
-        tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','kdeglobals','--group','Sounds','--key','Enable','--default','true']}).then(r=>{const v=typeof r==='string'?r:(r.output||'');return{value:v.trim()!=='false'};}).catch(()=>({value:true})),
-        tauriInvoke('get_audio_devices').then(JSON.parse).catch(()=>({sinks:[],sources:[],defaultSink:'',defaultSource:''})),
-        tauriInvoke('get_app_audio').then(JSON.parse).catch(()=>[]),
-        tauriInvoke('get_sink_descriptions').then(JSON.parse).catch(()=>[]),
-        tauriInvoke('get_balance').then(JSON.parse).catch(()=>({balance:0})),
-    ]);}catch(e){vol=50;muted=false;notifSnd=true;uiSnd=true;balance=0;}
-
-    const descMap=Object.fromEntries(descs.map(d=>[d.name,d.friendly||d.desc]));
-    const sinkLabel=(name)=>descMap[name]||name.split('.').slice(-2).join(' ')||name;
-    const srcLabel=(name)=>descMap[name]||name.split('.').slice(-2).join(' ')||name;
-
-    let h=renderHeader(t('hdr_sound'));
-    h+=renderSection(t('sec_volume'));
-    h+=renderCard([
-        `<div class="detail-item"><span class="dt">${_tr("Volumen del sistema")}</span>${renderSlider('vol',vol)}</div>`,
-        renderRowItem('Silenciar',muted?t('enabled'):t('disabled'),renderToggle('mute',muted)),
-    ]);
-    // ── Balance visual — twin VU bars + circular pan knob, iOS-style ──
-    const balLPct = balance<=0?100:Math.max(0,100-balance);
-    const balRPct = balance>=0?100:Math.max(0,100+balance);
-    h+=renderSection(_tr('Balance de audio'));
-    h+=`<div class="detail-card" style="padding:18px 18px 14px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
-            <span class="dt">${_tr('Balance L/R')}</span>
-            <span style="font-size:13px;color:var(--blue);font-weight:600;font-variant-numeric:tabular-nums" id="bal-val">${balance===0?_tr('Centro'):(balance<0?'← '+_tr('Izda')+' '+Math.abs(balance):_tr('Dcha')+' '+balance+' →')}</span>
-        </div>
-
-        <!-- Twin bars (L on top, R on bottom) showing actual channel weight -->
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-            <div style="display:flex;align-items:center;gap:10px">
-                <span style="font-size:11px;color:var(--tx2);min-width:14px;font-weight:600">L</span>
-                <div style="flex:1;height:6px;background:var(--toff);border-radius:3px;overflow:hidden">
-                    <div id="bal-bar-l" style="height:100%;width:${balLPct}%;background:linear-gradient(90deg,var(--blue),#5cb8ff);border-radius:3px;transition:width 0.15s ease"></div>
-                </div>
-                <span id="bal-pct-l" style="font-size:11px;color:var(--tx2);min-width:32px;text-align:right;font-variant-numeric:tabular-nums">${balLPct}%</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px">
-                <span style="font-size:11px;color:var(--tx2);min-width:14px;font-weight:600">R</span>
-                <div style="flex:1;height:6px;background:var(--toff);border-radius:3px;overflow:hidden">
-                    <div id="bal-bar-r" style="height:100%;width:${balRPct}%;background:linear-gradient(90deg,var(--blue),#5cb8ff);border-radius:3px;transition:width 0.15s ease"></div>
-                </div>
-                <span id="bal-pct-r" style="font-size:11px;color:var(--tx2);min-width:32px;text-align:right;font-variant-numeric:tabular-nums">${balRPct}%</span>
-            </div>
-        </div>
-
-        <!-- Pan slider with center notch + tick marks -->
-        <div style="position:relative;padding:6px 0">
-            <!-- Tick marks behind slider -->
-            <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--brd);transform:translateY(-50%)"></div>
-            <div style="position:absolute;left:50%;top:calc(50% - 6px);width:2px;height:12px;background:var(--blue);border-radius:1px;transform:translateX(-50%);opacity:.5"></div>
-            <input type="range" class="range-input" id="bal-slider" min="-100" max="100" step="5" value="${balance}" style="width:100%;position:relative;z-index:2">
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--tx2);margin-top:2px">
-            <span>← L</span>
-            <span>${_tr('Centro')}</span>
-            <span>R →</span>
-        </div>
-
-        <div style="display:flex;justify-content:center;margin-top:14px">
-            <button id="bal-center" class="btn btn-secondary btn-sm" style="padding:6px 16px;font-size:12px;border-radius:14px">${_tr('Centrar')}</button>
-        </div>
-    </div>`;
-
-    // Output device
-    if(devices.sinks.length>1){
-        h+=renderSection(t('sec_audio_out'));
-        h+=`<div class="detail-card"><div class="audio-dev-list" id="audio-sinks">`;
-        devices.sinks.forEach(s=>{
-            const active=s.name===devices.defaultSink||s.isDefault;
-            h+=`<div class="audio-dev-row${active?' active':''}" data-sink="${esc(s.name)}">
-                <div class="audio-dev-icon">${active?'<svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="9" stroke="var(--blue)" stroke-width="1.5"/><path d="M6 10l3 3 5-6" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>':'<div style="width:16px;height:16px"></div>'}</div>
-                <span class="audio-dev-name">${esc(sinkLabel(s.name))}</span>
-            </div>`;
-        });
-        h+=`</div></div>`;
-    }
-
-    // Input device
-    if(devices.sources.length>1){
-        h+=renderSection(t('sec_audio_in'));
-        h+=`<div class="detail-card"><div class="audio-dev-list" id="audio-sources">`;
-        devices.sources.forEach(s=>{
-            const active=s.name===devices.defaultSource||s.isDefault;
-            h+=`<div class="audio-dev-row${active?' active':''}" data-source="${esc(s.name)}">
-                <div class="audio-dev-icon">${active?'<svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="9" stroke="var(--blue)" stroke-width="1.5"/><path d="M6 10l3 3 5-6" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>':'<div style="width:16px;height:16px"></div>'}</div>
-                <span class="audio-dev-name">${esc(srcLabel(s.name))}</span>
-            </div>`;
-        });
-        h+=`</div></div>`;
-    }
-
-    // Per-app volumes
-    const visApps=apps.filter(a=>a.name&&!['pipewire','PulseAudio','pavucontrol'].includes(a.name));
-    if(visApps.length>0){
-        h+=renderSection(t('sec_volume_per_app'));
-        h+=`<div class="detail-card">`;
-        visApps.forEach(a=>{
-            h+=`<div class="detail-item audio-app-row" data-app-idx="${a.index}">
-                <span class="dt audio-app-name">${esc(a.name)}</span>
-                ${renderSlider('app-vol-'+a.index,a.volume,0,150)}
-            </div>`;
-        });
-        h+=`</div>`;
-    }
-
-    h+=renderSection(t('sec_system_sounds'));
-    h+=renderCard([
-        renderRowItem('Sonidos de notificación','Reproduce sonido al recibir notificaciones',renderToggle('snd-notif',notifSnd)),
-        renderRowItem('Sonidos de interfaz','Sonidos al hacer clic, navegar y otras acciones',renderToggle('snd-ui',uiSnd)),
-    ]);
-    c.innerHTML=h;
-
-    setupSlider('vol',async v=>{try{await tauriInvoke('set_volume',{value:parseInt(v)})}catch(e){}});
-    // Balance slider
-    const balSlider=document.getElementById('bal-slider');
-    const balVal=document.getElementById('bal-val');
-    const balLabel=v=>v===0?_tr('Centro'):(v<0?'← '+_tr('Izda')+' '+Math.abs(v):_tr('Dcha')+' '+v+' →');
-    const balBarL=document.getElementById('bal-bar-l');
-    const balBarR=document.getElementById('bal-bar-r');
-    const balPctL=document.getElementById('bal-pct-l');
-    const balPctR=document.getElementById('bal-pct-r');
-    const _balUpdate=v=>{
-        const l=v<=0?100:Math.max(0,100-v);
-        const r=v>=0?100:Math.max(0,100+v);
-        if(balBarL)balBarL.style.width=l+'%';
-        if(balBarR)balBarR.style.width=r+'%';
-        if(balPctL)balPctL.textContent=l+'%';
-        if(balPctR)balPctR.textContent=r+'%';
-        if(balVal)balVal.textContent=balLabel(v);
-    };
-    balSlider?.addEventListener('input',()=>_balUpdate(parseInt(balSlider.value)));
-    balSlider?.addEventListener('change',async()=>{
-        const v=parseInt(balSlider.value);
-        try{await tauriInvoke('set_balance',{balance:v});}catch(e){toast(_tr('Error al aplicar'),'❌');}
-    });
-    document.getElementById('bal-center')?.addEventListener('click',async()=>{
-        if(balSlider){balSlider.value=0;_balUpdate(0);}
-        try{await tauriInvoke('set_balance',{balance:0});}catch(e){}
-        toast(_tr('Balance centrado'),'🎧');
-    });
-    setupToggle('mute',async()=>{try{await tauriInvoke('toggle_mute')}catch(e){}toast('Volumen cambiado','🔊');});
-    setupToggle('snd-notif',async a=>{try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','Sound',a?'true':'false']});}catch(e){}toast(a?'Sonidos de notificación activados':'Desactivados','🔔');});
-    setupToggle('snd-ui',async a=>{try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kdeglobals','--group','Sounds','--key','Enable',a?'true':'false']});}catch(e){}toast(a?'Sonidos de interfaz activados':'Desactivados');});
-
-    // Sink selection
-    c.querySelectorAll('[data-sink]').forEach(row=>row.addEventListener('click',async()=>{
-        const name=row.dataset.sink;
-        try{await tauriInvoke('set_default_sink',{name});}catch(e){}
-        c.querySelectorAll('[data-sink]').forEach(r=>r.classList.remove('active'));
-        row.classList.add('active');
-        row.querySelector('.audio-dev-icon').innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="9" stroke="var(--blue)" stroke-width="1.5"/><path d="M6 10l3 3 5-6" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        toast('Salida: '+sinkLabel(name),'🔊');
-    }));
-    c.querySelectorAll('[data-source]').forEach(row=>row.addEventListener('click',async()=>{
-        const name=row.dataset.source;
-        try{await tauriInvoke('set_default_source',{name});}catch(e){}
-        c.querySelectorAll('[data-source]').forEach(r=>r.classList.remove('active'));
-        row.classList.add('active');
-        row.querySelector('.audio-dev-icon').innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none"><circle cx="10" cy="10" r="9" stroke="var(--blue)" stroke-width="1.5"/><path d="M6 10l3 3 5-6" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        toast('Entrada: '+srcLabel(name),'🎙');
-    }));
-
-    // Per-app sliders
-    visApps.forEach(a=>{
-        setupSlider('app-vol-'+a.index,async v=>{try{await tauriInvoke('set_app_volume',{index:a.index,volume:parseInt(v)})}catch(e){}},false);
-    });
-
-    // Sync volume externally every 10s
-    addInterval(async()=>{
-        const slider=document.getElementById('vol');
-        if(!slider||document.activeElement===slider)return;
-        try{
-            const v=JSON.parse(await tauriInvoke('get_volume'));
-            const pct=Math.round(v.volume);
-            slider.value=pct; slider.style.setProperty('--fill',pct+'%');
-            const lbl=document.getElementById('vol-l');if(lbl)lbl.textContent=pct+'%';
-            const mt=document.querySelector('[data-toggle="mute"]');
-            if(mt){v.muted?mt.classList.add('active'):mt.classList.remove('active');}
-        }catch(e){}
-    },10000);
+await desktop.sound(c); addSystemListener(()=>{if(c.querySelector('input:active'))return;return desktop.sound(c);});
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1464,6 +718,32 @@ export async function renderBateria(c){
             }
         }catch(e){}
     },5000);
+}
+
+// Charge-limit writes need the same authentication path as the other hardware
+// controls. Cache the password only for this running Settings process so a
+// slider does not open a password dialog for every pixel of movement.
+let _chargeLimitPassword=null;
+let _chargeLimitAuthPromise=null;
+async function applyChargeLimit(limit){
+    const args={limit:Number(limit)};
+    if(_chargeLimitPassword)args.password=_chargeLimitPassword;
+    let result=JSON.parse(await tauriInvoke('set_charge_limit',args));
+    if(!result.needs_auth)return result;
+    if(!_chargeLimitAuthPromise){
+        _chargeLimitAuthPromise=(async()=>{
+            const auth=await window.promptAuth?.({
+                title:'Permisos para proteger la batería',
+                description:'BookOS necesita autorización para escribir el límite de carga del firmware.',
+                confirmLabel:'Autorizar',verifyPassword:false,allowFingerprint:true,
+            });
+            if(auth?.method==='password'&&auth.password){_chargeLimitPassword=auth.password;return auth.password;}
+            return null;
+        })().finally(()=>{_chargeLimitAuthPromise=null;});
+    }
+    const password=await _chargeLimitAuthPromise;
+    if(!password)return result;
+    return JSON.parse(await tauriInvoke('set_charge_limit',{limit:Number(limit),password}));
 }
 
 // Two-phase render: phase 1 paints immediately with the cheap reads (status,
@@ -1916,14 +1196,14 @@ async function _renderBateriaContent(c, heavy=null){
         const modes=['power-saver','balanced','performance'];
         h+=renderSection(t('sec_perf_mode'))+`<div class="perf-modes">${modes.map(m=>`<div class="perf-mode-card ${pm===m?'active':''}" data-mode="${m}"><div class="perf-mode-icon"><img src="${perfIcons[m]}" width="32" height="32" class="perf-icon-img"></div><div class="perf-mode-name">${perfNames[m]}</div><div class="perf-mode-desc">${perfDescs[m]}</div></div>`).join('')}</div>`;
     }
-    // ── Opciones avanzadas de energía (powerdevil: tapa, suspensión, crítica) ──
+    // ── Opciones avanzadas de energía (tapa, suspensión, crítica) ─────────────
     h+=renderCard([`<div class="detail-item detail-item-row" style="cursor:pointer" id="go-power-adv"><div class="detail-texts"><span class="dt">${_tr('Opciones avanzadas de energía')}</span><span class="ds">${_tr('Tapa, suspensión y batería crítica')}</span></div>${chevron()}</div>`]);
     h+=`</div>`; // cierre bat-page-wrap
     c.innerHTML=h;
     document.getElementById('go-power-adv')?.addEventListener('click',()=>{
         if(window.pushSubNav)window.pushSubNav(()=>renderBateria(c));
         window.clearPageIntervals?.();
-        renderPowerAdvanced(c);
+        renderEnergyAdvanced(c);
     });
 
     // System process toggle (same mkAppRow as above)
@@ -1990,12 +1270,22 @@ async function _renderBateriaContent(c, heavy=null){
         ]);
         if(a){
             try{
-                const r=JSON.parse(await tauriInvoke('set_charge_limit',{limit:currentLimit}));
-                toast(r.ok?`Protección activa: hasta el ${currentLimit}%`:`Guardado (hardware: ${r.error})`,'✓');
-            }catch(e){toast('Protección guardada (se aplica al iniciar)','⚠');}
+                const r=await applyChargeLimit(currentLimit);
+                if(!r.ok){
+                    await setSetting('BatteryProtection','false');
+                    if(section)section.style.display='none';
+                    const toggle=document.querySelector('[data-toggle="bprot"]');
+                    toggle?.classList.remove('active');
+                    toggle?.setAttribute('aria-checked','false');
+                    throw new Error(r.needs_auth?'Autorización cancelada':(r.error||'No se pudo aplicar el límite'));
+                }
+                toast(`Protección activa: hasta el ${currentLimit}%`,'✓');
+            }catch(e){toast('No se pudo aplicar el límite de carga','❌');}
         } else {
-            try{await tauriInvoke('set_charge_limit',{limit:100});}catch(e){}
-            toast('Carga ilimitada');
+            try{
+                const r=await applyChargeLimit(100);
+                toast(r.ok?'Carga ilimitada':(r.needs_auth?'No se cambió el límite: autorización cancelada':`No se pudo quitar el límite (${r.error||'error'})`),r.ok?'✓':'❌');
+            }catch(e){toast('No se pudo quitar el límite de carga','❌');}
         }
     });
     setupToggle('dim-low',async a=>{setSetting('DimLowBattery',a?'true':'false');toast(a?'Atenuación automática activada':'Atenuación automática desactivada');});
@@ -2032,12 +1322,10 @@ async function _renderBateriaContent(c, heavy=null){
             const umbral=document.getElementById('umbral-val');
             if(umbral)umbral.textContent=lim<100?`${lim}% (protección activa)`:'100% (sin límite)';
             try{
-                const [r] = await Promise.all([
-                    tauriInvoke('set_charge_limit',{limit:lim}).then(JSON.parse),
-                    setSetting('ChargeLimit',String(lim)),
-                ]);
-                if(r.ok)toast(`Límite de carga: ${lim}%`,'🔋');
-                else toast(`No se pudo aplicar límite (${r.error||'error'})`, '❌');
+                const r=await applyChargeLimit(lim);
+                if(!r.ok)throw new Error(r.needs_auth?'Autorización cancelada':(r.error||'error'));
+                await setSetting('ChargeLimit',String(lim));
+                toast(`Límite de carga: ${lim}%`,'🔋');
                 // Notifica al applet vía IPC
                 const curProfile=document.querySelector('.perf-mode-card.active')?.dataset?.mode||'balanced';
                 _emitIpcState(curProfile,lim);
@@ -2061,7 +1349,7 @@ async function _renderBateriaContent(c, heavy=null){
                 const section=document.getElementById('bprot-limit-section');
                 if(section)section.style.display='none';
                 setSetting('BatteryProtection','false');
-                try{await tauriInvoke('set_charge_limit',{limit:100});}catch(e){}
+                try{await applyChargeLimit(100);}catch(e){}
             }
             // Pre-emptively turn off until user confirms — setupToggle already
             // flipped it on optimistically.
@@ -2140,463 +1428,36 @@ async function _renderBateriaContent(c, heavy=null){
 // ── Notificaciones ─────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderNotificaciones(c){
-    c.innerHTML=renderHeader(t('hdr_notifications'))+renderSkeleton(2);
-
-    let dnd=false,snd=true,onLock=true,popups=true;
-    try{
-        [dnd,snd,onLock,popups]=await Promise.all([
-            tauriInvoke('get_dnd_status').then(r=>JSON.parse(r).dnd_active).catch(()=>false),
-            tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','Sound','--default','true']}).then(v=>v.trim()!=='false').catch(()=>true),
-            tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','PopupOnLockScreen','--default','true']}).then(v=>v.trim()!=='false').catch(()=>true),
-            tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','PopupCriticalOnly','--default','false']}).then(v=>v.trim()!=='true').catch(()=>true),
-        ]);
-    }catch(e){}
-    const updNotif=(await getSetting('UpdateNotifications','true'))!=='false';
-
-    // Popups BookOS (~/.config/bookos-notificationsrc, compartido con el widget)
-    const bnRead=(key,def)=>tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','bookos-notificationsrc','--group','Popups','--key',key,'--default',def]}).then(v=>v.trim()).catch(()=>def);
-    const bnWrite=(key,val)=>tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','bookos-notificationsrc','--group','Popups','--key',key,String(val)]}).catch(()=>{});
-    let bnEnabled='true',bnTimeout='6',bnCountdown='true',bnPosition='bottomright',bnTheme='auto';
-    try{
-        [bnEnabled,bnTimeout,bnCountdown,bnPosition,bnTheme]=await Promise.all([
-            bnRead('Enabled','true'),bnRead('Timeout','6'),bnRead('ShowCountdown','true'),bnRead('Position','bottomright'),bnRead('Theme','auto'),
-        ]);
-    }catch(e){}
-
-    let h=renderHeader(t('hdr_notifications'));
-    h+=renderSection(t('sec_general'));
-    h+=renderCard([
-        renderRowItem('No molestar',dnd?'Silencia todas las notificaciones':'Permite notificaciones',renderToggle('dnd',dnd)),
-        renderRowItem('Mostrar en pantalla bloqueada','Ver notificaciones al bloquear',renderToggle('notif-lock',onLock)),
-        renderRowItem('Mostrar todas las notificaciones','Desactiva para ver sólo críticas',renderToggle('notif-popups',popups)),
-    ]);
-    h+=renderSection('BookOS');
-    h+=renderCard([
-        renderRowItem('Avisos de actualizaciones','Notificar cuando haya actualizaciones de BookOS o paquetes',renderToggle('notif-updates',updNotif)),
-    ]);
-    h+=renderSection('Ventanas emergentes (BookOS)');
-    const bnPosOpts=[['bottomright','Abajo a la derecha'],['bottomleft','Abajo a la izquierda'],['topright','Arriba a la derecha'],['topleft','Arriba a la izquierda'],['topcenter','Arriba centrado']]
-        .map(([v,l])=>`<option value="${v}" ${v===bnPosition?'selected':''}>${l}</option>`).join('');
-    const bnTimeOpts=[0,3,5,6,8,10,15,30].map(s=>`<option value="${s}" ${String(s)===bnTimeout?'selected':''}>${s===0?'Nunca':s+' s'}</option>`).join('');
-    const bnThemeOpts=[['auto','Automático'],['light','Claro'],['dark','Oscuro']]
-        .map(([v,l])=>`<option value="${v}" ${v===bnTheme?'selected':''}>${l}</option>`).join('');
-    h+=renderCard([
-        renderRowItem('Notificaciones emergentes','Popups estilo BookOS al recibir notificaciones',renderToggle('bn-enabled',bnEnabled!=='false')),
-        `<div class="detail-item"><span class="dt">Posición en pantalla</span><select class="sel" id="bn-position" style="margin-top:8px">${bnPosOpts}</select></div>`,
-        `<div class="detail-item"><span class="dt">Cerrar automáticamente tras</span><select class="sel" id="bn-timeout" style="margin-top:8px">${bnTimeOpts}</select></div>`,
-        renderRowItem('Barra de cuenta atrás','Muestra cuándo se cerrará el popup',renderToggle('bn-countdown',bnCountdown!=='false')),
-        `<div class="detail-item"><span class="dt">Tema de los popups</span><select class="sel" id="bn-theme" style="margin-top:8px">${bnThemeOpts}</select></div>`,
-    ]);
-    h+=renderSection(t('sec_audio'));
-    h+=renderCard([
-        renderRowItem('Sonidos de notificación','Reproduce sonido al recibir notificaciones',renderToggle('notif-snd',snd)),
-    ]);
-    h+=renderSection(t('sec_history'));
-    h+=renderCard([
-        renderRowItem('Ajustes de notificaciones','Configura el historial y el comportamiento en Plasma',`<button class="btn btn-secondary btn-sm" id="notif-hist">Abrir</button>`),
-    ]);
-
-    c.innerHTML=h;
-
-    setupToggle('dnd',async a=>{
-        try{await tauriInvoke('toggle_dnd',{enable:a});}catch(e){}
-        toast(a?'No molestar activado':'No molestar desactivado');
-    });
-    setupToggle('notif-lock',async a=>{
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','PopupOnLockScreen',a?'true':'false']});}catch(e){}
-        toast(a?'Notificaciones en pantalla bloqueada activadas':'Desactivadas en bloqueo');
-    });
-    setupToggle('notif-popups',async a=>{
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','PopupCriticalOnly',a?'false':'true']});}catch(e){}
-        toast(a?'Todas las notificaciones visibles':'Sólo notificaciones críticas');
-    });
-    setupToggle('notif-updates',async a=>{
-        setSetting('UpdateNotifications',a?'true':'false');
-        toast(a?'Avisos de actualizaciones activados':'Avisos de actualizaciones desactivados');
-    });
-    setupToggle('bn-enabled',async a=>{
-        await bnWrite('Enabled',a);
-        toast(a?'Popups BookOS activados':'Popups BookOS desactivados','🔔');
-    });
-    setupToggle('bn-countdown',async a=>{
-        await bnWrite('ShowCountdown',a);
-        toast(a?'Cuenta atrás visible':'Cuenta atrás oculta');
-    });
-    document.getElementById('bn-position')?.addEventListener('change',async e=>{
-        await bnWrite('Position',e.target.value);
-        toast('Posición actualizada');
-    });
-    document.getElementById('bn-timeout')?.addEventListener('change',async e=>{
-        await bnWrite('Timeout',e.target.value);
-        toast('Duración actualizada');
-    });
-    document.getElementById('bn-theme')?.addEventListener('change',async e=>{
-        await bnWrite('Theme',e.target.value);
-        toast('Tema de popups actualizado');
-    });
-    setupToggle('notif-snd',async a=>{
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','plasmanotifyrc','--group','Notifications','--key','Sound',a?'true':'false']});}catch(e){}
-        toast(a?'Sonidos activados':'Sonidos desactivados','🔔');
-    });
-    document.getElementById('notif-hist')?.addEventListener('click',async()=>{
-        // Open Plasma's notification settings KCM. plasmawindowed for the applet is
-        // unreliable on Plasma 6, so we open the real settings module instead.
-        let ok=false;
-        try{await tauriInvoke('run_command',{cmd:'kcmshell6',args:['kcm_notifications']});ok=true;}catch(e){}
-        if(!ok){try{await tauriInvoke('run_command',{cmd:'systemsettings',args:['kcm_notifications']});ok=true;}catch(e){}}
-        toast(ok?_tr('Abriendo ajustes de notificaciones'):_tr('No se pudo abrir'),'🔔');
-    });
+    const enabled=(await getSetting('UpdateNotifications','true'))!=='false';
+    let dnd;
+    try{dnd=JSON.parse(await tauriInvoke('get_dnd_status'));if(dnd.ok===false)throw new Error(dnd.error);}catch(e){dnd={error:String(e)};}
+    c.innerHTML=renderHeader('Notificaciones')+renderCard([
+        renderRowItem('Avisos de actualizaciones','',renderToggle('native-updates',enabled)),
+        dnd.error?renderInfoItem('No molestar no disponible',esc(dnd.error)):renderRowItem('No molestar','Silenciar avisos del escritorio',renderToggle('native-dnd',dnd.dnd_active)),
+        renderInfoItem('El historial de notificaciones está en la campana del panel.')]);
+    setupToggle('native-updates',active=>setSetting('UpdateNotifications',String(active)));
+    setupToggle('native-dnd',async enable=>{const result=JSON.parse(await tauriInvoke('toggle_dnd',{enable}));if(result.ok===false)throw new Error(result.error);});
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Seguridad ──────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderSeguridad(c){
-    c.innerHTML=renderHeader(t('hdr_security'))+renderSkeleton(3);
-
-    let fw={active:false},lockTimeout=5,lockAfterSuspend=true,lockGrace=0,camOn=true,micMuted=false;
-    try{
-        [fw,lockTimeout,lockAfterSuspend,lockGrace,camOn,micMuted]=await Promise.all([
-            tauriInvoke('get_firewall_status').then(JSON.parse).catch(()=>({active:false})),
-            tauriInvoke('get_lock_timeout').then(r=>JSON.parse(r).timeout).catch(()=>5),
-            tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','kscreenlockerrc','--group','Daemon','--key','LockOnResume','--default','true']}).then(v=>v.trim()!=='false').catch(()=>true),
-            // La clave de KDE es LockGrace, no LockGracePeriod: se leía una que
-            // no existe, así que el selector volvía siempre a 0 aunque hubiera
-            // un valor guardado. get_lock_grace ya usa la clave correcta, la
-            // misma que escribe set_lock_grace.
-            tauriInvoke('get_lock_grace').then(r=>JSON.parse(r).seconds||0).catch(()=>0),
-            tauriInvoke('get_camera_enabled').then(r=>JSON.parse(r).enabled).catch(()=>true),
-            tauriInvoke('get_mic_muted').then(r=>JSON.parse(r).muted).catch(()=>false),
-        ]);
-    }catch(e){}
-
-    const timeoutOpts=[1,2,5,10,15,30].map(m=>`<option value="${m}" ${m==lockTimeout?'selected':''}>${m} min</option>`).join('');
-    const graceOpts=[0,5,10,30,60].map(s=>`<option value="${s}" ${s==lockGrace?'selected':''}>${s===0?'Inmediatamente':`${s}s`}</option>`).join('');
-
-    let h=renderHeader(t('hdr_security'));
-    h+=renderSection(t('sec_firewall'));
-    h+=renderCard([
-        renderRowItem('Cortafuegos (UFW)',fw.active?'Protegido':'Desactivado',renderToggle('fw',fw.active)),
-    ]);
-    h+=renderSection(t('sec_lockscreen_section'));
-    h+=renderCard([
-        renderRowItem('Bloquear al reanudar de suspensión','Pide contraseña al despertar',renderToggle('sec-lock-resume',lockAfterSuspend)),
-        `<div class="detail-item"><span class="dt">Bloqueo automático</span><select class="sel" id="sec-lock-timeout" style="margin-top:8px">${timeoutOpts}</select></div>`,
-        `<div class="detail-item"><span class="dt">Periodo de gracia</span><span class="ds">Tiempo sin pedir contraseña al despertar</span><select class="sel" id="sec-lock-grace" style="margin-top:8px">${graceOpts}</select></div>`,
-    ]);
-    h+=renderSection(t('sec_camera_mic'));
-    h+=renderCard([
-        renderRowItem('Cámara',camOn?'Activada':'Bloqueada a nivel del kernel',renderToggle('sec-camera',camOn)),
-        renderRowItem('Micrófono',micMuted?'Silenciado en todo el sistema':'Activo',renderToggle('sec-mic',!micMuted)),
-    ]);
-    h+=renderSection(t('sec_privacy'));
-    h+=renderCard([
-        renderRowItem('Historial de actividades','Plasma registra tus archivos y apps recientes',renderToggle('sec-activity',false)),
-        `<div class="detail-item" style="cursor:pointer" id="sec-clear-hist"><span class="dt" style="color:var(--red,#e53935)">Borrar historial de actividades</span></div>`,
-    ]);
-
-    // Páginas fusionadas aquí desde el sidebar (Ubicación, Emergencia)
-    h+=renderCard([
-        `<div class="detail-item detail-item-row" style="cursor:pointer" id="go-ubicacion"><div class="detail-texts"><span class="dt">${_tr('Ubicación')}</span><span class="ds">${_tr('Solicitudes')}</span></div>${chevron()}</div>`,
-        `<div class="detail-item detail-item-row" style="cursor:pointer" id="go-emergencia"><div class="detail-texts"><span class="dt">${_tr('Seguridad y emergencia')}</span><span class="ds">${_tr('Datos médicos')}</span></div>${chevron()}</div>`,
-    ]);
-
-    c.innerHTML=h;
-    document.getElementById('go-ubicacion')?.addEventListener('click',()=>window.openPage('ubicacion'));
-    document.getElementById('go-emergencia')?.addEventListener('click',()=>window.openPage('emergencia'));
-
-    setupToggle('fw',async a=>{
-        const ok=await promptSudo(a?'activar el cortafuegos':'desactivar el cortafuegos','ufw',[a?'enable':'disable']);
-        if(!ok){toast('Permiso denegado','❌');setTimeout(()=>renderSeguridad(c),300);return;}
-        toast(a?'Cortafuegos activado':'Cortafuegos desactivado','🛡️');
-    });
-    setupToggle('sec-lock-resume',async a=>{
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kscreenlockerrc','--group','Daemon','--key','LockOnResume',a?'true':'false']});}catch(e){}
-        toast(a?'Bloqueo al reanudar activado':'Desactivado');
-    });
-    document.getElementById('sec-lock-timeout')?.addEventListener('change',async e=>{
-        try{await tauriInvoke('set_lock_timeout',{minutes:parseInt(e.target.value)});}catch(e2){}
-        toast('Tiempo de bloqueo: '+e.target.value+' min');
-    });
-    document.getElementById('sec-lock-grace')?.addEventListener('change',async e=>{
-        try{await tauriInvoke('set_lock_grace',{seconds:parseInt(e.target.value)});}catch(e2){}
-        toast('Periodo de gracia actualizado');
-    });
-    setupToggle('sec-camera',async a=>{
-        const r=JSON.parse(await tauriInvoke('set_camera_enabled',{enable:a}));
-        if(r.ok) toast(a?'Cámara activada':'Cámara bloqueada','📷');
-        else { toast('Error: '+(r.error||'permiso denegado'),'❌'); renderSeguridad(c); }
-    });
-    setupToggle('sec-mic',async a=>{
-        const r=JSON.parse(await tauriInvoke('set_mic_muted',{muted:!a}));
-        if(r.ok) toast(a?'Micrófono activo':'Micrófono silenciado','🎙️');
-        else renderSeguridad(c);
-    });
-    setupToggle('sec-activity',async a=>{
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kactivitymanagerdrc','--group','Plugins','--key','org.kde.ActivityManager.ResourceScoringEnabled',a?'true':'false']});}catch(e){}
-        toast(a?'Historial activado':'Historial desactivado');
-    });
-    document.getElementById('sec-clear-hist')?.addEventListener('click',()=>{
-        showDialog('Borrar historial','Se eliminará el historial de actividades de Plasma (archivos recientes, apps usadas). No se pueden recuperar.',{
-            confirmText:'Borrar',confirmClass:'danger',
-            onConfirm:async()=>{
-                try{await tauriInvoke('run_command',{cmd:'qdbus6',args:['org.kde.ActivityManager','/ActivityManager/Resources/Scoring','DeleteAllEntries']}).catch(()=>{});}catch(e){}
-                try{await tauriInvoke('run_command',{cmd:'kactivitymanagerd',args:['--stop']}).catch(()=>{});}catch(e){}
-                toast('Historial borrado','🗑️');
-            }
-        });
-    });
-
-    // Load actual activity-history toggle state
-    try{
-        const v=await tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','kactivitymanagerdrc','--group','Plugins','--key','org.kde.ActivityManager.ResourceScoringEnabled','--default','true']});
-        const tog=document.querySelector('[data-toggle="sec-activity"]');
-        if(tog&&v.trim()==='true')tog.classList.add('active');
-        else if(tog)tog.classList.remove('active');
-    }catch(e){}
+return desktop.security(c);
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Temas (schedule uses actual selected themes, not hardcoded) ────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderTemas(c){
-    c.innerHTML=renderHeader(t('hdr_themes'))+renderSkeleton(3);
-    let theme={scheme:'',is_dark:false},themes=[],schedule={enabled:false,light_time:'07:00',dark_time:'20:00',light_theme:'BookOS-Light',dark_theme:'BookOS-Dark'};
-    let kcsT={light:'',dark:'',is_global:false};
-    try{[theme,themes,schedule,kcsT]=await Promise.all([
-        tauriInvoke('get_current_theme').then(JSON.parse),
-        tauriInvoke('get_available_themes').then(JSON.parse),
-        tauriInvoke('get_theme_schedule').then(JSON.parse),
-        tauriInvoke('get_kde_light_dark_themes').then(JSON.parse).catch(()=>({light:'',dark:'',is_global:false})),
-    ]);}catch(e){}
-    // Only show BookOS themes
-    themes=themes.filter(t=>/^bookos/i.test(t.name));
-    const dark=themes.filter(t=>t.is_dark),light=themes.filter(t=>!t.is_dark);
-
-    const mkCard=(t,isDk)=>{
-        const bg=themeColor(t.name,isDk);
-        const innerCls=isDk?'dark-inner':'light-inner';
-        return`<div class="theme-card-large ${t.active?'active':''}" data-s="${esc(t.name)}">
-            <div class="theme-preview-large" style="background:${bg}">
-                <div class="theme-preview-inner ${innerCls}">
-                    <div class="tp-bar"></div>
-                    <div class="tp-content"><div class="tp-line w60"></div><div class="tp-line w40"></div><div class="tp-line w75"></div></div>
-                </div>
-            </div>
-            <div class="theme-card-footer">
-                <span class="theme-name">${esc(t.name)}</span>
-                <span class="theme-check">${t.active?'✓':''}</span>
-            </div>
-        </div>`;
-    };
-
-    const isDk=theme.is_dark;
-    // Light / Dark mode chooser — two big swatches with a radio underneath.
-    const _modeSwatch=(mode,label,active)=>`
-        <div class="mode-swatch ${active?'active':''}" data-mode="${mode}">
-            <div class="mode-swatch-preview ${mode}"></div>
-            <span class="mode-swatch-label">${_tr(label)}</span>
-            <div class="mode-radio ${active?'on':''}"></div>
-        </div>`;
-
-    // Icon style chooser: Light / Dark / Tinted terminal glyph.
-    // Fixed glyph colours (NOT green): Light #9EC8FF, Dark #244060, Tinted #659EC4.
-    // These only change once the user enters the tinted-icon settings sub-page.
-    const _termGlyph=(stroke)=>`<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${stroke}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
-    const _savedIcon=localStorage.getItem('bookos_icon_style')||'light';
-    const _ICON_COLORS={light:'#9EC8FF',dark:'#244060',tinted:'#659EC4'};
-    const _iconSwatch=(mode,label,tileBg,glyphBg,active)=>`
-        <div class="icon-swatch ${active?'active':''}" data-icon="${mode}">
-            <div class="icon-swatch-tile" style="background:${tileBg}"><div class="icon-swatch-glyph" style="background:${glyphBg}">${_termGlyph('#ffffff')}</div></div>
-            <span class="icon-swatch-label">${_tr(label)}</span>
-            <div class="mode-radio ${active?'on':''}"></div>
-        </div>`;
-
-    c.innerHTML=renderHeader(t('hdr_themes'))+
-        // ── Light / Dark mode + schedule + (when tinted) tinted-icon settings ──
-        `<div class="theme-block">
-            <div class="mode-swatch-row">
-                ${_modeSwatch('light','Claro',!isDk)}
-                ${_modeSwatch('dark','Oscuro',isDk)}
-            </div>
-            <div class="theme-block-divider"></div>
-            ${renderRowItem('Programar modo oscuro','',renderToggle('sched',schedule.enabled))}
-        </div>`+
-        // Paleta de colores (dynamic color) vive ahora en Fondo de Pantalla:
-        // ver renderFondos(). Tiene más sentido ahí porque la paleta sale del
-        // fondo de pantalla, no del tema.
-        // ── Icon style + tinted settings (row appears only for "tinted") ──
-        `<div class="theme-block">
-            <div class="icon-swatch-row">
-                ${_iconSwatch('light','Claro','#ffffff',_ICON_COLORS.light,_savedIcon==='light')}
-                ${_iconSwatch('dark','Oscuro','#1c1c1e',_ICON_COLORS.dark,_savedIcon==='dark')}
-                ${_iconSwatch('tinted','Tintado',(isDk?'#1c1c1e':'#ffffff'),_ICON_COLORS.tinted,_savedIcon==='tinted')}
-            </div>
-            <div class="theme-block-divider" id="ti-row-div" style="display:${_savedIcon==='tinted'?'block':'none'}"></div>
-            <div class="ti-settings-row" id="ti-settings-open" style="display:${_savedIcon==='tinted'?'flex':'none'}">
-                <span class="dt">${_tr('Ajustes de los iconos tintados')}</span>
-                <span class="ti-chevron">›</span>
-            </div>
-        </div>`+
-        // ── BookOS color schemes ──
-        `<div class="theme-block">
-            <div class="theme-grid-duo">${themes.map(t=>mkCard(t,t.is_dark)).join('')}</div>
-        </div>`+
-        // ── Cursor y set de iconos del sistema ──
-        renderSection(_tr('Personalización'))+
-        renderCard([
-            `<div class="detail-item" style="cursor:pointer" id="btn-cursor-theme">
-                <span class="dt">${_tr('Tema del cursor')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-cursor-theme">…</span>${chevron()}</div>
-            </div>`,
-            `<div class="detail-item" style="cursor:pointer" id="btn-icon-theme">
-                <span class="dt">${_tr('Iconos del sistema')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="lbl-icon-theme">…</span>${chevron()}</div>
-            </div>`,
-        ]);
-
-    // Current cursor/icon theme + pickers (best-effort, lazy)
-    (async()=>{
-        const rcRead=async(file,group,key)=>{
-            try{const r=JSON.parse(await tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file',file,'--group',group,'--key',key]}));return (r.output||'').trim();}
-            catch(e){return '';}
-        };
-        const _setLbl=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v||_tr('Predeterminado');};
-        let curCursor=await rcRead('kcminputrc','Mouse','cursorTheme');
-        let curIcons=await rcRead('kdeglobals','Icons','Theme');
-        _setLbl('lbl-cursor-theme',curCursor);
-        _setLbl('lbl-icon-theme',curIcons);
-
-        document.getElementById('btn-cursor-theme')?.addEventListener('click',async e=>{
-            let list=[];try{list=JSON.parse(await tauriInvoke('list_cursor_themes'));}catch(err){}
-            if(!list.length){toast(_tr('No se encontraron temas de cursor'),'❌');return;}
-            popoverSelect(e.currentTarget,{
-                title:_tr('Tema del cursor'),
-                options:list.map(th=>({val:th.id,label:th.name})),
-                current:curCursor,
-                onSelect:async id=>{
-                    try{
-                        const r=JSON.parse(await tauriInvoke('apply_cursor_theme',{id}));
-                        if(r.ok){curCursor=id;_setLbl('lbl-cursor-theme',id);toast(_tr('Tema del cursor aplicado'));}
-                        else toast(_tr('Error al aplicar'),'❌');
-                    }catch(err){toast(_tr('Error al aplicar'),'❌');}
-                },
-            });
-        });
-        document.getElementById('btn-icon-theme')?.addEventListener('click',async e=>{
-            let list=[];try{list=JSON.parse(await tauriInvoke('list_icon_themes'));}catch(err){}
-            if(!list.length){toast(_tr('No se encontraron temas de iconos'),'❌');return;}
-            popoverSelect(e.currentTarget,{
-                title:_tr('Iconos del sistema'),
-                options:list.map(th=>({val:th.id,label:th.name})),
-                current:curIcons,
-                onSelect:async id=>{
-                    try{
-                        const r=JSON.parse(await tauriInvoke('apply_icon_theme',{id}));
-                        if(r.ok){curIcons=id;_setLbl('lbl-icon-theme',id);toast(_tr('Iconos aplicados'));}
-                        else toast(_tr('Error al aplicar'),'❌');
-                    }catch(err){toast(_tr('Error al aplicar'),'❌');}
-                },
-            });
-        });
-    })();
-
-    // Light / Dark mode swatches
-    const _applyMode=async dark_=>{
-        const name=dark_?(kcsT.dark||dark[0]?.name||'BookOS-Dark'):(kcsT.light||light[0]?.name||'BookOS-Light');
-        try{await tauriInvoke('apply_kde_theme',{name,isGlobal:kcsT.is_global})}catch(e){}
-        document.documentElement.className=dark_?'dark-mode':'light-mode';
-        toast(dark_?'Modo oscuro activado':'Modo claro activado');
-        if(!window.__dmLogoutAsked){
-            window.__dmLogoutAsked=true;
-            showDialog('Cerrar sesión','Algunas apps ya abiertas pueden quedar con el tema anterior. Cerrar sesión las pondrá todas en el nuevo tema.',{
-                confirmText:'Cerrar sesión',cancelText:'Más tarde',
-                onConfirm:async()=>{try{await tauriInvoke('logout_session');}catch(e){}}
-            });
-        }
-    };
-    document.querySelectorAll('.mode-swatch').forEach(sw=>sw.addEventListener('click',()=>{
-        document.querySelectorAll('.mode-swatch').forEach(x=>{x.classList.remove('active');x.querySelector('.mode-radio').classList.remove('on');});
-        sw.classList.add('active');sw.querySelector('.mode-radio').classList.add('on');
-        _applyMode(sw.dataset.mode==='dark');
-    }));
-    // Icon style swatches — persist choice, apply the icon theme, and show the
-    // tinted-settings row only for "tinted".
-    document.querySelectorAll('.icon-swatch').forEach(sw=>sw.addEventListener('click',async()=>{
-        document.querySelectorAll('.icon-swatch').forEach(x=>{x.classList.remove('active');x.querySelector('.mode-radio').classList.remove('on');});
-        sw.classList.add('active');sw.querySelector('.mode-radio').classList.add('on');
-        const m=sw.dataset.icon;
-        localStorage.setItem('bookos_icon_style',m);
-        const isTint=m==='tinted';
-        const row=document.getElementById('ti-settings-open');
-        const div=document.getElementById('ti-row-div');
-        if(row)row.style.display=isTint?'flex':'none';
-        if(div)div.style.display=isTint?'block':'none';
-        // Apply the real KDE icon theme. Tinted uses the variant matching the
-        // current system mode (dark/light) for the icon's base square.
-        const _dark=document.documentElement.classList.contains('dark-mode');
-        const _variant=_dark?'dark':'light';
-        const hue=parseInt(localStorage.getItem(`bookos_tint_${_variant}_hue`)||'210',10);
-        const strength=parseInt(localStorage.getItem(`bookos_tint_${_variant}_strength`)||'45',10);
-        toast(_tr('Aplicando iconos…'),'🔄');
-        try{
-            const r=JSON.parse(await tauriInvoke('set_icon_style',{mode:m,hue,strength,dark:_dark,
-                tintBase:localStorage.getItem('bookos_tint_base')!=='0',
-                tintLogo:localStorage.getItem('bookos_tint_logo')==='1',
-                logoHue:parseInt(localStorage.getItem(`bookos_tint_${_variant}_logohue`)||'210',10)}));
-            toast(r.ok?_tr('Iconos aplicados'):(_tr('Error')+': '+(r.error||'')), r.ok?'✅':'❌');
-        }catch(e){toast(_tr('No se pudieron aplicar los iconos'),'❌');}
-    }));
-    // "Ajustes de los iconos tintados" → opens its own sub-page.
-    document.getElementById('ti-settings-open')?.addEventListener('click',()=>{
-        if(window.pushSubNav)window.pushSubNav(()=>renderTemas(c));
-        renderTintedIcons(c);
-    });
-    // Toggle only flips enabled; preserve the saved times/themes from `schedule`.
-    setupToggle('sched',async a=>{saveSchedule(a,schedule);toast(a?'Programación activada':'Programación desactivada');});
-    document.querySelectorAll('.theme-card-large').forEach(cd=>{cd.addEventListener('click',async()=>{try{await tauriInvoke('set_color_scheme',{scheme:cd.dataset.s})}catch(e){}document.documentElement.className=cd.dataset.s.toLowerCase().includes('dark')?'dark-mode':'light-mode';document.querySelectorAll('.theme-card-large').forEach(x=>{x.classList.remove('active');x.querySelector('.theme-check').textContent='';});cd.classList.add('active');cd.querySelector('.theme-check').textContent='✓';toast('Tema aplicado: '+cd.dataset.s);});});
+return desktop.appearance(c,()=>renderTintedIcons(c));
 }
 // Save schedule. When `from` (a schedule object) is given, use its times/themes;
 // otherwise read them from the sub-page's inputs (with sane fallbacks).
-async function saveSchedule(enabled,from){
-    const lt=from?.light_time||document.getElementById('sched-lt')?.value||'07:00';
-    const dt=from?.dark_time||document.getElementById('sched-dt')?.value||'20:00';
-    const ltheme=from?.light_theme||document.getElementById('sched-ltheme')?.value||'BookOS-Light';
-    const dtheme=from?.dark_theme||document.getElementById('sched-dtheme')?.value||'BookOS-Dark';
-    try{await tauriInvoke('set_theme_schedule',{enabled,light_time:lt,dark_time:dt,light_theme:ltheme,dark_theme:dtheme});}catch(e){}
-}
+
 
 // ── Dark/Light mode settings sub-page (automatic schedule) ──
-export async function renderModeSettings(c){
-    c.innerHTML=renderHeader('Ajustes del modo Oscuro/Claro')+renderSkeleton(1);
-    let schedule={enabled:false,light_time:'07:00',dark_time:'20:00',light_theme:'BookOS-Light',dark_theme:'BookOS-Dark'};
-    let themes=[];
-    try{[schedule,themes]=await Promise.all([
-        tauriInvoke('get_theme_schedule').then(JSON.parse),
-        tauriInvoke('get_available_themes').then(JSON.parse),
-    ]);}catch(e){}
-    themes=themes.filter(t=>/^bookos/i.test(t.name));
-    const dark=themes.filter(t=>t.is_dark),light=themes.filter(t=>!t.is_dark);
 
-    c.innerHTML=renderHeader('Ajustes del modo Oscuro/Claro')+
-        `<div class="theme-block">
-            ${renderRowItem('Programar modo oscuro','Cambiar automáticamente por hora',renderToggle('sched',schedule.enabled))}
-            <div id="ms-opts" style="display:${schedule.enabled?'block':'none'}">
-                <div class="theme-block-divider"></div>
-                <div class="ms-grid">
-                    <div><span class="ds">${_tr('Claro desde')}</span><input type="time" id="sched-lt" value="${schedule.light_time}" class="sel"></div>
-                    <div><span class="ds">${_tr('Oscuro desde')}</span><input type="time" id="sched-dt" value="${schedule.dark_time}" class="sel"></div>
-                </div>
-                <div class="ms-grid" style="margin-top:12px">
-                    <div><span class="ds">${_tr('Tema claro')}</span><select id="sched-ltheme" class="sel">${light.map(t=>`<option value="${esc(t.name)}" ${t.name===schedule.light_theme?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div>
-                    <div><span class="ds">${_tr('Tema oscuro')}</span><select id="sched-dtheme" class="sel">${dark.map(t=>`<option value="${esc(t.name)}" ${t.name===schedule.dark_theme?'selected':''}>${esc(t.name)}</option>`).join('')}</select></div>
-                </div>
-            </div>
-        </div>`;
-
-    setupToggle('sched',async a=>{document.getElementById('ms-opts').style.display=a?'block':'none';saveSchedule(a);toast(a?'Programación activada':'Programación desactivada');});
-    ['sched-lt','sched-dt','sched-ltheme','sched-dtheme'].forEach(id=>{document.getElementById(id)?.addEventListener('change',()=>saveSchedule(true));});
-}
 
 // ── Tinted icons customization sub-page ──
 // Dual tint: Light and Dark icon variants each keep their own hue + strength.
@@ -2725,467 +1586,13 @@ export async function renderTintedIcons(c){
 }
 
 // Fingerprint draw-in animation — strokes materialize center→outward via stroke-dashoffset
-const _FP_CIRCS=[624,542,460,379,300,227,161,101,50]; // outermost→innermost (index matches DOM order)
-const _FP_DASH=[
-    '30 9 22 8 16 7 10 6',
-    '26 8 20 7 13 6 8 5',
-    '23 8 17 6 12 5 7 5',
-    '20 7 15 6 10 5',
-    '17 6 13 5 8 4',
-    '15 6 11 4 7 4',
-    '13 5 9 4',
-    '10 4 7 3',
-    '8 3'
-];
-function _startFpIdleAnimById(svgId='fp-svg-main'){
-    const svg=document.getElementById(svgId);
-    if(!svg)return;
-    const zones=[...svg.querySelectorAll('.fp-zone')]; // 10 elements: 0=outer…8=inner ring, 9=dot
-    const strokable=zones.slice(0,9);
-    const dot=zones[9];
-    // Reset: hide all, set dashoffset to full circumference (invisible)
-    strokable.forEach((r,i)=>{
-        r.classList.remove('fp-drawing');
-        r.style.transition='none';
-        r.style.opacity='1';
-        r.style.strokeDasharray=`${_FP_CIRCS[i]} ${_FP_CIRCS[i]}`;
-        r.style.strokeDashoffset=String(_FP_CIRCS[i]);
-    });
-    if(dot){dot.style.transition='none';dot.style.opacity='0';}
-    // Draw center→out: reverse so index 0 = innermost ring (rx=7)
-    const rev=[...strokable].reverse();
-    const revDash=[..._FP_DASH].reverse();
-    const revCirc=[..._FP_CIRCS].reverse();
-    rev.forEach((r,i)=>{
-        setTimeout(()=>{
-            r.classList.add('fp-drawing');
-            requestAnimationFrame(()=>requestAnimationFrame(()=>{
-                r.style.strokeDashoffset='0';
-            }));
-            // Restore original ridge pattern after transition completes
-            setTimeout(()=>{
-                r.style.strokeDasharray=revDash[i];
-                r.classList.remove('fp-drawing');
-            },650);
-        }, 200 + i*110);
-    });
-    if(dot){
-        setTimeout(()=>{
-            dot.style.transition='opacity 0.35s ease-out';
-            dot.style.opacity='1';
-        }, 200 + rev.length*110);
-    }
-}
-function _startFpIdleAnim(){_startFpIdleAnimById('fp-svg-main');}
+ // outermost→innermost (index matches DOM order)
+
+
+
 
 export async function renderBloqueo(c){
-    c.innerHTML=renderHeader(t('hdr_lockscreen'))+renderSkeleton(3);
-    const _sddmDefaults={variant:'dark',background:'solid',bgImage:'',accentColor:'#007AFF',clockFormat:'24h',clockFont:'serif',blurRadius:'24',showDate:'true',showBattery:'true',showBookBar:'true'};
-    const _desktopDefaults={animaciones:true,fecha:true,medios:true,reloj_y:.08,acceso_y:.36,medios_y:.68,reloj_tamano:144,avatar_tamano:132};
-    let timeout=5,fp={available:false,enrolled:false},aod=false,sddmCfg={..._sddmDefaults},userInfo={display_name:'',has_avatar:false,avatar_path:''},lockThemeOn=false,sddmThemeOn=false,desktopCfg={..._desktopDefaults};
-    try{[timeout,fp,aod,sddmCfg,userInfo,lockThemeOn,sddmThemeOn,desktopCfg]=await Promise.all([
-        tauriInvoke('get_lock_timeout').then(r=>JSON.parse(r).timeout).catch(()=>5),
-        tauriInvoke('check_fingerprint').then(JSON.parse).catch(()=>({available:false,enrolled:false})),
-        getSetting('AOD','false').then(v=>v==='true'),
-        tauriInvoke('get_sddm_config').then(JSON.parse).catch(()=>({..._sddmDefaults})),
-        tauriInvoke('get_user_info').then(JSON.parse).catch(()=>({display_name:'',has_avatar:false,avatar_path:''})),
-        tauriInvoke('is_lockscreen_theme_installed').then(r=>JSON.parse(r).installed).catch(()=>false),
-        tauriInvoke('is_sddm_theme_installed').then(r=>JSON.parse(r).installed).catch(()=>false),
-        tauriInvoke('get_desktop_lockscreen_config').then(JSON.parse).catch(()=>({..._desktopDefaults}))
-    ]);}catch(e){}
-    desktopCfg={..._desktopDefaults,...desktopCfg};
-    // Defaults for missing keys (older config)
-    for(const k in _sddmDefaults) if(!sddmCfg[k]) sddmCfg[k]=_sddmDefaults[k];
-    // showBookBar en theme.conf es la fuente de verdad real (la lee tanto el
-    // lockscreen KDE como el greeter SDDM); BookBarEnabled en settings.json
-    // es solo caché optimista de UI, no autoritativa.
-    const bookBarEnabled=sddmCfg.showBookBar!=='false';
-
-    // Fingerprint SVG — dual-layer: grey base + blue overlay (opacity-controlled)
-    const enrolled=fp.enrolled;
-    const fpSvg=`<svg viewBox="0 0 200 260" width="170" height="220" id="fp-svg-main" class="fp-svg-main">
-        <!-- Grey base ridges (always visible) -->
-        <g class="fp-base-group">
-            <ellipse cx="100" cy="130" rx="88" ry="110" fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="30 9 22 8 16 7 10 6" transform="rotate(-8 100 130)" class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="76" ry="96"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="26 8 20 7 13 6 8 5"  transform="rotate(-5 100 130)" class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="64" ry="82"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="23 8 17 6 12 5 7 5"  transform="rotate(-3 100 130)" class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="52" ry="68"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="20 7 15 6 10 5"       transform="rotate(-1 100 130)" class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="41" ry="54"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="17 6 13 5 8 4"        transform="rotate(1 100 130)"  class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="31" ry="41"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="15 6 11 4 7 4"        transform="rotate(3 100 130)"  class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="22" ry="29"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="13 5 9 4"             transform="rotate(5 100 130)"  class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="14" ry="18"  fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="10 4 7 3"             transform="rotate(7 100 130)"  class="fp-base"/>
-            <ellipse cx="100" cy="130" rx="7"  ry="9"   fill="none" stroke="var(--fp-grey,#3a3a3c)" stroke-width="2.5" stroke-dasharray="8 3"                  transform="rotate(9 100 130)"  class="fp-base"/>
-            <ellipse cx="100" cy="131" rx="2"  ry="3"   fill="var(--fp-grey,#3a3a3c)" class="fp-base"/>
-        </g>
-        <!-- Blue overlay ridges (opacity-controlled by JS) -->
-        <g class="fp-zone-group">
-            <ellipse cx="100" cy="130" rx="88" ry="110" fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="30 9 22 8 16 7 10 6" transform="rotate(-8 100 130)" class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="76" ry="96"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="26 8 20 7 13 6 8 5"  transform="rotate(-5 100 130)" class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="64" ry="82"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="23 8 17 6 12 5 7 5"  transform="rotate(-3 100 130)" class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="52" ry="68"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="20 7 15 6 10 5"       transform="rotate(-1 100 130)" class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="41" ry="54"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="17 6 13 5 8 4"        transform="rotate(1 100 130)"  class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="31" ry="41"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="15 6 11 4 7 4"        transform="rotate(3 100 130)"  class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="22" ry="29"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="13 5 9 4"             transform="rotate(5 100 130)"  class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="14" ry="18"  fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="10 4 7 3"             transform="rotate(7 100 130)"  class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="130" rx="7"  ry="9"   fill="none" stroke="var(--fp-blue,#0A58CA)" stroke-width="2.8" stroke-dasharray="8 3"                  transform="rotate(9 100 130)"  class="fp-zone" style="opacity:0"/>
-            <ellipse cx="100" cy="131" rx="2"  ry="3"   fill="var(--fp-blue,#0A58CA)" class="fp-zone" style="opacity:0"/>
-        </g>
-    </svg>`;
-
-    const fpHtml=fp.available?renderSection(t('sec_biometrics'))+`<div class="detail-card">
-        <div class="fp-hello-wrap" id="fp-area">
-            <div class="sensor-wrapper" id="fp-rings">${fpSvg}<div class="fp-laser" aria-hidden="true"></div></div>
-            <p id="fp-status" class="fp-hello-status">${enrolled?'Huella configurada correctamente':'Coloca el dedo en el sensor'}</p>
-            <button class="btn btn-primary btn-sm" id="fp-enroll" style="margin-top:8px">${enrolled?'Volver a registrar':'Iniciar registro'}</button>
-        </div>
-    </div>`:'';
-
-    // SDDM theme section
-    const bgOpts=[['solid','Sólido'],['image','Imagen'],['blur','Blur']];
-    const fmtOpts=[['24h','24 horas'],['12h','12 horas']];
-    const fontOpts=[['serif','Serif'],['sans','Sans'],['mono','Mono']];
-    const accentSwatches=['#007AFF','#FF3B30','#FF9500','#FFCC00','#34C759','#5AC8FA','#AF52DE','#FF2D55'];
-    const blurPct=parseInt(sddmCfg.blurRadius)||24;
-    // La personalización profunda vive en su propia página (editor visual con
-    // manipulación directa). Aquí solo queda la puerta de entrada: mantener dos
-    // interfaces escribiendo el mismo theme.conf.user acabaría desincronizándolas.
-    const sddmHtml=renderSection('Personalización')+`<div class="detail-card">
-        <div class="detail-item detail-item-row" id="go-sddm-editor" style="cursor:pointer">
-            <div class="detail-texts">
-                <span class="dt">Personalizar la pantalla</span>
-                <span class="ds">Reloj, fondo, cuentas, BookBar y widgets · también en el acceso</span>
-            </div>${chevron()}
-        </div>
-    </div>`;
-
-    const lockType=await getSetting('LockType','password').catch(()=>'password');
-    const lockTypeLabel=lockType==='pin'?'PIN':'Contraseña del sistema';
-    const desktopPreview=`<div class="native-lock-preview" id="native-lock-preview"
-        style="--clock-y:${desktopCfg.reloj_y*100}%;--access-y:${desktopCfg.acceso_y*100}%;--media-y:${desktopCfg.medios_y*100}%;--clock-size:${desktopCfg.reloj_tamano*.34}px;--avatar-size:${desktopCfg.avatar_tamano*.32}px">
-        <div class="nlp-shade"></div>
-        <div class="nlp-clock"><strong>12:30</strong><span class="nlp-date" ${desktopCfg.fecha?'':'hidden'}>martes, 18 de agosto</span></div>
-        <div class="nlp-access"><div class="nlp-avatar">${esc((userInfo.display_name||'B').trim().charAt(0).toUpperCase()||'B')}</div><span>${esc(userInfo.display_name||'BookOS')}</span><div class="nlp-password"><i></i><i></i><i></i><b>→</b></div></div>
-        <div class="nlp-media" ${desktopCfg.medios?'':'hidden'}><div class="nlp-cover"></div><div class="nlp-song"><strong>Ahora suena</strong><span>BookOS Music</span><i></i><div>◀ &nbsp; ❚❚ &nbsp; ▶</div></div></div>
-        <button class="nlp-power" tabindex="-1">•••</button>
-    </div>`;
-    const nativeSlider=(id,title,min,max,value,step,label)=>`<div class="detail-item native-lock-slider"><div class="detail-texts"><span class="dt">${title}</span><span class="ds" id="${id}-value">${label(value)}</span></div><div class="slider-container"><input type="range" class="filled" id="${id}" min="${min}" max="${max}" step="${step}" value="${value}"></div></div>`;
-    const percent=v=>Math.round(v*100)+'% de la altura';
-    const pixels=v=>Math.round(v)+' px lógicos';
-
-    c.innerHTML=renderHeader(t('hdr_lockscreen_aod'))+
-        `<div class="themed-page">`+
-        renderSection('Pantalla de bloqueo de BookOS Desktop')+
-        `<div class="detail-card native-lock-editor">
-            <div class="native-lock-editor-head"><div><span class="dt">Vista previa adaptable</span><span class="ds">Las posiciones son proporcionales y mantienen el diseño en HiDPI y monitores grandes.</span></div><span class="native-live-state" id="native-live-state">Guardado</span></div>
-            ${desktopPreview}
-            <button class="btn btn-secondary btn-sm native-lock-reset" id="native-lock-reset">Restaurar diseño</button>
-        </div>`+
-        renderCard([
-            renderRowItem('Animaciones','Entrada escalonada, pulso al comprobar y error con movimiento',renderToggle('native-lock-animations',desktopCfg.animaciones)),
-            renderRowItem('Mostrar fecha','Fecha larga debajo del reloj',renderToggle('native-lock-date',desktopCfg.fecha)),
-            renderRowItem('Controles multimedia','Tarjeta MPRIS con progreso y reproducción',renderToggle('native-lock-media',desktopCfg.medios))
-        ])+
-        renderSection('Distribución')+
-        `<div class="detail-card native-lock-controls">
-            ${nativeSlider('native-clock-y','Posición del reloj',.02,.40,desktopCfg.reloj_y,.01,percent)}
-            ${nativeSlider('native-access-y','Posición del acceso',.18,.72,desktopCfg.acceso_y,.01,percent)}
-            ${nativeSlider('native-media-y','Posición de multimedia',.42,.88,desktopCfg.medios_y,.01,percent)}
-            ${nativeSlider('native-clock-size','Tamaño del reloj',72,220,desktopCfg.reloj_tamano,2,pixels)}
-            ${nativeSlider('native-avatar-size','Tamaño del avatar',64,220,desktopCfg.avatar_tamano,2,pixels)}
-        </div>`+
-        renderCard([
-            `<div class="detail-item detail-item-row" id="lock-type-row" style="cursor:pointer">
-                <div class="detail-texts"><span class="dt">Tipo de bloqueo</span><span class="ds" id="lock-type-label">${lockTypeLabel}</span></div>
-                ${chevron()}
-            </div>`,
-            `<div class="detail-item"><span class="dt">Tiempo de espera</span><div class="slider-container"><input type="range" class="filled" id="lt" min="1" max="30" value="${timeout}" style="--fill:${((timeout-1)/29)*100}%"><span class="slider-label" id="lt-l">${timeout} min</span></div></div>`,
-            fp.available?`<div class="detail-item detail-item-row" id="fp-open-row" style="cursor:pointer">
-                <div class="detail-texts"><span class="dt">Configurar huella</span><span class="ds">${enrolled?'Huella registrada':'Contraseña huella digital'}</span></div>
-                <span style="color:var(--tx2);font-size:18px;line-height:1">›</span>
-            </div>`:''
-        ].filter(Boolean))+
-        renderCard([
-            renderRowItem('AOD','Muestra información cuando la pantalla está apagada',renderToggle('aod',aod)),
-            renderRowItem('Mostrar Book Bar','Pastilla dinámica con música, rutinas y batería',renderToggle('bookbar',bookBarEnabled))
-        ])+
-        renderSection('Tema BookOS')+
-        renderCard([
-            renderRowItem('Tema BookOS — Pantalla de bloqueo','Reemplaza el lockscreen de Plasma',renderToggle('lock-theme',lockThemeOn)),
-            renderRowItem('Tema BookOS — SDDM (login)','Activa el tema BookOS al iniciar sesión',renderToggle('sddm-theme',sddmThemeOn))
-        ])+sddmHtml+`</div>`;
-
-    // Editor de la pantalla de inicio. Delegado en el contenedor y colocado
-    // inmediatamente tras el innerHTML, para que una excepción en los
-    // manejadores de más abajo no deje la fila muerta y sin señal.
-    // El contenedor es un proxy NUEVO en cada navegación, y el de una visita
-    // anterior descarta sus escrituras en silencio. Como el listener se engancha
-    // una sola vez, no puede capturarlo: se guarda el vigente en el elemento
-    // real y se lee en el momento del clic.
-    c._sddmCurrentC=c;
-    if(!c._sddmNavBound){
-        c._sddmNavBound=true;
-        c.addEventListener('click',async ev=>{
-            if(!ev.target.closest('#go-sddm-editor'))return;
-            const cur=ev.currentTarget._sddmCurrentC||c;
-            try{
-                if(window.pushSubNav)window.pushSubNav(()=>renderBloqueo(cur));
-                window.clearPageIntervals?.();
-                await renderSddmEditor(cur);
-            }catch(e){
-                console.error('[sddm-editor]',e);
-                toast('No se pudo abrir: '+(e&&e.message||e),'❌');
-            }
-        });
-    }
-
-    setupSlider('lt',async v=>{try{await tauriInvoke('set_lock_timeout',{minutes:parseInt(v)})}catch(e){}const l=document.getElementById('lt-l');if(l)l.textContent=v+' min';toast('Tiempo de espera: '+v+' min');},false);
-
-    // El editor nativo actualiza primero la maqueta y agrupa cambios rápidos en
-    // una sola escritura. El compositor relee el fichero por D-Bus si esta es
-    // una sesión BookOS; fuera de ella el ajuste queda listo para el próximo
-    // inicio sin marcarlo como error.
-    let nativeSaveTimer=0;
-    const updateNativePreview=()=>{
-        const p=document.getElementById('native-lock-preview');
-        if(!p)return;
-        p.style.setProperty('--clock-y',desktopCfg.reloj_y*100+'%');
-        p.style.setProperty('--access-y',desktopCfg.acceso_y*100+'%');
-        p.style.setProperty('--media-y',desktopCfg.medios_y*100+'%');
-        p.style.setProperty('--clock-size',desktopCfg.reloj_tamano*.34+'px');
-        p.style.setProperty('--avatar-size',desktopCfg.avatar_tamano*.32+'px');
-        p.querySelector('.nlp-date').hidden=!desktopCfg.fecha;
-        p.querySelector('.nlp-media').hidden=!desktopCfg.medios;
-        p.classList.toggle('no-motion',!desktopCfg.animaciones);
-        const values={
-            'native-clock-y-value':percent(desktopCfg.reloj_y),
-            'native-access-y-value':percent(desktopCfg.acceso_y),
-            'native-media-y-value':percent(desktopCfg.medios_y),
-            'native-clock-size-value':pixels(desktopCfg.reloj_tamano),
-            'native-avatar-size-value':pixels(desktopCfg.avatar_tamano),
-        };
-        for(const [id,value] of Object.entries(values)){const el=document.getElementById(id);if(el)el.textContent=value;}
-    };
-    const saveNative=()=>{
-        clearTimeout(nativeSaveTimer);
-        const state=document.getElementById('native-live-state');
-        if(state){state.textContent='Pendiente…';state.className='native-live-state saving';}
-        nativeSaveTimer=setTimeout(async()=>{
-            try{
-                const result=JSON.parse(await tauriInvoke('set_desktop_lockscreen_config',{config:desktopCfg}));
-                if(!result.ok)throw new Error(result.error||'No se pudo guardar');
-                desktopCfg={...desktopCfg,...result.config};
-                if(state){state.textContent=result.live?'Aplicado en vivo':'Guardado · próxima sesión';state.className='native-live-state '+(result.live?'live':'offline');}
-            }catch(e){
-                if(state){state.textContent='Error al guardar';state.className='native-live-state error';}
-                toast('No se pudo guardar el diseño del bloqueo','⚠️');
-            }
-        },180);
-    };
-    const bindNativeRange=(id,key,format)=>{
-        const el=document.getElementById(id);if(!el)return;
-        const sync=(persist=true)=>{
-            desktopCfg[key]=Number(el.value);
-            const pct=((el.value-el.min)/(el.max-el.min))*100;
-            el.style.setProperty('--fill',pct+'%');
-            const label=document.getElementById(id+'-value');if(label)label.textContent=format(desktopCfg[key]);
-            updateNativePreview();if(persist)saveNative();
-        };
-        el.addEventListener('input',()=>sync(true));sync(false);
-    };
-    bindNativeRange('native-clock-y','reloj_y',percent);
-    bindNativeRange('native-access-y','acceso_y',percent);
-    bindNativeRange('native-media-y','medios_y',percent);
-    bindNativeRange('native-clock-size','reloj_tamano',pixels);
-    bindNativeRange('native-avatar-size','avatar_tamano',pixels);
-    for(const id of ['native-lock-animations','native-lock-date','native-lock-media']){
-        const subtitle=document.querySelector(`[data-toggle="${id}"]`)?.closest('.detail-item-row')?.querySelector('.ds');
-        if(subtitle)subtitle.dataset.custom='true';
-    }
-    setupToggle('native-lock-animations',v=>{desktopCfg.animaciones=v;updateNativePreview();saveNative();});
-    setupToggle('native-lock-date',v=>{desktopCfg.fecha=v;updateNativePreview();saveNative();});
-    setupToggle('native-lock-media',v=>{desktopCfg.medios=v;updateNativePreview();saveNative();});
-    document.getElementById('native-lock-reset')?.addEventListener('click',()=>{
-        desktopCfg={..._desktopDefaults};
-        const ids={
-            'native-clock-y':'reloj_y','native-access-y':'acceso_y','native-media-y':'medios_y',
-            'native-clock-size':'reloj_tamano','native-avatar-size':'avatar_tamano'
-        };
-        for(const [id,key] of Object.entries(ids)){const el=document.getElementById(id);if(el){el.value=desktopCfg[key];el.dispatchEvent(new Event('input'));}}
-        for(const [id,key] of [['native-lock-animations','animaciones'],['native-lock-date','fecha'],['native-lock-media','medios']]){
-            const el=document.querySelector(`[data-toggle="${id}"]`);if(el){el.classList.toggle('active',desktopCfg[key]);el.setAttribute('aria-checked',desktopCfg[key]?'true':'false');}
-        }
-        updateNativePreview();saveNative();
-    });
-    updateNativePreview();
-
-    // Lock type — anchored popover
-    let _lockCur=lockType;
-    document.getElementById('lock-type-row')?.addEventListener('click',e=>{
-        popoverSelect(e.currentTarget,{
-            title:_tr('Tipo de bloqueo'),
-            options:[
-                {val:'password',label:_tr('Contraseña'),sub:_tr('Contraseña clásica')},
-                {val:'pin',     label:_tr('PIN'),        sub:_tr('Hará autologin')},
-            ],
-            current:_lockCur,
-            onSelect:async val=>{
-                _lockCur=val;
-                await setSetting('LockType',val);
-                const label=document.getElementById('lock-type-label');
-                if(label)label.textContent=val==='pin'?'PIN':_tr('Contraseña del sistema');
-                if(val==='pin'){
-                    try{await tauriInvoke('run_command',{cmd:'sh',args:['-c','klogin --configure-pin 2>/dev/null']});}catch(e){}
-                }
-                toast(val==='pin'?'Tipo de bloqueo: PIN':'Tipo de bloqueo: Contraseña');
-            },
-        });
-    });
-
-    // Fingerprint popup
-    if(fp.available){
-        document.getElementById('fp-open-row')?.addEventListener('click',()=>{
-            showDialog('Configurar huella',
-                `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0">
-                    <div class="sensor-wrapper" id="fp-rings-pop">${fpSvg.replace('id="fp-svg-main"','id="fp-svg-pop"').replace('id="fp-rings"','id="fp-rings-inner"')}<div class="fp-laser" aria-hidden="true"></div></div>
-                    <p id="fp-status-pop" class="fp-hello-status" style="text-align:center;color:var(--tx2);font-size:14px">${enrolled?'Huella configurada. Puedes volver a registrarla.':'Coloca el dedo en el sensor para registrar'}</p>
-                    <button class="btn btn-primary" id="fp-enroll-pop" style="min-width:160px">${enrolled?'Volver a registrar':'Iniciar registro'}</button>
-                </div>`,
-                {confirmText:null,cancelText:'Cerrar',onCancel:()=>{}}
-            );
-            requestAnimationFrame(()=>{
-                _startFpIdleAnimById('fp-svg-pop');
-                document.getElementById('fp-enroll-pop')?.addEventListener('click',async()=>{
-                    const btn=document.getElementById('fp-enroll-pop');
-                    const status=document.getElementById('fp-status-pop');
-                    const svg=document.getElementById('fp-svg-pop');
-                    const blueRings=svg?[...svg.querySelectorAll('.fp-zone')]:[];
-                    btn.disabled=true;btn.textContent='Registrando...';
-                    status.textContent='Coloca tu dedo repetidamente en el sensor...';
-                    const wrapper=document.getElementById('fp-rings-pop');
-                    if(wrapper)wrapper.classList.add('fp-scanning');
-                    let scanActive=true;
-                    const LASER_DUR=1800,LASER_H=28,FRAME_H=220;
-                    const _RY_TOP=[17,29,41,52,64,75,85,95,102,107];
-                    const _RY_BOT=[203,191,179,168,156,145,135,125,118,113];
-                    const scanStart=Date.now();
-                    const scanPulse=()=>{
-                        if(!scanActive)return;
-                        const elapsed=(Date.now()-scanStart)%LASER_DUR;
-                        const laserTop=-LASER_H+(LASER_H+FRAME_H)*(elapsed/LASER_DUR);
-                        const laserBot=laserTop+LASER_H;
-                        blueRings.forEach((r,i)=>{
-                            const ov=Math.max(0,Math.min(laserBot,_RY_BOT[i])-Math.max(laserTop,_RY_TOP[i]));
-                            const maxOv=Math.min(LASER_H,_RY_BOT[i]-_RY_TOP[i]);
-                            const op=0.25+0.75*(maxOv>0?ov/maxOv:0);
-                            r.style.opacity=op.toFixed(2);
-                            r.style.transition='opacity 0.08s linear';
-                        });
-                        setTimeout(()=>requestAnimationFrame(scanPulse),16);
-                    };
-                    requestAnimationFrame(scanPulse);
-                    let unlisten = null;
-                    if (window.__TAURI__?.event?.listen) {
-                        unlisten = await window.__TAURI__.event.listen('fp-progress', ev => {
-                            const d = ev.payload;
-                            if (d.done) {
-                                status.textContent = 'Procesando registro...';
-                            } else if (d.stage) {
-                                status.textContent = `Escaneo ${d.stage} completado. Levanta el dedo y vuelve a colocarlo.`;
-                                if (wrapper) {
-                                    wrapper.classList.remove('fp-scanning');
-                                    wrapper.classList.add('fp-success');
-                                    setTimeout(() => {
-                                        wrapper.classList.remove('fp-success');
-                                        wrapper.classList.add('fp-scanning');
-                                    }, 400);
-                                }
-                            }
-                        });
-                    }
-
-                    try{
-                        const r=JSON.parse(await tauriInvoke('enroll_fingerprint'));
-                        scanActive=false;
-                        if(wrapper)wrapper.classList.remove('fp-scanning');
-                        blueRings.forEach(ring=>{ring.style.opacity='1';ring.style.transition='opacity 0.3s ease';});
-                        if(r.ok){
-                            if(wrapper){wrapper.classList.remove('fp-success');void wrapper.offsetWidth;wrapper.classList.add('fp-success');setTimeout(()=>wrapper.classList.remove('fp-success'),900);}
-                            status.textContent='¡Huella registrada correctamente!';
-                            btn.textContent='Volver a registrar';
-                            const lbl=document.getElementById('fp-open-row')?.querySelector('.ds');
-                            if(lbl)lbl.textContent='Huella registrada';
-                            toast('Huella registrada','✅');
-                        } else {
-                            if(wrapper){wrapper.classList.remove('fp-error');void wrapper.offsetWidth;wrapper.classList.add('fp-error');setTimeout(()=>wrapper.classList.remove('fp-error'),450);}
-                            status.textContent='No se pudo registrar. Inténtalo de nuevo.';
-                            console.error('[FP Enroll Error]', r.output);
-                            btn.textContent='Reintentar';
-                        }
-                    }catch(e){
-                        scanActive=false;
-                        if(wrapper)wrapper.classList.remove('fp-scanning');
-                        blueRings.forEach(ring=>{ring.style.opacity='1';ring.style.transition='opacity 0.3s ease';});
-                        if(wrapper){wrapper.classList.remove('fp-error');void wrapper.offsetWidth;wrapper.classList.add('fp-error');setTimeout(()=>wrapper.classList.remove('fp-error'),450);}
-                        status.textContent='Error: asegúrate de que el sensor está disponible';
-                        btn.textContent='Reintentar';
-                    } finally {
-                        if (unlisten) unlisten();
-                    }
-                    btn.disabled=false;
-                });
-            });
-        });
-    }
-
-    setupToggle('aod',async a=>{setSetting('AOD',a?'true':'false');toast(a?'AOD activado':'AOD desactivado');});
-    setupToggle('bookbar',async a=>{
-        const action=a?'activar':'desactivar';
-        const pwd=await showRootAuth('Permisos requeridos',
-            `Para ${action} Book Bar en el bloqueo y el acceso, introduce la contraseña del equipo.`);
-        let ok=false;
-        if(pwd!==null){
-            try{
-                const cfg={...JSON.parse(await tauriInvoke('get_sddm_config')),showBookBar:a?'true':'false'};
-                ok=JSON.parse(await tauriInvoke('set_sddm_config',{cfg:JSON.stringify(cfg),password:pwd})).ok;
-            }catch(e){ ok=false; }
-        }
-        if(ok){
-            setSetting('BookBarEnabled',a?'true':'false');
-            try{await tauriInvoke('run_command',{cmd:'sh',args:['-c',`mkdir -p "$HOME/.config" && echo '{"enabled":${a}}' > "$HOME/.config/bookos-bookbar.json"`]});}catch(e){}
-            toast(a?'Book Bar activada':'Book Bar desactivada');
-        } else {
-            toast('No se pudo actualizar Book Bar','⚠️');
-            setTimeout(()=>renderBloqueo(c),200);
-        }
-    });
-    // ── Tema BookOS lockscreen ──
-    setupToggle('lock-theme',async a=>{
-        const action=a?'activar':'desactivar';
-        const pwd=await showRootAuth('Permisos requeridos',
-            `Para ${action} el tema BookOS del bloqueo, introduce la contraseña del equipo.`);
-        let ok=false;
-        if(pwd!==null){
-            const cmd=a?'install_lockscreen_theme':'uninstall_lockscreen_theme';
-            try{ ok=JSON.parse(await tauriInvoke(cmd,{password:pwd})).ok; }catch(e){ ok=false; }
-        }
-        if(ok) toast(a?'Tema lockscreen activado':'Tema lockscreen desactivado','🔒');
-        else { setTimeout(()=>renderBloqueo(c),200); }
-    });
-    // ── Tema BookOS SDDM ──
-    setupToggle('sddm-theme',async a=>{
-        const action=a?'activar':'desactivar';
-        const pwd=await showRootAuth('Permisos requeridos',
-            `Para ${action} el tema BookOS de SDDM, introduce la contraseña del equipo.`);
-        let ok=false;
-        if(pwd!==null){
-            const cmd=a?'install_sddm_theme':'uninstall_sddm_theme';
-            try{ ok=JSON.parse(await tauriInvoke(cmd,{password:pwd})).ok; }catch(e){ ok=false; }
-        }
-        if(ok) toast(a?'Tema SDDM activado':'Tema SDDM desactivado','🚪');
-        else { setTimeout(()=>renderBloqueo(c),200); }
-    });
-
-    // Fingerprint enroll
+return desktop.lockscreen(c);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -3912,7 +2319,7 @@ function _startUpdatePolling(c,bar,text,progressWrap,sysInfo){
 // ════════════════════════════════════════════════════════════════════════
 export async function renderAcerca(c){
     c.innerHTML=renderHeader(t('hdr_about'))+renderSkeleton(4);
-    let i={hostname:'--',kernel:'--',distro:'--',cpu:'--',ram:'--',gpu:'--',plasma:'--',model:'--'};
+    let i={hostname:'--',kernel:'--',distro:'--',cpu:'--',ram:'--',gpu:'--',desktop:'--',model:'--'};
     try{i=JSON.parse(await tauriInvoke('get_system_info'));}catch(e){}
 
     // Samsung-style: device image + name + rename + info sections
@@ -3936,7 +2343,7 @@ export async function renderAcerca(c){
     h+=renderSection(t('sec_software'));
     h+=renderCard([
         renderInfoItem('Sistema operativo','BookOS · '+esc(i.distro)),
-        renderInfoItem('Entorno de escritorio','KDE Plasma '+esc(i.plasma)),
+        renderInfoItem('Entorno de escritorio','BookOS'),
         renderInfoItem('Kernel de Linux',esc(i.kernel)),
     ]);
 
@@ -4089,12 +2496,7 @@ export async function renderGeneral(c){
         }catch(e){toast(_tr('No se pudo cambiar'),'❌');}
     }));
     document.getElementById('open-printers')?.addEventListener('click',async()=>{
-        // Try KDE's printer KCM, then system-config-printer, then GNOME control center.
-        let ok=false;
-        for(const [cmd,args] of [['kcmshell6',['kcm_printer_manager']],['system-config-printer',[]],['gnome-control-center',['printers']]]){
-            try{const r=await tauriInvoke('run_command',{cmd,args});if(r&&!String(r).includes('not found')){ok=true;break;}}catch(e){}
-        }
-        toast(ok?_tr('Abriendo impresoras'):_tr('No hay gestor de impresoras instalado'),'🖨️');
+        try{await tauriInvoke('open_printers');}catch(e){toast(String(e),'❌');}
     });
 
     document.querySelectorAll('[data-lang]').forEach(b => b.addEventListener('click', async()=>{
@@ -4503,7 +2905,6 @@ export async function renderMantenimiento(c){
         renderRowItem('Limpiar caché de paquetes','Limpia archivos de Paru/Pacman',`<button class="btn btn-secondary btn-sm" id="m-pkg">Limpiar</button>`),
         renderRowItem('Miniaturas temporales','Borra caché de thumbnails',`<button class="btn btn-secondary btn-sm" id="m-cache">Borrar</button>`)
     ])+renderSection(t('sec_bookos_management'))+renderCard([
-        renderRowItem('Permisos de Hardware','Añade reglas polkit para obviar contraseñas en control',`<button class="btn btn-secondary btn-sm" id="m-polkit">Configurar</button>`),
         renderRowItem('Exportar a JSON','Exportar configuración de BookOS',`<button class="btn btn-secondary btn-sm" id="m-exp">Exportar</button>`),
         renderRowItem('Importar JSON','Importar configuración (requiere elegir archivo)',`<button class="btn btn-secondary btn-sm" id="m-imp">Importar</button>`)
     ]);
@@ -4519,9 +2920,6 @@ export async function renderMantenimiento(c){
     };
     run('m-flat','flatpak');run('m-pkg','packages');run('m-cache','cache');
     
-    document.getElementById('m-polkit')?.addEventListener('click', async()=>{
-        try { await tauriInvoke('setup_polkit_rules'); toast('Reglas Polkit configuradas con éxito!'); } catch(e) { toast('Error al configurar'); }
-    });
     document.getElementById('m-exp')?.addEventListener('click', async()=>{
         try {
             const dest = await window.__TAURI__.dialog.save({defaultPath:'bookos_settings.json', filters:[{name:'JSON',extensions:['json']}]});
@@ -4619,8 +3017,8 @@ export async function renderFondos(c){
         <button class="wp-change-btn" id="btn-change-wp">${_tr("Cambiar fondo de pantalla")}</button>
         <div class="wp-palette-row" id="wps-palette">
             <div class="wp-palette-texts">
-                <span class="wp-palette-title">${_tr("Acento automático de Plasma")}</span>
-                <span class="wp-palette-sub">${_tr("Color de acento nativo de KDE según el fondo")}</span>
+            <span class="wp-palette-title">${_tr("Acento automático de BookOS")}</span>
+            <span class="wp-palette-sub">${_tr("Color de acento del escritorio según el fondo")}</span>
             </div>
             ${renderToggle('palette',colorPalette)}
         </div>
@@ -4636,7 +3034,6 @@ export async function renderFondos(c){
         <div class="theme-block-divider" id="dyn-div" style="display:none"></div>
         <div id="dyn-body" style="display:none">
             ${renderRowItem('Aplicar paleta a los iconos','Recolorea los iconos de las apps con el tono elegido',renderToggle('dyniconos',false))}
-            ${renderRowItem('Aplicar paleta a Plasma/KDE','Tiñe KdeControlStation y el tema de escritorio con el esquema de color nativo',renderToggle('dynplasma',false))}
             ${renderRowItem('Aplicar paleta a Kvantum','Tiñe apps Qt como Dolphin o Kate con el estilo Kvantum de BookOS',renderToggle('dynkvantum',false))}
             ${renderRowItem('Aplicar paleta a la pantalla de bloqueo','Tiñe el acento de la pantalla de bloqueo y, si es posible, del saludo de inicio de sesión',renderToggle('dynlockscreen',false))}
             <div class="theme-block-divider"></div>
@@ -4719,15 +3116,10 @@ export async function renderFondos(c){
         g.scrollIntoView({behavior:'smooth'});
         _mountFab();
     });
-    // Apply accent-from-wallpaper and refresh Plasma so it takes effect live.
+    // Apply the BookOS accent so it takes effect live.
     const _applyPalette=async(on)=>{
         setSetting('ColorPalette',on?'true':'false');
         try{
-            await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kdeglobals','--group','General','--key','AccentColorFromWallpaper',on?'true':'false']});
-            // When turning off, clear any forced accent so Plasma reverts to default.
-            if(!on)await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kdeglobals','--group','General','--key','accentColorFromWallpaper',on?'true':'false']}).catch(()=>{});
-            // Notify running apps of the kdeglobals change (live update, no relogin).
-            await tauriInvoke('run_command',{cmd:'dbus-send',args:['--session','--type=signal','/KGlobalSettings','org.kde.KGlobalSettings.notifyChange','int32:0','int32:0']}).catch(()=>{});
         }catch(e){}
         toast(on?'Paleta de colores activada':'Paleta desactivada');
     };
@@ -4995,8 +3387,6 @@ async function setupDynamicColor(current){
         if(tg&&st.enabled){tg.classList.add('active');tg.setAttribute('aria-checked','true');}
         const ti=document.querySelector('[data-toggle="dyniconos"]');
         if(ti&&localStorage.getItem('bookos_dyn_icons')==='1'){ti.classList.add('active');ti.setAttribute('aria-checked','true');}
-        const tp=document.querySelector('[data-toggle="dynplasma"]');
-        if(tp&&st.plasma){tp.classList.add('active');tp.setAttribute('aria-checked','true');}
         const tk=document.querySelector('[data-toggle="dynkvantum"]');
         if(tk&&st.kvantum){tk.classList.add('active');tk.setAttribute('aria-checked','true');}
         const tl=document.querySelector('[data-toggle="dynlockscreen"]');
@@ -5054,13 +3444,9 @@ async function setupDynamicColor(current){
         localStorage.setItem('bookos_dyn_icons',on?'1':'0');
         if(on&&applied.seed)applyIcons(applied.seed);
     });
-    // Esquema de color nativo de Plasma: aparte de los iconos, independiente
+    // Esquema de color del escritorio: aparte de los iconos, independiente
     // (se puede querer uno sin el otro). Al encenderlo con una paleta ya
     // aplicada, la reescribe para generar+aplicar el .colors de una vez.
-    setupToggle('dynplasma',async on=>{
-        try{await tauriInvoke('dynamic_color_set_plasma',{enabled:on});}catch(e){}
-        toast(on?_tr('Paleta aplicada a Plasma/KDE'):_tr('Paleta de Plasma/KDE desactivada'));
-    });
     setupToggle('dynkvantum',async on=>{
         try{await tauriInvoke('dynamic_color_set_kvantum',{enabled:on});}catch(e){}
         toast(on?_tr('Paleta aplicada a Kvantum'):_tr('Paleta de Kvantum desactivada'));
@@ -5126,11 +3512,6 @@ const RB_ACTIONS=[
     {type:'airplane',      svg:SVGI.plane,    label:'Modo avión',         valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Conexiones'},
     // ── Pantalla
     {type:'brightness',    svg:SVGI.sun,      label:'Brillo de pantalla', valueType:'range', min:0, max:100, default:50, category:'Pantalla'},
-    {type:'vision_booster',svg:SVGI.sun,      label:'Vision Booster',     valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Pantalla'},
-    {type:'hdr',           svg:SVGI.sun,      label:'HDR',                valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Pantalla'},
-    {type:'screen_saver',  svg:SVGI.moonSm,   label:'Ahorro de pantalla', valueType:'toggle_val', options:[['true','Activar (90Hz)'],['false','Desactivar (120Hz)']], category:'Pantalla'},
-    {type:'nightlight',    svg:SVGI.moonSm,   label:'Luz nocturna',       valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Pantalla'},
-    {type:'icc_profile',   svg:SVGI.palette,  label:'Perfil de color',    valueType:'select', options:[['SDC4189.icm','Estándar'],['SDC4189S.icm','sRGB'],['SDC4189A.icm','Adobe RGB'],['SDC4189P.icm','DCI-P3']], category:'Pantalla'},
     // ── Sonido
     {type:'volume',        svg:SVGI.volume2,  label:'Volumen del sistema', valueType:'range', min:0, max:100, default:50, category:'Sonido'},
     // ── Batería y rendimiento
@@ -5620,349 +4001,17 @@ export async function renderAplicaciones(c){
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// ── Salud Digital (Android-style Digital Wellbeing) ───────────────────
-// ════════════════════════════════════════════════════════════════════════
-export async function renderSaludDigital(c){
-    c.innerHTML=renderHeader(t('hdr_digital_health'))+renderSkeleton(3);
-    let appUsage=[];
-    let vol=50,muted=false;
-    try{[appUsage,{volume:vol,muted}]=await Promise.all([
-        tauriInvoke('get_app_usage').then(JSON.parse).catch(()=>[]),
-        tauriInvoke('get_volume').then(JSON.parse).catch(()=>({volume:50,muted:false}))
-    ]);}catch(e){}
-
-    // Real usage only: tracking accumulates from main.js. Empty -> "no data yet" card below.
-    const hasData=Array.isArray(appUsage)&&appUsage.length>0;
-    const totalMin=hasData?appUsage.reduce((s,a)=>s+(a.minutes||0),0):0;
-    const totalH=Math.floor(totalMin/60),totalM=totalMin%60;
-
-    let h=renderHeader(t('hdr_digital_health'));
-
-    // Hero: today's total
-    h+=`<div class="sd-hero">
-        <div class="sd-hero-ring">
-            <svg viewBox="0 0 100 100" width="120" height="120">
-                <circle cx="50" cy="50" r="42" fill="none" stroke="var(--sbg)" stroke-width="8"/>
-                <circle cx="50" cy="50" r="42" fill="none" stroke="var(--blue)" stroke-width="8"
-                    stroke-dasharray="${hasData?Math.min(264,Math.round(totalMin/480*264)):0} 264"
-                    stroke-dashoffset="66" stroke-linecap="round"/>
-            </svg>
-            <div class="sd-hero-ring-label">
-                <span class="sd-hero-time">${hasData?(totalH>0?totalH+'h ':'')+totalM+'m':'0m'}</span>
-                <span class="sd-hero-sub">${_tr("Hoy")}</span>
-            </div>
-        </div>
-        <div class="sd-hero-info">
-            <span class="sd-hero-title">${_tr("Uso del dispositivo")}</span>
-            <span class="sd-hero-desc">Monitoriza cuánto tiempo usas cada aplicación.</span>
-        </div>
-    </div>`;
-
-    // Screen time goal
-    const goalMin=parseInt(await getSetting('sd_goal_min','480').catch(()=>'480'))||480;
-
-    // App usage bars. Tracking runs globally from main.js, so opening this page
-    // just displays whatever has accumulated.
-    if(hasData){
-        h+=renderSection(t('sec_per_app_usage'));
-        const maxMin=Math.max(...appUsage.map(a=>a.minutes||0),1);
-        h+=`<div class="detail-card">${appUsage.slice(0,8).map(a=>{
-            const pct=Math.round((a.minutes||0)/maxMin*100);
-            const m=a.minutes||0;
-            const timeStr=m>=60?`${Math.floor(m/60)}h ${m%60}m`:`${m}m`;
-            return `<div class="sd-app-item">
-                <div class="sd-app-icon-wrap">${a.icon?`<img src="${esc(a.icon)}" class="sd-app-icon">`:
-                    `<div class="sd-app-icon-ph">${(a.name||'?').charAt(0).toUpperCase()}</div>`}
-                </div>
-                <div class="sd-app-info">
-                    <div class="sd-app-top"><span class="sd-app-name">${esc(a.name||'App')}</span><span class="sd-app-time">${timeStr}</span></div>
-                    <div class="sd-app-bar-bg"><div class="sd-app-bar" style="width:${pct}%"></div></div>
-                </div>
-            </div>`;
-        }).join('')}</div>`;
-    } else {
-        h+=renderSection(t('sec_per_app_usage'));
-        h+=renderCard([renderInfoItem('Sin datos de uso aún','El uso se registra automáticamente mientras BookOS Settings esté abierto. Vuelve más tarde.')]);
-    }
-
-    // Volume
-    h+=renderSection(t('sec_volume_audio'));
-    h+=renderCard([
-        `<div class="detail-item"><span class="dt">${_tr("Volumen del sistema")}</span>${renderSlider('sd-vol',vol)}</div>`,
-        renderRowItem('Silenciar','Sin sonido',renderToggle('sd-mute',muted))
-    ]);
-
-    // Screen time goal
-    const goalH=Math.floor(goalMin/60),goalM=goalMin%60;
-    h+=renderSection(t('sec_screen_time_goal'));
-    h+=renderCard([
-        `<div class="detail-item">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <span class="dt">${_tr("Límite diario")}</span>
-                <span style="font-size:13px;color:var(--tx2)" id="sd-goal-val">${goalH>0?goalH+'h ':''} ${goalM}m</span>
-            </div>
-            <input type="range" class="range-input" id="sd-goal" min="30" max="720" step="30" value="${goalMin}">
-        </div>`,
-        renderRowItem('Avisar al alcanzar el límite','Notificación cuando se supere el objetivo',renderToggle('sd-goal-notif',await getSetting('sd_goal_notif','false').then(v=>v==='true').catch(()=>false))),
-    ]);
-
-    // Focus mode
-    h+=renderSection(t('sec_focus_mode'));
-    h+=renderCard([
-        renderRowItem('No molestar al activar enfoque','Silencia notificaciones en modo enfoque',renderToggle('sd-focus-dnd',await getSetting('sd_focus_dnd','false').then(v=>v==='true').catch(()=>false))),
-        renderRowItem('Activar modo enfoque','Minimiza distracciones',renderToggle('sd-focus',false)),
-    ]);
-
-    c.innerHTML=h;
-
-    setupSlider('sd-vol',async v=>{
-        setSetting('sd_volume',String(v));
-        try{await tauriInvoke('set_volume',{value:parseInt(v)});}catch(e){}
-    });
-    setupToggle('sd-mute',async a=>{try{await tauriInvoke('toggle_mute');}catch(e){}toast(a?'Silenciado':'Sonido activado','🔊');});
-
-    const goalSlider=document.getElementById('sd-goal');
-    const goalValEl=document.getElementById('sd-goal-val');
-    goalSlider?.addEventListener('input',()=>{
-        const v=parseInt(goalSlider.value);
-        const h2=Math.floor(v/60),m2=v%60;
-        if(goalValEl)goalValEl.textContent=(h2>0?h2+'h ':'')+m2+'m';
-    });
-    goalSlider?.addEventListener('change',()=>{
-        setSetting('sd_goal_min',goalSlider.value);
-        toast('Objetivo actualizado');
-    });
-    setupToggle('sd-goal-notif',async a=>{setSetting('sd_goal_notif',a?'true':'false');toast(a?'Avisos de objetivo activados':'Desactivados');});
-    setupToggle('sd-focus-dnd',async a=>{setSetting('sd_focus_dnd',a?'true':'false');});
-    setupToggle('sd-focus',async a=>{
-        if(a&&await getSetting('sd_focus_dnd','false').then(v=>v==='true').catch(()=>false)){
-            try{await tauriInvoke('toggle_dnd',{enable:true});}catch(e){}
-        } else if(!a&&await getSetting('sd_focus_dnd','false').then(v=>v==='true').catch(()=>false)){
-            try{await tauriInvoke('toggle_dnd',{enable:false});}catch(e){}
-        }
-        toast(a?'Modo enfoque activado':'Modo enfoque desactivado',a?'🎯':'✋');
-    });
-
-    // Refresh only the usage ring + bars every 30s (no full re-render)
-    addInterval(async()=>{
-        const hero=document.querySelector('.sd-hero');
-        if(!hero)return;
-        try{
-            const usage=JSON.parse(await tauriInvoke('get_app_usage').catch(()=>'[]'));
-            if(!Array.isArray(usage)||!usage.length)return;
-            const totalMin=usage.reduce((s,a)=>s+(a.minutes||0),0);
-            const totalH=Math.floor(totalMin/60),totalM=totalMin%60;
-            const timeEl=document.querySelector('.sd-hero-time');
-            if(timeEl)timeEl.textContent=(totalH>0?totalH+'h ':'')+totalM+'m';
-            const dashEl=document.querySelector('.sd-hero-ring circle:last-child');
-            if(dashEl)dashEl.setAttribute('stroke-dasharray',`${Math.min(264,Math.round(totalMin/480*264))} 264`);
-        }catch(e){}
-    },30000);
-}
-
-// ════════════════════════════════════════════════════════════════════════
 // ── Accesibilidad ───────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderAccesibilidad(c){
-    c.innerHTML=renderHeader(t('hdr_accessibility'))+renderSkeleton(3);
-    // Rust returns: {font_dpi, contrast, invert, cursor_size} — all strings
-    let s={font_dpi:'0',contrast:'5',invert:'false',cursor_size:'24'};
-    let reduceMotion=false;
-    try{[s,reduceMotion]=await Promise.all([
-        tauriInvoke('get_accessibility_settings').then(JSON.parse),
-        tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','kwinrc','--group','Compositing','--key','AnimationSpeed','--default','3']}).then(v=>{const n=parseInt(v.trim());return n===0||n>=5;}).catch(()=>false),
-    ]);}catch(e){}
-
-    // font_dpi=0 means "auto" (system default ~96). Map to 75-150% range.
-    const rawDpi=parseInt(s.font_dpi)||0;
-    const fontPct=rawDpi>0?Math.round(rawDpi/96*100):100;
-    const cursorSize=parseInt(s.cursor_size)||24;
-    const invertActive=s.invert==='true';
-
-    let h=renderHeader(t('hdr_accessibility'));
-    h+=`<div class="acc-preview-wrap">
-        <span class="acc-preview-label">${_tr("Vista previa de texto")}</span>
-        <span class="acc-preview-text" id="acc-prev-text" style="font-size:${Math.round(14*fontPct/100)}px">${_tr("El texto del sistema se verá así")}</span>
-    </div>`;
-    h+=renderSection(t('sec_vision'));
-    h+=renderCard([
-        `<div class="detail-item">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <span class="dt">${_tr("Tamaño de texto")}</span>
-                <span style="font-size:13px;color:var(--tx2);font-variant-numeric:tabular-nums" id="font-scale-val">${fontPct}%</span>
-            </div>
-            <input type="range" class="range-input" id="font-scale" min="75" max="150" step="5" value="${fontPct}">
-        </div>`,
-        renderRowItem('Colores invertidos','Invierte los colores (KWin)',renderToggle('acc-invert',invertActive)),
-        renderRowItem('Reducir movimiento','Minimiza animaciones del compositor',renderToggle('acc-reduce-motion',reduceMotion))
-    ]);
-    h+=renderSection(t('sec_mouse_pointer'));
-    h+=renderCard([
-        `<div class="detail-item">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <span class="dt">${_tr("Tamaño del cursor")}</span>
-                <span style="font-size:13px;color:var(--tx2);font-variant-numeric:tabular-nums" id="cursor-val">${cursorSize}px</span>
-            </div>
-            <input type="range" class="range-input" id="cursor-size" min="16" max="64" step="8" value="${cursorSize}">
-        </div>`
-    ]);
-    c.innerHTML=h;
-
-    const fontSlider=document.getElementById('font-scale');
-    const fontVal=document.getElementById('font-scale-val');
-    const prevText=document.getElementById('acc-prev-text');
-    fontSlider?.addEventListener('input',()=>{
-        const pct=parseInt(fontSlider.value);
-        fontVal.textContent=pct+'%';
-        prevText.style.fontSize=Math.round(14*pct/100)+'px';
-    });
-    fontSlider?.addEventListener('change',async()=>{
-        const pct=parseInt(fontSlider.value);
-        const dpi=pct===100?0:Math.round(pct/100*96); // 0 = auto/system default
-        try{await tauriInvoke('set_font_scale',{dpi});}catch(e){}
-        toast('Tamaño actualizado — cierra sesión para aplicar');
-    });
-
-    const cursorSlider=document.getElementById('cursor-size');
-    const cursorVal=document.getElementById('cursor-val');
-    cursorSlider?.addEventListener('input',()=>{cursorVal.textContent=cursorSlider.value+'px';});
-    cursorSlider?.addEventListener('change',async()=>{
-        const size=parseInt(cursorSlider.value);
-        try{await tauriInvoke('set_cursor_size',{size});}catch(e){}
-        toast('Tamaño del cursor actualizado');
-    });
-
-    setupToggle('acc-invert',async a=>{
-        try{await tauriInvoke('toggle_invert_colors',{enable:a});}catch(e){}
-        toast(a?'Colores invertidos':'Colores normales');
-    });
-    setupToggle('acc-reduce-motion',async a=>{
-        // 0 = instant (no animations), 3 = default
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kwinrc','--group','Compositing','--key','AnimationSpeed',a?'0':'3']});}catch(e){}
-        try{await tauriInvoke('run_command',{cmd:'qdbus6',args:['org.kde.KWin','/KWin','reconfigure']});}catch(e){}
-        toast(a?'Movimiento reducido':'Animaciones normales');
-    });
+return desktop.accessibility(c);
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Funciones Avanzadas / Labs ──────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderAvanzadas(c){
-    c.innerHTML=renderHeader(t('hdr_advanced'))+renderSkeleton(3);
-
-    // Load KWin effects + compositor perf state in parallel
-    let fx={blur:false,wobbly:false,magic:false},cursorFix=false;
-    try{
-        [fx,cursorFix]=await Promise.all([
-            tauriInvoke('get_kwin_effects').then(JSON.parse).catch(()=>({blur:false,wobbly:false,magic:false})),
-            tauriInvoke('get_cursor_fix_status').then(r=>JSON.parse(r).enabled).catch(()=>false),
-        ]);
-    }catch(e){}
-
-    let h=renderHeader(t('hdr_advanced'));
-
-    // ── Stable features ─────────────────────────────────────────────
-    h+=renderSection(t('sec_compositor_fx'));
-    h+=renderCard([
-        renderRowItem('Desenfoque de fondo','Fondo desenfocado bajo ventanas translúcidas',renderToggle('fx-blur',fx.blur)),
-        renderRowItem('Ventanas elásticas','Efecto de movimiento suave al arrastrar',renderToggle('fx-wobbly',fx.wobbly)),
-        renderRowItem('Efecto lámpara mágica','Animación al minimizar ventanas',renderToggle('fx-magic',fx.magic)),
-    ]);
-
-    h+=renderSection(t('sec_perf'));
-    h+=renderCard([
-        renderRowItem('Optimizar latencia del cursor','Ajusta KWin para menor latencia de entrada',renderToggle('fx-cursorfix',cursorFix)),
-        renderRowItem('Reiniciar compositor','Útil si hay artefactos gráficos',`<button class="btn btn-secondary btn-sm" id="fx-restart-kwin">Reiniciar</button>`),
-    ]);
-
-
-    // ── Laboratorio (experimental) ─────────────────────────────────
-    // Compact divider hero — sits flush with the experimental sections
-    // so the visual hierarchy reads: stable settings → divider → labs.
-    const labGet=(k,def='false')=>{try{return localStorage.getItem('bookos_lab_'+k)||def;}catch{return def;}};
-    const labSet=(k,v)=>{try{localStorage.setItem('bookos_lab_'+k,v);}catch{}};
-
-    h+=`<div class="labs-divider">
-        <div class="labs-divider-icon">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4l5 9a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4l5-9V3z"/><path d="M9 7h6"/></svg>
-        </div>
-        <div class="labs-divider-text">
-            <span class="labs-divider-title">Laboratorio <span class="labs-badge">Beta</span></span>
-            <span class="labs-divider-sub">Funciones experimentales. Pueden cambiar o desaparecer en futuras versiones.</span>
-        </div>
-    </div>`;
-
-    h+=renderSection(t('sec_active'));
-    h+=renderCard([
-        renderRowItem('Animaciones reducidas','Menos movimiento en la interfaz',renderToggle('lab-reducedmotion',labGet('reducedmotion')==='true')),
-    ]);
-
-    h+=renderSection(t('sec_in_dev'));
-    const upcomingItems=[
-        {color:'#0a84ff', title:'Panel de productividad', desc:'Vista rápida de tareas y notas',
-         svg:`<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/>`},
-        {color:'#ff9500', title:'Gestos avanzados', desc:'Gestos táctiles personalizados',
-         svg:`<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>`},
-        {color:'#30d158', title:'Sync de ajustes', desc:'Copia de seguridad en la nube',
-         svg:`<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>`},
-        {color:'#af52de', title:'IA contextual', desc:'Sugerencias según tu uso',
-         svg:`<circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>`},
-    ];
-    h+=`<div class="detail-card lab-list">${upcomingItems.map(it=>`
-        <div class="lab-row">
-            <div class="lab-row-icon" style="background:${it.color}1f;color:${it.color}">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${it.svg}</svg>
-            </div>
-            <div class="lab-row-info">
-                <span class="lab-row-title">${it.title}</span>
-                <span class="lab-row-desc">${it.desc}</span>
-            </div>
-            <span class="lab-status-chip">Próximamente</span>
-        </div>
-    `).join('')}</div>`;
-
-    c.innerHTML=h;
-
-    // Lab toggles
-    setupToggle('lab-reducedmotion',a=>{
-        labSet('reducedmotion',a?'true':'false');
-        document.documentElement.classList.toggle('reduced-motion',a);
-        toast(a?'Animaciones reducidas activadas':'Animaciones restauradas');
-    });
-
-    setupToggle('fx-blur',async a=>{
-        try{await tauriInvoke('toggle_kwin_effect',{effect:'blur',enable:a});}catch(e){}
-        toast(a?'Desenfoque activado':'Desenfoque desactivado');
-    });
-    setupToggle('fx-wobbly',async a=>{
-        try{await tauriInvoke('toggle_kwin_effect',{effect:'wobbly',enable:a});}catch(e){}
-        toast(a?'Ventanas elásticas activadas':'Ventanas elásticas desactivadas');
-    });
-    setupToggle('fx-magic',async a=>{
-        try{await tauriInvoke('toggle_kwin_effect',{effect:'magic',enable:a});}catch(e){}
-        toast(a?'Lámpara mágica activada':'Lámpara mágica desactivada');
-    });
-    setupToggle('fx-cursorfix',async a=>{
-        if(a){
-            try{await tauriInvoke('fix_cursor_hz');}catch(e){}
-            toast('Latencia del cursor optimizada','⚡');
-        } else {
-            // Restore defaults
-            try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kwinrc','--group','Compositing','--key','LatencyPolicy','Medium']});}catch(e){}
-            try{await tauriInvoke('run_command',{cmd:'qdbus6',args:['org.kde.KWin','/KWin','reconfigure']});}catch(e){}
-            toast('Latencia restablecida a valores por defecto');
-        }
-    });
-    document.getElementById('fx-restart-kwin')?.addEventListener('click',()=>{
-        showDialog('Reiniciar compositor','KWin se reiniciará brevemente. La pantalla puede parpadear.',{
-            confirmText:'Reiniciar',
-            onConfirm:async()=>{
-                try{await tauriInvoke('run_command',{cmd:'kwin_wayland',args:['--replace']}).catch(()=>{});} catch(e){}
-                try{await tauriInvoke('run_command',{cmd:'kwin_x11',args:['--replace']}).catch(()=>{});}catch(e){}
-                toast('Compositor reiniciado','♻️');
-            }
-        });
-    });
+return desktop.advanced(c);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -7467,470 +5516,17 @@ export async function renderDispositivos(c){
     },10000);
 }
 
-// ── Atajos de teclado (kglobalshortcutsrc) ─────────────────────────────
-// Editor curado: los atajos más usados de KWin/Plasma, con captura de tecla.
-// El daemon se reinicia tras cada cambio (restart_kglobalaccel).
-export async function renderShortcutsPage(c){
-    const title=_tr('Atajos de teclado');
-    c.innerHTML=renderHeader(title)+renderSkeleton(3);
-
-    // group:[...grupos anidados], key, label. services usan valor simple; kwin usa "actual,defecto,desc"
-    const SHORTCUTS=[
-        {sec:_tr('Sistema'),items:[
-            {groups:['services','org.kde.krunner.desktop'],key:'_launch',label:'KRunner (buscador)',simple:true},
-            {groups:['services','org.kde.spectacle.desktop'],key:'_launch',label:_tr('Captura de pantalla'),simple:true},
-            {groups:['services','org.kde.konsole.desktop'],key:'_launch',label:_tr('Terminal'),simple:true},
-            {groups:['ksmserver'],key:'Lock Session',label:_tr('Bloquear pantalla')},
-        ]},
-        {sec:_tr('Ventanas'),items:[
-            {groups:['kwin'],key:'Walk Through Windows',label:_tr('Cambiar de ventana')},
-            {groups:['kwin'],key:'Overview',label:_tr('Vista general')},
-            {groups:['kwin'],key:'Grid View',label:_tr('Vista de cuadrícula')},
-            {groups:['kwin'],key:'Show Desktop',label:_tr('Mostrar escritorio')},
-            {groups:['kwin'],key:'Window Maximize',label:_tr('Maximizar ventana')},
-            {groups:['kwin'],key:'Window Minimize',label:_tr('Minimizar ventana')},
-            {groups:['kwin'],key:'Window Fullscreen',label:_tr('Pantalla completa')},
-            {groups:['kwin'],key:'Window Close',label:_tr('Cerrar ventana')},
-            {groups:['kwin'],key:'Kill Window',label:_tr('Forzar cierre de ventana')},
-        ]},
-    ];
-
-    const rcRead=async(groups,key)=>{
-        try{
-            const args=['--file','kglobalshortcutsrc'];groups.forEach(g=>args.push('--group',g));args.push('--key',key);
-            const r=JSON.parse(await tauriInvoke('run_command',{cmd:'kreadconfig6',args}));
-            return (r.output||'').trim();
-        }catch(e){return '';}
-    };
-    const rcWrite=async(groups,key,val)=>{
-        const args=['--file','kglobalshortcutsrc'];groups.forEach(g=>args.push('--group',g));args.push('--key',key,val);
-        await tauriInvoke('run_command',{cmd:'kwriteconfig6',args}).catch(()=>{});
-    };
-    // Primer atajo del campo actual ("A\tB" → "A"; "none" → '')
-    const parseCur=(raw,simple)=>{
-        const field=simple?raw:(raw.split(',')[0]||'');
-        const first=field.split('\\t')[0].split('\t')[0].trim();
-        return (first&&first!=='none')?first:'';
-    };
-
-    // Leer todos en paralelo
-    const flat=SHORTCUTS.flatMap(s=>s.items);
-    const raws=await Promise.all(flat.map(it=>rcRead(it.groups,it.key)));
-    flat.forEach((it,i)=>{it.raw=raws[i];it.cur=parseCur(raws[i],it.simple);});
-    let customs=[];
-    try{customs=JSON.parse(await tauriInvoke('list_custom_shortcuts'));}catch(e){}
-
-    let h=renderHeader(title);
-    let idx=0;
-    for(const sec of SHORTCUTS){
-        h+=renderSection(sec.sec);
-        h+=renderCard(sec.items.map(it=>{
-            const i=idx++;
-            return `<div class="detail-item detail-item-row" style="cursor:pointer" id="sc-${i}">
-                <div class="detail-texts"><span class="dt">${it.label}</span></div>
-                <span class="sc-combo" id="sc-${i}-v" style="color:var(--blue);font-size:13px;font-family:monospace;background:var(--bg2,rgba(128,128,128,.12));padding:3px 10px;border-radius:6px">${esc(it.cur||_tr('Sin asignar'))}</span>
-            </div>`;
-        }));
-    }
-    // ── Atajos personalizados (lanzar un comando con una combinación) ──
-    h+=renderSection(_tr('Atajos personalizados'));
-    const comboChip=(id,txt)=>`<span class="sc-combo" id="${id}" style="color:var(--blue);font-size:13px;font-family:monospace;background:var(--bg2,rgba(128,128,128,.12));padding:3px 10px;border-radius:6px">${esc(txt)}</span>`;
-    const customRows=customs.map((cs,j)=>`<div class="detail-item detail-item-row" id="scc-${j}" style="cursor:pointer">
-        <div class="detail-texts"><span class="dt">${esc(cs.name)}</span><span class="ds" style="font-family:monospace">${esc(cs.command)}</span></div>
-        <div style="display:flex;align-items:center;gap:10px">
-            ${comboChip(`scc-${j}-v`,cs.combo||_tr('Sin asignar'))}
-            <button id="scc-${j}-del" title="${_tr('Eliminar')}" style="background:none;border:none;cursor:pointer;color:var(--red,#e53935);padding:4px;display:flex"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
-        </div>
-    </div>`);
-    if(!customRows.length)customRows.push(`<div class="detail-item"><span class="ds">${_tr('Lanza cualquier comando con una combinación de teclas')}</span></div>`);
-    customRows.push(`<div class="detail-item" style="cursor:pointer" id="sc-add"><span class="dt" style="color:var(--blue)">+ ${_tr('Añadir atajo')}</span></div>`);
-    h+=renderCard(customRows);
-
-    h+=`<p style="color:var(--tx2);font-size:12px;padding:4px 16px">${_tr('Toca un atajo y pulsa la nueva combinación. Esc cancela · Retroceso lo borra.')}</p>`;
-    c.innerHTML=h;
-
-    // KDE key names for a few JS event.key values
-    const KEYMAP={' ':'Space','ArrowUp':'Up','ArrowDown':'Down','ArrowLeft':'Left','ArrowRight':'Right','Escape':'Esc','+':'Plus','-':'Minus'};
-    const comboFrom=e=>{
-        const mods=[];
-        if(e.metaKey)mods.push('Meta');if(e.ctrlKey)mods.push('Ctrl');if(e.altKey)mods.push('Alt');if(e.shiftKey)mods.push('Shift');
-        let k=e.key;
-        if(['Meta','Control','Alt','Shift'].includes(k))return null;   // solo modificador aún
-        k=KEYMAP[k]||(k.length===1?k.toUpperCase():k);
-        return [...mods,k].join('+');
-    };
-
-    let capturing=null; // {it,el}
-    const stopCapture=()=>{
-        if(!capturing)return;
-        capturing.el.textContent=capturing.it.cur||_tr('Sin asignar');
-        capturing.el.style.background='var(--bg2,rgba(128,128,128,.12))';
-        capturing=null;
-        document.removeEventListener('keydown',onKey,true);
-    };
-    const saveCombo=async(it,el,combo)=>{
-        const newField=combo||'none';
-        const newRaw=it.simple?newField:(()=>{const parts=it.raw.split(',');parts[0]=newField;return parts.join(',');})();
-        // set_global_shortcut para el daemon ANTES de escribir: kglobalaccel
-        // persiste su estado en memoria al salir, así que escribir con el
-        // daemon vivo hacía que el cambio se revirtiera solo.
-        try{
-            const r=JSON.parse(await tauriInvoke('set_global_shortcut',{groups:it.groups,key:it.key,value:newRaw}));
-            if(!r.ok){toast(_tr('Error al aplicar'),'❌');return;}
-        }catch(e){toast(_tr('Error al aplicar'),'❌');return;}
-        it.raw=newRaw;it.cur=combo;
-        el.textContent=combo||_tr('Sin asignar');
-        toast(_tr('Atajo actualizado'));
-    };
-    const onKey=e=>{
-        if(!capturing)return;
-        e.preventDefault();e.stopPropagation();
-        if(e.key==='Escape'){stopCapture();return;}
-        if(e.key==='Backspace'){const{it,el}=capturing;capturing=null;document.removeEventListener('keydown',onKey,true);saveCombo(it,el,'');return;}
-        const combo=comboFrom(e);
-        if(!combo)return; // esperar a la tecla final
-        const{it,el}=capturing;capturing=null;document.removeEventListener('keydown',onKey,true);
-        el.style.background='var(--bg2,rgba(128,128,128,.12))';
-        saveCombo(it,el,combo);
-    };
-    const startCapture=(it,el)=>{
-        stopCapture();
-        capturing={it,el};
-        el.textContent=_tr('Pulsa la combinación…');
-        el.style.background='var(--blue)';
-        document.addEventListener('keydown',onKey,true);
-    };
-    flat.forEach((it,i)=>{
-        document.getElementById(`sc-${i}`)?.addEventListener('click',()=>startCapture(it,document.getElementById(`sc-${i}-v`)));
-    });
-
-    // Personalizados: re-capturar combo al tocar la fila, borrar con la papelera
-    customs.forEach((cs,j)=>{
-        const it={groups:['services',cs.id],key:'_launch',simple:true,raw:cs.combo||'none',cur:cs.combo||''};
-        document.getElementById(`scc-${j}`)?.addEventListener('click',e=>{
-            if(e.target.closest(`#scc-${j}-del`))return;
-            startCapture(it,document.getElementById(`scc-${j}-v`));
-        });
-        document.getElementById(`scc-${j}-del`)?.addEventListener('click',()=>{
-            showDialog(_tr('Eliminar atajo'),`"${esc(cs.name)}"`,{
-                confirmText:_tr('Eliminar'),confirmClass:'cancel',
-                onConfirm:async()=>{
-                    try{await tauriInvoke('delete_custom_shortcut',{id:cs.id});toast(_tr('Atajo eliminado'));}
-                    catch(e){toast(_tr('Error al aplicar'),'❌');}
-                    renderShortcutsPage(c);
-                },
-            });
-        });
-    });
-
-    // Diálogo de creación: nombre + comando + captura de combinación
-    document.getElementById('sc-add')?.addEventListener('click',()=>{
-        stopCapture();
-        const ov=document.createElement('div');ov.className='bk-overlay';
-        ov.innerHTML=`<div class="bk-dialog"><div class="bk-dialog-title">${_tr('Añadir atajo')}</div>
-            <input type="text" id="cs-name" class="sel" style="width:100%;margin:10px 0 8px;box-sizing:border-box" placeholder="${_tr('Nombre')}">
-            <input type="text" id="cs-cmd" class="sel" style="width:100%;margin:0 0 8px;box-sizing:border-box;font-family:monospace" placeholder="${_tr('Comando (ej: konsole)')}">
-            <button id="cs-combo" class="sel" style="width:100%;margin:0 0 14px;box-sizing:border-box;cursor:pointer;text-align:center;font-family:monospace">${_tr('Pulsar para capturar combinación')}</button>
-            <div class="bk-dialog-btns"><button class="bk-dbtn cancel" id="cs-c">${t('cancel')}</button><button class="bk-dbtn confirm" id="cs-o">${t('save')}</button></div></div>`;
-        document.body.appendChild(ov);
-        let combo='';
-        const btn=ov.querySelector('#cs-combo');
-        const onDlgKey=e=>{
-            e.preventDefault();e.stopPropagation();
-            if(e.key==='Escape'){btn.textContent=combo||_tr('Pulsar para capturar combinación');document.removeEventListener('keydown',onDlgKey,true);return;}
-            const cmb=comboFrom(e);
-            if(!cmb)return;
-            combo=cmb;btn.textContent=cmb;
-            document.removeEventListener('keydown',onDlgKey,true);
-        };
-        btn.addEventListener('click',()=>{
-            btn.textContent=_tr('Pulsa la combinación…');
-            document.addEventListener('keydown',onDlgKey,true);
-        });
-        const closeDlg=()=>{document.removeEventListener('keydown',onDlgKey,true);ov.remove();};
-        ov.querySelector('#cs-c').onclick=closeDlg;
-        ov.addEventListener('click',e=>{if(e.target===ov)closeDlg();});
-        ov.querySelector('#cs-o').onclick=async()=>{
-            const name=ov.querySelector('#cs-name').value.trim();
-            const cmd=ov.querySelector('#cs-cmd').value.trim();
-            if(!name||!cmd||!combo){toast(_tr('Completa nombre, comando y combinación'),'ℹ');return;}
-            try{
-                await tauriInvoke('create_custom_shortcut',{name,command:cmd,combo});
-                closeDlg();toast(_tr('Atajo creado'));renderShortcutsPage(c);
-            }catch(e){toast(_tr('Error al aplicar')+': '+e,'❌');}
-        };
-    });
+// ── Opciones avanzadas de energía ──────────────────────────────────────
+export async function renderEnergyAdvanced(c){
+return desktop.lockscreen(c);
 }
 
-// ── Opciones avanzadas de energía (powerdevilrc) ───────────────────────
-export async function renderPowerAdvanced(c){
-    const title=_tr('Opciones avanzadas de energía');
-    c.innerHTML=renderHeader(title)+renderSkeleton(3);
+// ── Pantallas externas ─────────────────────────────────────────────────
 
-    // kreadconfig6/kwriteconfig6 sobre powerdevilrc (grupos anidados AC/Battery)
-    const rcRead=async(groups,key,def='')=>{
-        try{
-            const args=['--file','powerdevilrc'];groups.forEach(g=>args.push('--group',g));args.push('--key',key,'--default',def);
-            const r=JSON.parse(await tauriInvoke('run_command',{cmd:'kreadconfig6',args}));
-            return (r.output||'').trim();
-        }catch(e){return def;}
-    };
-    const rcWrite=async(groups,key,val)=>{
-        const args=['--file','powerdevilrc'];groups.forEach(g=>args.push('--group',g));args.push('--key',key,String(val));
-        await tauriInvoke('run_command',{cmd:'kwriteconfig6',args}).catch(()=>{});
-    };
-    const reload=async()=>{
-        await tauriInvoke('run_command',{cmd:'qdbus6',args:['org.kde.Solid.PowerManagement','/org/kde/Solid/PowerManagement','org.kde.Solid.PowerManagement.reparseConfiguration']}).catch(()=>{});
-    };
-
-    // powerdevil action codes: 0 nada · 1 suspender · 8 apagar · 32 bloquear · 64 apagar pantalla
-    const LID_OPTS=[
-        {val:'1',label:_tr('Suspender')},
-        {val:'64',label:_tr('Apagar la pantalla')},
-        {val:'32',label:_tr('Bloquear')},
-        {val:'8',label:_tr('Apagar el equipo')},
-        {val:'0',label:_tr('No hacer nada')},
-    ];
-    const CRIT_OPTS=[
-        {val:'1',label:_tr('Suspender')},
-        {val:'2',label:_tr('Hibernar')},
-        {val:'8',label:_tr('Apagar el equipo')},
-        {val:'0',label:_tr('No hacer nada')},
-    ];
-    const SUSP_MIN=[{val:'0',label:_tr('Nunca')},{val:'15',label:'15 min'},{val:'30',label:'30 min'},{val:'60',label:'1 h'},{val:'120',label:'2 h'}];
-    const OFF_MIN=[{val:'0',label:_tr('Nunca')},{val:'5',label:'5 min'},{val:'10',label:'10 min'},{val:'15',label:'15 min'},{val:'30',label:'30 min'}];
-    const lbl=(opts,v)=>(opts.find(o=>o.val===String(v))||{}).label||String(v);
-
-    const[lidBat,lidAC,suspBat,suspAC,offBat,offAC,critAct,critLvl]=await Promise.all([
-        rcRead(['Battery','SuspendAndShutdown'],'LidAction','1'),
-        rcRead(['AC','SuspendAndShutdown'],'LidAction','1'),
-        rcRead(['Battery','SuspendAndShutdown'],'AutoSuspendIdleTimeoutSec','900'),
-        rcRead(['AC','SuspendAndShutdown'],'AutoSuspendIdleTimeoutSec','0'),
-        rcRead(['Battery','Display'],'TurnOffDisplayIdleTimeoutSec','600'),
-        rcRead(['AC','Display'],'TurnOffDisplayIdleTimeoutSec','0'),
-        rcRead(['BatteryManagement'],'BatteryCriticalAction','1'),
-        rcRead(['BatteryManagement'],'BatteryCriticalLevel','5'),
-    ]);
-    const secToMin=s=>{const n=parseInt(s)||0;return n<=0?'0':String(Math.round(n/60));};
-    const state={
-        lidBat:String(parseInt(lidBat)||0),lidAC:String(parseInt(lidAC)||0),
-        suspBat:secToMin(suspBat),suspAC:secToMin(suspAC),
-        offBat:secToMin(offBat),offAC:secToMin(offAC),
-        critAct:String(parseInt(critAct)||0),critLvl:String(parseInt(critLvl)||5),
-    };
-
-    const selRow=(id,label,valueLabel)=>`<div class="detail-item" style="cursor:pointer" id="${id}">
-        <span class="dt">${label}</span>
-        <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="${id}-l">${valueLabel}</span>${chevron()}</div>
-    </div>`;
-
-    let h=renderHeader(title);
-    h+=renderSection(_tr('Con batería'));
-    h+=renderCard([
-        selRow('pa-lid-bat',_tr('Al cerrar la tapa'),lbl(LID_OPTS,state.lidBat)),
-        selRow('pa-susp-bat',_tr('Suspender tras inactividad'),lbl(SUSP_MIN,state.suspBat)),
-        selRow('pa-off-bat',_tr('Apagar pantalla tras'),lbl(OFF_MIN,state.offBat)),
-    ]);
-    h+=renderSection(_tr('Enchufado'));
-    h+=renderCard([
-        selRow('pa-lid-ac',_tr('Al cerrar la tapa'),lbl(LID_OPTS,state.lidAC)),
-        selRow('pa-susp-ac',_tr('Suspender tras inactividad'),lbl(SUSP_MIN,state.suspAC)),
-        selRow('pa-off-ac',_tr('Apagar pantalla tras'),lbl(OFF_MIN,state.offAC)),
-    ]);
-    h+=renderSection(_tr('Batería crítica'));
-    h+=renderCard([
-        selRow('pa-crit-act',_tr('Acción con batería crítica'),lbl(CRIT_OPTS,state.critAct)),
-        selRow('pa-crit-lvl',_tr('Nivel crítico'),state.critLvl+'%'),
-    ]);
-    c.innerHTML=h;
-
-    const _setLbl=(id,txt)=>{const e=document.getElementById(id+'-l');if(e)e.textContent=txt;};
-    const wire=(id,opts,cur,onPick)=>{
-        document.getElementById(id)?.addEventListener('click',e=>{
-            popoverSelect(e.currentTarget,{options:opts,current:cur(),onSelect:async v=>{
-                await onPick(String(v));await reload();_setLbl(id,lbl(opts,v));toast(_tr('Guardado'));
-            }});
-        });
-    };
-    wire('pa-lid-bat',LID_OPTS,()=>state.lidBat,async v=>{state.lidBat=v;await rcWrite(['Battery','SuspendAndShutdown'],'LidAction',v);});
-    wire('pa-lid-ac',LID_OPTS,()=>state.lidAC,async v=>{state.lidAC=v;await rcWrite(['AC','SuspendAndShutdown'],'LidAction',v);});
-    wire('pa-susp-bat',SUSP_MIN,()=>state.suspBat,async v=>{
-        state.suspBat=v;
-        await rcWrite(['Battery','SuspendAndShutdown'],'AutoSuspendAction',v==='0'?'0':'1');
-        if(v!=='0')await rcWrite(['Battery','SuspendAndShutdown'],'AutoSuspendIdleTimeoutSec',parseInt(v)*60);
-    });
-    wire('pa-susp-ac',SUSP_MIN,()=>state.suspAC,async v=>{
-        state.suspAC=v;
-        await rcWrite(['AC','SuspendAndShutdown'],'AutoSuspendAction',v==='0'?'0':'1');
-        if(v!=='0')await rcWrite(['AC','SuspendAndShutdown'],'AutoSuspendIdleTimeoutSec',parseInt(v)*60);
-    });
-    wire('pa-off-bat',OFF_MIN,()=>state.offBat,async v=>{
-        state.offBat=v;
-        await rcWrite(['Battery','Display'],'TurnOffDisplayWhenIdle',v==='0'?'false':'true');
-        if(v!=='0')await rcWrite(['Battery','Display'],'TurnOffDisplayIdleTimeoutSec',parseInt(v)*60);
-    });
-    wire('pa-off-ac',OFF_MIN,()=>state.offAC,async v=>{
-        state.offAC=v;
-        await rcWrite(['AC','Display'],'TurnOffDisplayWhenIdle',v==='0'?'false':'true');
-        if(v!=='0')await rcWrite(['AC','Display'],'TurnOffDisplayIdleTimeoutSec',parseInt(v)*60);
-    });
-    wire('pa-crit-act',CRIT_OPTS,()=>state.critAct,async v=>{state.critAct=v;await rcWrite(['BatteryManagement'],'BatteryCriticalAction',v);});
-    const LVL_OPTS=[3,5,7,10].map(n=>({val:String(n),label:n+'%'}));
-    wire('pa-crit-lvl',LVL_OPTS,()=>state.critLvl,async v=>{state.critLvl=v;await rcWrite(['BatteryManagement'],'BatteryCriticalLevel',v);});
-}
-
-// ── Pantallas externas (kscreen-doctor) ────────────────────────────────
-export async function renderExternalDisplays(c){
-    // En sesión BookOS manda el compositor; kscreen-doctor no se llama siquiera.
-    if(await bookosDesktopReady())return renderPantallasBookOS(c);
-    const title=_tr('Pantallas externas');
-    c.innerHTML=renderHeader(title)+renderSkeleton(2);
-
-    let cfg=null;
-    try{cfg=JSON.parse(await tauriInvoke('kscreen_get'));}catch(e){}
-    const outputs=(cfg?.outputs||[]).filter(o=>o.connected);
-    const isInternal=o=>/^(eDP|LVDS|DSI)/i.test(o.name||'');
-    const internal=outputs.find(isInternal)||outputs[0];
-    const externals=outputs.filter(o=>o!==internal);
-
-    const apply=async(args)=>{
-        try{
-            const r=JSON.parse(await tauriInvoke('kscreen_set',{args}));
-            if(!r.ok){toast(_tr('Error al aplicar')+(r.error?': '+r.error:''),'❌');return false;}
-            return true;
-        }catch(e){toast(_tr('Error al aplicar'),'❌');return false;}
-    };
-    const rerender=()=>setTimeout(()=>renderExternalDisplays(c),400);
-
-    let h=renderHeader(title);
-    if(!externals.length){
-        h+=renderCard([
-            `<div class="detail-item"><span class="dt">${_tr('No hay pantallas externas conectadas')}</span><span class="ds">${_tr('Conecta un monitor por HDMI o USB-C y aparecerá aquí')}</span></div>`,
-        ]);
-    }
-    // Logical size (physical / scale) — kscreen positions use logical coords on Wayland
-    const logicalW=o=>Math.round(((o?.size?.width)||1920)/((o?.scale)||1));
-    const logicalH=o=>Math.round(((o?.size?.height)||1080)/((o?.scale)||1));
-    const intW=logicalW(internal),intH=logicalH(internal);
-
-    const listRows=(o,idx)=>{
-        const p=`xd${idx}`;
-        const rows=[];
-        rows.push(renderRowItem(esc(o.name),o.enabled?_tr('Activada'):_tr('Desactivada'),renderToggle(`${p}-en`,o.enabled)));
-        if(o.enabled){
-            const cur=(o.modes||[]).find(m=>m.id===o.currentModeId);
-            const curRes=(cur?.name||'').split('@')[0],curHz=(cur?.name||'').split('@')[1]||'';
-            rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-mode">
-                <span class="dt">${_tr('Resolución')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${esc(curRes)}</span>${chevron()}</div>
-            </div>`);
-            // Tasas de refresco disponibles para la resolución actual
-            const hzOpts=[...new Set((o.modes||[]).filter(m=>m.name.startsWith(curRes+'@')).map(m=>m.name.split('@')[1]))];
-            if(hzOpts.length>1)rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-hz">
-                <span class="dt">${_tr('Tasa de refresco')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${esc(curHz)} Hz</span>${chevron()}</div>
-            </div>`);
-            rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-scale">
-                <span class="dt">${_tr('Escala')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${Math.round((o.scale||1)*100)}%</span>${chevron()}</div>
-            </div>`);
-            if(o!==internal){
-                const dx=(o.pos?.x||0)-(internal?.pos?.x||0),dy=(o.pos?.y||0)-(internal?.pos?.y||0);
-                const posLabel=(dx===0&&dy===0)?_tr('Duplicada')
-                    :(Math.abs(dy)>Math.abs(dx))?(dy<0?_tr('Arriba'):_tr('Abajo'))
-                    :(dx<0?_tr('A la izquierda'):_tr('A la derecha'));
-                rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-pos">
-                    <span class="dt">${_tr('Posición')}</span>
-                    <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${posLabel}</span>${chevron()}</div>
-                </div>`);
-            }
-            if(o.priority!==1)rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-primary"><span class="dt" style="color:var(--blue)">${_tr('Establecer como principal')}</span></div>`);
-        }
-        return rows;
-    };
-
-    const all=[internal,...externals].filter(Boolean);
-    all.forEach((o,idx)=>{
-        h+=renderSection(o===internal?_tr('Pantalla del portátil'):_tr('Pantalla externa'));
-        h+=renderCard(listRows(o,idx));
-    });
-    c.innerHTML=h;
-
-    all.forEach((o,idx)=>{
-        const p=`xd${idx}`;
-        setupToggle(`${p}-en`,async a=>{
-            // Never disable the last enabled output
-            const enabledCount=all.filter(x=>x.enabled).length;
-            if(!a&&enabledCount<=1){toast(_tr('No puedes desactivar la única pantalla'),'❌');rerender();return;}
-            if(await apply([`output.${o.name}.${a?'enable':'disable'}`]))rerender();
-        });
-        document.getElementById(`${p}-mode`)?.addEventListener('click',e=>{
-            const modes=(o.modes||[]);
-            const curName=(modes.find(m=>m.id===o.currentModeId)||{}).name||'';
-            const curHz=curName.split('@')[1]||'';
-            const uniqueRes=[...new Set(modes.map(m=>m.name.split('@')[0]))];
-            popoverSelect(e.currentTarget,{
-                title:_tr('Resolución'),
-                options:uniqueRes.map(r=>({val:r,label:r})),
-                current:curName.split('@')[0],
-                onSelect:async v=>{
-                    // conservar Hz actual si existe para la nueva resolución
-                    const target=modes.find(m=>m.name===`${v}@${curHz}`)||modes.find(m=>m.name.startsWith(v+'@'))||{name:v};
-                    if(await apply([`output.${o.name}.mode.${target.name}`]))rerender();
-                },
-            });
-        });
-        document.getElementById(`${p}-hz`)?.addEventListener('click',e=>{
-            const modes=(o.modes||[]);
-            const curName=(modes.find(m=>m.id===o.currentModeId)||{}).name||'';
-            const curRes=curName.split('@')[0];
-            const hzs=[...new Set(modes.filter(m=>m.name.startsWith(curRes+'@')).map(m=>m.name.split('@')[1]))];
-            popoverSelect(e.currentTarget,{
-                title:_tr('Tasa de refresco'),
-                options:hzs.map(hz=>({val:hz,label:hz+' Hz'})),
-                current:curName.split('@')[1]||'',
-                onSelect:async v=>{if(await apply([`output.${o.name}.mode.${curRes}@${v}`]))rerender();},
-            });
-        });
-        document.getElementById(`${p}-scale`)?.addEventListener('click',e=>{
-            popoverSelect(e.currentTarget,{
-                title:_tr('Escala'),
-                options:[100,125,150,175,200].map(s=>({val:s,label:s+'%'})),
-                current:Math.round((o.scale||1)*100),
-                onSelect:async v=>{if(await apply([`output.${o.name}.scale.${v/100}`]))rerender();},
-            });
-        });
-        document.getElementById(`${p}-pos`)?.addEventListener('click',e=>{
-            popoverSelect(e.currentTarget,{
-                title:_tr('Posición'),
-                options:[
-                    {val:'right',label:_tr('A la derecha')},
-                    {val:'left',label:_tr('A la izquierda')},
-                    {val:'above',label:_tr('Arriba')},
-                    {val:'below',label:_tr('Abajo')},
-                    {val:'mirror',label:_tr('Duplicar pantalla')},
-                ],
-                current:'',
-                onSelect:async v=>{
-                    const oW=logicalW(o),oH=logicalH(o);
-                    const args=v==='mirror'?[`output.${o.name}.position.${internal?.pos?.x||0},${internal?.pos?.y||0}`]
-                        :v==='left'?[`output.${o.name}.position.0,0`,`output.${internal.name}.position.${oW},0`]
-                        :v==='above'?[`output.${o.name}.position.0,0`,`output.${internal.name}.position.0,${oH}`]
-                        :v==='below'?[`output.${internal.name}.position.0,0`,`output.${o.name}.position.0,${intH}`]
-                        :[`output.${internal.name}.position.0,0`,`output.${o.name}.position.${intW},0`];
-                    if(await apply(args))rerender();
-                },
-            });
-        });
-        document.getElementById(`${p}-primary`)?.addEventListener('click',async()=>{
-            if(await apply([`output.${o.name}.priority.1`]))rerender();
-        });
-    });
-}
 
 
 // ── Pantallas, gestionadas por BookOS Desktop ───────────────────────────
-// Mismo diseño que la página de KScreen —las mismas tarjetas, filas y
+// Mismo diseño que las demás pantallas: tarjetas, filas y
 // popovers— pero hablando con el compositor. Lo que cambia es que aquí un
 // fallo se ve: cada acción enseña «aplicando…» y termina en aplicado o en el
 // error que devolvió el compositor, nunca en un éxito supuesto.
@@ -8130,526 +5726,39 @@ function _bkPosLabel(o,principal){
     return dx<0?_tr('A la izquierda'):_tr('A la derecha');
 }
 
-// ── Touchpad y ratón (KWin libinput vía DBus) — página del sidebar ─────
+// ── Touchpad y ratón — página del sidebar ──────────────────────────────
 export async function renderTouchpadMouse(c){
-    const title=_tr('Touchpad y ratón');
-    c.innerHTML=renderHeader(title)+renderSkeleton(2);
-
-    let devices=[];
-    try{devices=JSON.parse(await tauriInvoke('list_input_devices'));}catch(e){}
-    const touchpads=devices.filter(d=>d.touchpad);
-    const mice=devices.filter(d=>!d.touchpad);
-
-    let h=renderHeader(title);
-    let idx=0;
-    const deviceRows=(d,isTouchpad)=>{
-        const p=`ind${idx++}`;
-        const rows=[];
-        rows.push(renderRowItem(_tr('Activado'),'',renderToggle(`${p}-enabled`,d.enabled)));
-        if(isTouchpad)rows.push(renderRowItem(_tr('Tocar para hacer clic'),_tr('Un toque equivale a clic izquierdo'),renderToggle(`${p}-tap`,d.tap_to_click)));
-        rows.push(renderRowItem(_tr('Desplazamiento natural'),_tr('El contenido sigue el movimiento de los dedos'),renderToggle(`${p}-nat`,d.natural_scroll)));
-        if(isTouchpad&&d.supports_disable_while_typing)rows.push(renderRowItem(_tr('Desactivar al escribir'),'',renderToggle(`${p}-dwt`,d.disable_while_typing)));
-        rows.push(renderRowItem(_tr('Botones para zurdos'),_tr('Intercambia clic izquierdo y derecho'),renderToggle(`${p}-left`,d.left_handed)));
-        // Aceleración: -1..1 → slider 0..100
-        const accelPct=Math.round((d.pointer_acceleration+1)*50);
-        rows.push(`<div class="detail-item"><span class="dt">${_tr('Velocidad del puntero')}</span>${renderSlider(`${p}-accel`,accelPct,0,100)}</div>`);
-        // Scroll: factor 0.2..3.0 → slider 10..150 (50 = 1.0x)
-        const scrollPct=Math.max(10,Math.min(150,Math.round((d.scroll_factor||1)*50)));
-        rows.push(`<div class="detail-item"><span class="dt">${_tr('Velocidad de desplazamiento')}</span>${renderSlider(`${p}-scroll`,scrollPct,10,150)}</div>`);
-        rows.push(renderRowItem(_tr('Aceleración adaptativa'),_tr('Desactívala para precisión constante (gaming)'),renderToggle(`${p}-adaptive`,!d.accel_profile_flat)));
-        if(isTouchpad&&d.supports_click_methods)
-            rows.push(renderRowItem(_tr('Clic derecho con dos dedos'),_tr('Desactivado: clic derecho en la esquina inferior derecha'),renderToggle(`${p}-clickf`,d.click_method_clickfinger)));
-        return {p,rows};
-    };
-
-    const wired=[];
-    h+=renderSection(_tr('Touchpad'));
-    if(!touchpads.length){
-        h+=renderCard([`<div class="detail-item"><span class="dt">${_tr('No se detectó ningún touchpad')}</span></div>`]);
-    }else touchpads.forEach(d=>{
-        if(touchpads.length>1)h+=renderSection(esc(d.name));
-        const r=deviceRows(d,true);wired.push({d,p:r.p,isTouchpad:true});h+=renderCard(r.rows);
-    });
-    h+=renderSection(_tr('Ratón'));
-    if(!mice.length){
-        h+=renderCard([`<div class="detail-item"><span class="dt">${_tr('No se detectó ningún ratón')}</span><span class="ds">${_tr('Conecta un ratón USB o Bluetooth')}</span></div>`]);
-    }else mice.forEach(d=>{
-        if(mice.length>1)h+=renderSection(esc(d.name));
-        const r=deviceRows(d,false);wired.push({d,p:r.p,isTouchpad:false});h+=renderCard(r.rows);
-    });
-    c.innerHTML=h;
-
-    const setProp=async(sys,prop,value)=>{
-        try{await tauriInvoke('set_input_device_prop',{sysName:sys,prop,value:String(value)});}
-        catch(e){toast(_tr('Error al aplicar'),'❌');}
-    };
-    wired.forEach(({d,p,isTouchpad})=>{
-        setupToggle(`${p}-enabled`,a=>setProp(d.sys_name,'enabled',a));
-        if(isTouchpad)setupToggle(`${p}-tap`,a=>setProp(d.sys_name,'tapToClick',a));
-        setupToggle(`${p}-nat`,a=>setProp(d.sys_name,'naturalScroll',a));
-        if(isTouchpad&&d.supports_disable_while_typing)setupToggle(`${p}-dwt`,a=>setProp(d.sys_name,'disableWhileTyping',a));
-        setupToggle(`${p}-left`,a=>setProp(d.sys_name,'leftHanded',a));
-        setupSlider(`${p}-accel`,v=>{const accel=(v/50)-1;setProp(d.sys_name,'pointerAcceleration',accel.toFixed(2));});
-        setupSlider(`${p}-scroll`,v=>{setProp(d.sys_name,'scrollFactor',(v/50).toFixed(2));});
-        setupToggle(`${p}-adaptive`,a=>setProp(d.sys_name,a?'pointerAccelerationProfileAdaptive':'pointerAccelerationProfileFlat','true'));
-        if(isTouchpad&&d.supports_click_methods)
-            setupToggle(`${p}-clickf`,a=>setProp(d.sys_name,a?'clickMethodClickfinger':'clickMethodAreas','true'));
-    });
+return desktop.input(c);
 }
 
 // ── Teclado — página del sidebar ───────────────────────────────────────
 export async function renderTeclado(c){
-    const title=_tr('Teclado');
-    c.innerHTML=renderHeader(title)+renderSkeleton(2);
-
-    let loc={locale:'',keymap:''},keymaps=[];
-    const rcRead=async(key,def)=>{
-        try{
-            const r=JSON.parse(await tauriInvoke('run_command',{cmd:'kreadconfig6',args:['--file','kcminputrc','--group','Keyboard','--key',key,'--default',def]}));
-            return parseInt((r.output||'').trim())||parseInt(def);
-        }catch(e){return parseInt(def);}
-    };
-    let repeatDelay=600,repeatRate=25,keymapNames=[];
-    try{
-        [loc,keymaps,repeatDelay,repeatRate,keymapNames]=await Promise.all([
-            tauriInvoke('get_locale_info').then(JSON.parse).catch(()=>({locale:'',keymap:''})),
-            tauriInvoke('get_available_keymaps').then(JSON.parse).catch(()=>[]),
-            rcRead('RepeatDelay','600'),
-            rcRead('RepeatRate','25'),
-            tauriInvoke('list_keymaps_pretty').then(JSON.parse).catch(()=>[]),
-        ]);
-    }catch(e){}
-    // "es" → "Spanish (es)"; unknown codes stay as-is
-    const _kmMap={};keymapNames.forEach(k=>{_kmMap[k.id]=k.name;});
-    const prettyKm=code=>_kmMap[code]?`${_kmMap[code]} (${code})`:code;
-
-    const DELAY_OPTS=[200,400,600,800,1000].map(v=>({val:String(v),label:v+' ms'}));
-    const RATE_OPTS=[15,25,40,60].map(v=>({val:String(v),label:v+'/s'}));
-    const lbl=(opts,v)=>(opts.find(o=>o.val===String(v))||{}).label||String(v);
-
-    let h=renderHeader(title);
-    h+=renderSection(_tr('Distribución'));
-    h+=renderCard([
-        `<div class="detail-item detail-item-row" id="btn-key" style="cursor:pointer">
-            <div class="detail-texts"><span class="dt">${t('label_keyboard_layout')}</span><span class="ds" id="key-cur">${esc(loc.keymap?prettyKm(loc.keymap):t('default'))}</span></div>
-            <div style="color:var(--tx2);font-size:18px">›</div>
-        </div>`,
-        `<div id="key-list" style="display:none;padding:0 20px 16px"><div class="res-list" style="margin-bottom:0">
-            ${keymaps.map(k=>`<div class="res-item ${k===loc.keymap?'active':''}" data-key="${esc(k)}"><span>${esc(prettyKm(k))}</span></div>`).join('')}
-        </div></div>`,
-    ]);
-    h+=renderSection(_tr('Atajos'));
-    h+=renderCard([
-        `<div class="detail-item detail-item-row" style="cursor:pointer" id="open-kde-shortcuts">
-            <div class="detail-texts"><span class="dt">${_tr('Atajos de teclado')}</span><span class="ds">${_tr('Ver y cambiar los atajos del sistema')}</span></div>
-            ${chevron()}
-        </div>`,
-    ]);
-    h+=renderSection(_tr('Repetición de teclas'));
-    h+=renderCard([
-        `<div class="detail-item" style="cursor:pointer" id="kb-delay">
-            <span class="dt">${_tr('Retardo antes de repetir')}</span>
-            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="kb-delay-l">${repeatDelay} ms</span>${chevron()}</div>
-        </div>`,
-        `<div class="detail-item" style="cursor:pointer" id="kb-rate">
-            <span class="dt">${_tr('Velocidad de repetición')}</span>
-            <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px" id="kb-rate-l">${repeatRate}/s</span>${chevron()}</div>
-        </div>`,
-    ]);
-    c.innerHTML=h;
-
-    document.getElementById('btn-key')?.addEventListener('click',()=>{const el=document.getElementById('key-list');el.style.display=el.style.display==='none'?'block':'none';});
-    document.querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',async()=>{
-        try{
-            await tauriInvoke('set_keymap',{layout:b.dataset.key});
-            document.querySelectorAll('[data-key]').forEach(x=>x.classList.remove('active'));
-            b.classList.add('active');
-            const cur=document.getElementById('key-cur');if(cur)cur.textContent=prettyKm(b.dataset.key);
-            toast(t('tst_keyboard_changed'));
-        }catch(e){}
-    }));
-    document.getElementById('open-kde-shortcuts')?.addEventListener('click',()=>{
-        if(window.pushSubNav)window.pushSubNav(()=>renderTeclado(c));
-        window.clearPageIntervals?.();
-        renderShortcutsPage(c);
-    });
-    const rcWrite=async(key,val)=>{
-        await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','kcminputrc','--group','Keyboard','--key',key,String(val)]}).catch(()=>{});
-    };
-    document.getElementById('kb-delay')?.addEventListener('click',e=>{
-        popoverSelect(e.currentTarget,{options:DELAY_OPTS,current:String(repeatDelay),onSelect:async v=>{
-            repeatDelay=parseInt(v);await rcWrite('RepeatDelay',v);
-            const l=document.getElementById('kb-delay-l');if(l)l.textContent=v+' ms';
-            toast(_tr('Guardado — se aplica al iniciar sesión'));
-        }});
-    });
-    document.getElementById('kb-rate')?.addEventListener('click',e=>{
-        popoverSelect(e.currentTarget,{options:RATE_OPTS,current:String(repeatRate),onSelect:async v=>{
-            repeatRate=parseInt(v);await rcWrite('RepeatRate',v);
-            const l=document.getElementById('kb-rate-l');if(l)l.textContent=v+'/s';
-            toast(_tr('Guardado — se aplica al iniciar sesión'));
-        }});
-    });
-}
-
-// ── Book AI ────────────────────────────────────────────────────────────
-export async function renderAI(c){
-    c.innerHTML=renderHeader(t('hdr_ai'))+renderSkeleton(1);
-    let h=renderHeader(t('hdr_ai'));
-    h+=`<div id="sem-search-card"></div>`;
-    c.innerHTML=h;
-
-    const semCard=document.getElementById('sem-search-card');
-    let semPollTimer=null;
-
-    // Spinner keyframes una vez
-    if(!document.getElementById('sem-spin-style')){
-        const st2=document.createElement('style');
-        st2.id='sem-spin-style';
-        st2.textContent='@keyframes spin{to{transform:rotate(360deg)}}';
-        document.head.appendChild(st2);
-    }
-
-    const semRender=async()=>{
-        let st;
-        try{ st=JSON.parse(await tauriInvoke('search_status')); }
-        catch(e){ semCard.innerHTML=renderCard([renderInfoItem('Error','No se puede consultar el estado del servicio.')]); return; }
-        const inst=st.installed, state=st.install_state||'';
-        const active=st.watcher==='active';
-        const busy=(state==='installing'||state==='indexing');
-
-        let sub;
-        if(state==='installing')      sub='Instalando… descargando modelo (~500 MB)';
-        else if(state==='indexing')   sub='Indexando tus documentos…';
-        else if(state==='failed')     sub='Error en la instalación. Toca para reintentar.';
-        else if(!inst)                sub='Busca archivos por significado. Modelo local (~500 MB)';
-        else if(active)               sub=`${st.count} fragmentos indexados`;
-        else                          sub=`${st.count} fragmentos · pausado`;
-
-        const mainToggleOn = inst && active;
-        const rows=[
-            renderRowItem('Búsqueda semántica',
-                `<span style="${state==='failed'?'color:var(--red)':''}">${sub}</span>`,
-                busy
-                    ? `<div style="width:20px;height:20px;border:2px solid var(--brd);border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite"></div>`
-                    : renderToggle('sem-toggle', mainToggleOn)
-            )
-        ];
-
-        if(inst && !busy){
-            rows.push(
-                `<div id="sem-reindex-row" class="detail-item detail-item-row" style="cursor:pointer"><div class="detail-texts"><span class="dt">Reindexar ahora</span><span class="ds">Procesa todos los archivos de nuevo</span></div><span style="color:var(--tx2)">${SVGI.chevronR}</span></div>`,
-                `<div id="sem-uninstall-row" class="detail-item detail-item-row" style="cursor:pointer"><div class="detail-texts"><span class="dt" style="color:var(--red)">Desinstalar</span><span class="ds">Borra el índice y el modelo</span></div><span style="color:var(--tx2)">${SVGI.chevronR}</span></div>`
-            );
-        }
-
-        let body=renderCard(rows);
-
-        if(inst && !busy){
-            body+=renderSection(t('sec_search_test'));
-            body+=`<div style="background:var(--card);border-radius:14px;padding:14px">
-                <input id="sem-q" placeholder="Escribe para buscar…" style="width:100%;padding:10px 14px;border-radius:10px;border:none;background:var(--sbg);color:var(--tx);font-size:14px;outline:none">
-                <div id="sem-results" style="margin-top:10px"></div>
-            </div>`;
-        }
-        semCard.innerHTML=body;
-
-        setupToggle('sem-toggle', async a=>{
-            if(!inst){
-                await tauriInvoke('search_install');
-                semRender();
-            } else {
-                await tauriInvoke('search_toggle',{enable:a});
-                semRender();
-            }
-        });
-        const reidx=document.getElementById('sem-reindex-row');
-        if(reidx) reidx.onclick=async()=>{ toast('Reindexando en segundo plano…'); await tauriInvoke('search_reindex'); };
-        const unCh=document.getElementById('sem-uninstall-row');
-        if(unCh) unCh.onclick=()=>{
-            showDialog(_tr('Desinstalar búsqueda semántica'),
-                _tr('Se borrará el modelo, el índice y las dependencias (~500 MB).'),
-                {confirmText:_tr('Desinstalar'),confirmClass:'danger',onConfirm:async()=>{
-                    await tauriInvoke('search_uninstall');
-                    semRender();
-                }});
-        };
-
-        const q=document.getElementById('sem-q');
-        const res=document.getElementById('sem-results');
-        if(q && res){
-            let dbTimer=null;
-            q.oninput=()=>{
-                clearTimeout(dbTimer);
-                const v=q.value.trim();
-                if(!v){ res.innerHTML=''; return; }
-                dbTimer=setTimeout(async()=>{
-                    const r=JSON.parse(await tauriInvoke('search_query',{query:v}));
-                    const items=(r.results||[]).slice(0,6).map(x=>{
-                        const name=(x.ruta||'').split('/').pop();
-                        const dir=(x.ruta||'').split('/').slice(0,-1).join('/');
-                        return `<div style="padding:10px 0;border-bottom:1px solid var(--div);display:flex;align-items:center;gap:12px">
-                            <div style="flex:1;min-width:0">
-                                <div style="font-weight:500;font-size:14px;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
-                                <div style="font-size:12px;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(dir)}</div>
-                            </div>
-                            <span style="font-size:11px;color:var(--blue);font-weight:600">${Math.round((x.score||0)*100)}%</span>
-                        </div>`;
-                    }).join('');
-                    res.innerHTML=items||`<div style="color:var(--tx2);padding:10px 0;font-size:13px">Sin resultados.</div>`;
-                }, 300);
-            };
-        }
-
-        clearTimeout(semPollTimer);
-        if(busy){ semPollTimer=setTimeout(semRender, 2500); }
-    };
-    semRender();
-}
-
-// ── Ubicación ─────────────────────────────────────────────────────────────
-export async function renderUbicacion(c){
-    c.innerHTML=renderHeader(t('hdr_location'))+renderSkeleton(2);
-    let locEnabled=false;
-    try{const r=JSON.parse(await tauriInvoke('get_location_status'));locEnabled=!!r.enabled;}catch(e){}
-    const accuracy=await getSetting('loc_accuracy','high');
-    let h=renderHeader(t('hdr_location'));
-    h+=renderCard([
-        renderRowItem('Servicios de ubicación',locEnabled?'<span style="color:var(--green)">Activos</span>':'Desactivados',renderToggle('loc-svc',locEnabled)),
-    ]);
-    h+=renderSection(t('sec_precision'));
-    const accOpts=[['high','Alta precisión','GPS, WiFi y redes móviles'],['medium','Ahorro de batería','Solo WiFi y redes'],['device','Solo dispositivo','Sin conexión a internet']];
-    h+=renderCard(accOpts.map(([k,n,d])=>`<div class="detail-item detail-item-row" style="cursor:pointer" data-acc="${k}">
-        <div style="flex:1"><span class="dt">${n}</span><span class="ds">${d}</span></div>
-        <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${accuracy===k?'var(--blue)':'var(--brd)'};background:${accuracy===k?'var(--blue)':'transparent'};flex-shrink:0;display:flex;align-items:center;justify-content:center">
-            ${accuracy===k?'<div style="width:8px;height:8px;border-radius:50%;background:#fff"></div>':''}
-        </div></div>`));
-    h+=renderSection(t('sec_app_permissions'));
-    const locApps=[{name:'Firefox',icon:'firefox',perm:'always'},{name:'Thunderbird',icon:'thunderbird',perm:'ask'},{name:'KDE Connect',icon:'kdeconnect',perm:'always'},{name:'Plasma',icon:'kde',perm:'always'}];
-    h+=renderCard(locApps.map(a=>`<div class="detail-item detail-item-row">
-        <span class="dt" style="flex:1">${a.name}</span>
-        <span style="font-size:13px;color:${a.perm==='always'?'var(--green)':'var(--tx2)'}">${a.perm==='always'?'Siempre':'Preguntar'}</span>
-    </div>`));
-    h+=renderCard([renderInfoItem('Privacidad de ubicación','La ubicación exacta solo se usa para funciones que la requieran. Nunca se envía sin permiso.')]);
-    c.innerHTML=h;
-    setupToggle('loc-svc',async a=>{
-        try{await tauriInvoke('set_location_enabled',{enable:a});}catch(e){}
-        toast(a?'Ubicación activada':'Ubicación desactivada',a?'📍':'');
-    });
-    c.querySelectorAll('[data-acc]').forEach(row=>{
-        row.addEventListener('click',()=>{
-            setSetting('loc_accuracy',row.dataset.acc);
-            renderUbicacion(c);
-        });
-    });
-}
-
-// ── Seguridad y emergencia ────────────────────────────────────────────────
-export async function renderEmergencia(c){
-    c.innerHTML=renderHeader(t('hdr_emergency'))+renderSkeleton(2);
-    const medRaw=await getSetting('med_info','{}');
-    const sosEnabled=await getSetting('sos_enabled','false').then(v=>v==='true');
-    const locSos=await getSetting('sos_location','true').then(v=>v==='true');
-    let med={};try{med=JSON.parse(medRaw);}catch(e){}
-    const contactsRaw=await getSetting('emer_contacts','[]');
-    let contacts=[];try{contacts=JSON.parse(contactsRaw);}catch(e){}
-    let h=renderHeader(t('hdr_emergency'));
-    h+=renderSection(t('sec_medical_info'));
-    h+=renderCard([
-        `<div class="detail-item" style="padding:14px 20px">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-                <div><label style="font-size:12px;color:var(--tx2)">Grupo sanguíneo</label><input id="med-blood" class="about-rename-input" style="margin-top:4px" value="${esc(med.blood||'')}" placeholder="Ej. A+"></div>
-                <div><label style="font-size:12px;color:var(--tx2)">Alergias</label><input id="med-allergy" class="about-rename-input" style="margin-top:4px" value="${esc(med.allergy||'')}" placeholder="Ej. Penicilina"></div>
-                <div><label style="font-size:12px;color:var(--tx2)">Medicamentos</label><input id="med-meds" class="about-rename-input" style="margin-top:4px" value="${esc(med.meds||'')}" placeholder="Ej. Ibuprofeno"></div>
-                <div><label style="font-size:12px;color:var(--tx2)">Condiciones</label><input id="med-cond" class="about-rename-input" style="margin-top:4px" value="${esc(med.cond||'')}" placeholder="Ej. Diabetes"></div>
-            </div>
-            <button class="bk-dbtn confirm" id="med-save" style="margin-top:12px;width:100%">${_tr("Guardar")}</button>
-        </div>`
-    ]);
-    h+=renderSection(t('sec_emergency_contacts'));
-    if(contacts.length){
-        h+=renderCard(contacts.map((ct,i)=>`<div class="detail-item detail-item-row">
-            <div style="flex:1"><span class="dt">${esc(ct.name)}</span><span class="ds">${esc(ct.phone)}</span></div>
-            <button class="bk-dbtn cancel" data-del="${i}" style="font-size:12px;padding:4px 12px">Eliminar</button>
-        </div>`));
-    }
-    h+=renderCard([`<div class="detail-item" style="padding:14px 20px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div><label style="font-size:12px;color:var(--tx2)">Nombre</label><input id="ec-name" class="about-rename-input" style="margin-top:4px" placeholder="Nombre"></div>
-            <div><label style="font-size:12px;color:var(--tx2)">Teléfono</label><input id="ec-phone" class="about-rename-input" style="margin-top:4px" placeholder="+34 600 000 000"></div>
-        </div>
-        <button class="bk-dbtn confirm" id="ec-add" style="margin-top:12px;width:100%">Añadir contacto</button>
-    </div>`]);
-    h+=renderSection(t('sec_sos'));
-    h+=renderCard([
-        renderRowItem('Llamada de emergencia rápida','Pulsa el botón de encendido 3 veces',renderToggle('sos-btn',sosEnabled)),
-        renderRowItem('Compartir ubicación','Envía tu posición al contacto de emergencia',renderToggle('sos-loc',locSos)),
-    ]);
-    c.innerHTML=h;
-    document.getElementById('med-save')?.addEventListener('click',()=>{
-        const blood=document.getElementById('med-blood')?.value||'';
-        const allergy=document.getElementById('med-allergy')?.value||'';
-        const meds=document.getElementById('med-meds')?.value||'';
-        const cond=document.getElementById('med-cond')?.value||'';
-        setSetting('med_info',JSON.stringify({blood,allergy,meds,cond}));
-        toast('Información médica guardada','✓');
-    });
-    document.getElementById('ec-add')?.addEventListener('click',()=>{
-        const name=document.getElementById('ec-name')?.value?.trim();
-        const phone=document.getElementById('ec-phone')?.value?.trim();
-        if(!name||!phone)return;
-        contacts.push({name,phone});
-        setSetting('emer_contacts',JSON.stringify(contacts));
-        renderEmergencia(c);
-    });
-    c.querySelectorAll('[data-del]').forEach(btn=>{
-        btn.addEventListener('click',()=>{
-            contacts.splice(parseInt(btn.dataset.del),1);
-            setSetting('emer_contacts',JSON.stringify(contacts));
-            renderEmergencia(c);
-        });
-    });
-    setupToggle('sos-btn',a=>setSetting('sos_enabled',a));
-    setupToggle('sos-loc',a=>setSetting('sos_location',a));
+return desktop.keyboard(c);
 }
 
 // ── Pantalla de inicio ────────────────────────────────────────────────────
 
 // BookOS: la configuración del dock vive dentro del applet icontasks del panel,
-// no en un rc suelto. Escribirla con kwriteconfig6 no la aplicaría hasta
-// reiniciar plasmashell, así que pasamos por la consola de scripts, que escribe
+// no en un archivo de configuración suelto. La API del compositor la aplica
+// en vivo, así que los cambios se reflejan sin reiniciar la sesión.
 // y recarga el applet en vivo.
-// El panel del dock es el que lleva el icontasks; `dockWidgets` recoge además
+// El panel del dock lleva sus accesos; `dockWidgets` recoge además
 // el Launchpad, que replica el mismo reposo encogido para no verse más grande.
-const DOCK_SCRIPT_HEAD=`
-var dockPanel = null;
-var dockWidgets = [];
-panels().forEach(function(p){
-    p.widgetIds.forEach(function(id){
-        var w = p.widgetById(id);
-        if (!w) { return; }
-        if (w.type === "org.kde.plasma.icontasks") {
-            if (!dockPanel) { dockPanel = p; }
-            w.currentConfigGroup = ["General"];
-            dockWidgets.push(w);
-        } else if (w.type === "com.bookos.launchpad") {
-            w.currentConfigGroup = ["General"];
-            dockWidgets.push(w);
-        }
-    });
-});
-`;
-async function dockScript(body){
-    try{
-        const r=JSON.parse(await tauriInvoke('run_command',{cmd:'qdbus6',args:[
-            'org.kde.plasmashell','/PlasmaShell','org.kde.PlasmaShell.evaluateScript',
-            DOCK_SCRIPT_HEAD+body,
-        ]}));
-        return (r.output||'').trim();
-    }catch(e){return '';}
-}
+
+
 // readConfig devuelve '' cuando la clave nunca se ha escrito -> vale el default
-const dockRead=(key,def)=>dockScript(
-    `if (dockWidgets.length) { print(String(dockWidgets[0].readConfig("${key}"))); }`)
-    .then(v=>v===''?def:v).catch(()=>def);
-const dockWrite=(key,val)=>dockScript(
-    `dockWidgets.forEach(function(w){ w.writeConfig("${key}", ${JSON.stringify(val)}); w.reloadConfig(); });`);
-// La posición del dock es del panel, no de un rc: plasmashellrc no la controla.
-const dockPosRead=()=>dockScript('if (dockPanel) { print(dockPanel.location); }')
-    .then(v=>v||'bottom').catch(()=>'bottom');
-const dockPosWrite=(loc)=>dockScript(`if (dockPanel) { dockPanel.location = "${loc}"; }`);
+
+
+// La posición del dock pertenece al panel BookOS.
+
+
 // El grosor del panel manda sobre el tamaño de los iconos del dock: es
 // "height" en el API de scripting, tanto en horizontal como en vertical.
-const dockSizeRead=()=>dockScript('if (dockPanel) { print(dockPanel.height); }')
-    .then(v=>parseInt(v)||64).catch(()=>64);
-const dockSizeWrite=(px)=>dockScript(`if (dockPanel) { dockPanel.height = ${parseInt(px)}; }`);
+
+
 
 export async function renderPantallaInicio(c){
-    c.innerHTML=renderHeader(t('hdr_homescreen'))+renderSkeleton(2);
-    const [desktopIcons,gridSnap,dockPos,iconSize,showLabels,magnifyOn,magnifyScale,dockSize]=await Promise.all([
-        getSetting('desktop_icons','true').then(v=>v==='true'),
-        getSetting('desktop_grid','true').then(v=>v==='true'),
-        dockPosRead(),
-        getSetting('icon_size','medium'),
-        getSetting('icon_labels','true').then(v=>v==='true'),
-        dockRead('magnifyEnabled','true').then(v=>v!=='false'),
-        dockRead('magnifyScale','1.2').then(v=>parseFloat(v)||1.2),
-        dockSizeRead(),
-    ]);
-    let h=renderHeader(t('hdr_homescreen'));
-    const sizes=[['small','Pequeño'],['medium','Mediano'],['large','Grande']];
-    h+=renderSection(t('sec_desktop'));
-    h+=renderCard([
-        renderRowItem('Iconos en el escritorio','Muestra iconos de archivos y apps de fondo',renderToggle('desk-icons',desktopIcons)),
-        renderRowItem('Rejilla de alineacion','Ajusta los iconos automáticamente a la cuadricula',renderToggle('desk-grid',gridSnap)),
-        renderRowItem('Etiquetas de iconos','Muestra el nombre debajo de cada icono',renderToggle('desk-labels',showLabels)),
-        `<div class="detail-item detail-item-row">
-            <div class="detail-texts"><span class="dt">Tamaño de iconos</span><span class="ds">Cambia el tamaño de los iconos en el escritorio</span></div>
-            <div class="seg-ctrl">${sizes.map(([k,l])=>`<button class="seg-btn${iconSize===k?' active':''}" data-size="${k}">${l}</button>`).join('')}</div>
-        </div>`,
-    ]);
-    h+=renderSection(_tr('Dock'));
-    const magSteps=[['1.2',_tr('Suave')],['1.35',_tr('Normal')],['1.5',_tr('Fuerte')]];
-    const magCur=magSteps.reduce((best,[k])=>
-        Math.abs(parseFloat(k)-magnifyScale)<Math.abs(parseFloat(best)-magnifyScale)?k:best,'1.2');
-    h+=renderCard([
-        renderRowItem(_tr('Efecto lupa'),
-            _tr('Los iconos crecen al pasar el cursor, estilo macOS. Al desactivarlo se quedan siempre a tamaño completo'),
-            renderToggle('dock-magnify',magnifyOn)),
-        `<div class="detail-item detail-item-row" id="dock-magnify-scale-row" style="${magnifyOn?'':'display:none'}">
-            <div class="detail-texts"><span class="dt">${_tr('Intensidad de la lupa')}</span><span class="ds">${_tr('Cuánto crece el icono bajo el cursor')}</span></div>
-            <div class="seg-ctrl">${magSteps.map(([k,l])=>`<button class="seg-btn${magCur===k?' active':''}" data-mag="${k}">${l}</button>`).join('')}</div>
-        </div>`,
-        `<div class="detail-item">
-            <div class="detail-texts"><span class="dt">${_tr('Tamaño del dock')}</span><span class="ds">${_tr('Grosor del dock: cuanto más alto, más grandes los iconos')}</span></div>
-            ${renderSlider('dock-size',Math.min(120,Math.max(32,dockSize)),32,120)}
-        </div>`,
-    ]);
-    h+=renderSection(t('sec_taskbar_pos'));
-    const dockPositions=[['bottom','Abajo'],['top','Arriba'],['left','Izquierda'],['right','Derecha']];
-    h+=renderCard(dockPositions.map(([k,l])=>`<div class="detail-item detail-item-row" style="cursor:pointer" data-dock="${k}">
-        <span class="dt" style="flex:1">${l}</span>
-        <div style="width:20px;height:20px;border-radius:50%;border:2px solid ${dockPos===k?'var(--blue)':'var(--brd)'};background:${dockPos===k?'var(--blue)':'transparent'};flex-shrink:0;display:flex;align-items:center;justify-content:center">
-            ${dockPos===k?'<div style="width:8px;height:8px;border-radius:50%;background:#fff"></div>':''}
-        </div>
-    </div>`));
-    c.innerHTML=h;
-    setupToggle('desk-icons',async a=>{
-        setSetting('desktop_icons',a);
-        try{await tauriInvoke('run_command',{cmd:'kwriteconfig6',args:['--file','plasma-org.kde.plasma.desktop-appletsrc','--group','Containments','--group','1','--group','General','--key','showToolTips',a?'true':'false']});}catch(e){}
-    });
-    setupToggle('dock-magnify',async a=>{
-        const row=document.getElementById('dock-magnify-scale-row');
-        if(row)row.style.display=a?'':'none';
-        await dockWrite('magnifyEnabled',!!a);
-        toast(a?_tr('Efecto lupa activado'):_tr('Efecto lupa desactivado'));
-    });
-    // Solo al soltar: cada cambio reconstruye el panel y arrastrar en vivo lo ahoga.
-    setupSlider('dock-size',v=>dockSizeWrite(v),false);
-    c.querySelectorAll('[data-mag]').forEach(btn=>{
-        btn.addEventListener('click',async()=>{
-            c.querySelectorAll('[data-mag]').forEach(b=>b.classList.toggle('active',b===btn));
-            await dockWrite('magnifyScale',parseFloat(btn.dataset.mag));
-        });
-    });
-    setupToggle('desk-grid',a=>setSetting('desktop_grid',a));
-    setupToggle('desk-labels',a=>setSetting('icon_labels',a));
-    c.querySelectorAll('[data-size]').forEach(btn=>{
-        btn.addEventListener('click',()=>{
-            setSetting('icon_size',btn.dataset.size);
-            c.querySelectorAll('[data-size]').forEach(b=>{
-                b.classList.toggle('active',b.dataset.size===btn.dataset.size);
-            });
-            toast('Tamaño de icono: '+btn.textContent);
-        });
-    });
-    c.querySelectorAll('[data-dock]').forEach(row=>{
-        row.addEventListener('click',async()=>{
-            setSetting('dock_position',row.dataset.dock);
-            await dockPosWrite(row.dataset.dock);
-            renderPantallaInicio(c);
-        });
-    });
+return desktop.home(c);
 }
 
 export function renderPlaceholder(c, title, msg='Esta sección estará disponible próximamente.'){

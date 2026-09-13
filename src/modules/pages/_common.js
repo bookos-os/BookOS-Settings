@@ -22,14 +22,9 @@ function primeSetting(key,value){_sc.set(key,value);}
 const _ic=new Map();
 const _IC_TTL={
     check_hw_features:30000,   // powerprofilesctl, sysfs reads
-    get_display_info:30000,    // kscreen-doctor
-    get_sink_descriptions:60000, // pactl list sinks - descriptive, static
-    get_audio_devices:10000,   // pactl short lists
     get_system_info:120000,    // uname, lscpu — never changes
     get_available_themes:120000,
-    get_kde_light_dark_themes:30000,
     get_style_themes:30000,
-    get_kwin_effects:30000,
     get_battery_history:20000, // upower history
     get_battery_sysfs:3000,    // fast, but no need to re-read more than 3s
     get_current_theme:5000,    // color scheme — changes only on user action
@@ -49,7 +44,7 @@ async function ci(cmd,args){
 // Invalidate a cache entry when we know it changed (e.g. after setting a mode)
 function _icInvalidate(cmd){for(const k of _ic.keys())if(k.startsWith(cmd))_ic.delete(k);}
 
-// ── Hardware state cache (5s TTL) — avoids blocking page loads on kscreen-doctor ──
+// ── Hardware state cache (5s TTL) — avoids repeated sysfs reads ──
 const _hwCache={data:null,ts:0};
 async function getCachedHwState(){
     const now=Date.now();
@@ -65,7 +60,7 @@ export function invalidateHwCache(){_hwCache.data=null;_hwCache.ts=0;}
 function esc(s){
     const d=document.createElement('div');
     d.textContent=s;
-    return d.innerHTML;
+    return d.innerHTML.replaceAll('"','&quot;').replaceAll("'",'&#39;');
 }
 
 // ── Auto-refresh helper — registers interval in _pageIntervals, cleaned up on navigation.
@@ -76,6 +71,23 @@ function addInterval(fn, ms){
     const id=setInterval(()=>{ if(!document.hidden) fn(); },ms);
     window._pageIntervals.push(id);
     return id;
+}
+
+// Service notifications share the navigation lifetime with page timers.
+function addSystemListener(fn){
+    let running=false,pending=false;
+    let disposed=false;
+    const update=async()=>{
+        if(disposed)return;
+        if(document.hidden||running){pending=true;return;}
+        running=true;pending=false;
+        try{await fn();}catch(e){console.error(e);}finally{running=false;}
+        if(pending&&!disposed)queueMicrotask(update);
+    };
+    const visible=()=>{if(!document.hidden)update();};
+    window.addEventListener('bookos-system-changed',update);
+    document.addEventListener('visibilitychange',visible);
+    (window._pageCleanups ||= []).push(()=>{disposed=true;window.removeEventListener('bookos-system-changed',update);document.removeEventListener('visibilitychange',visible);});
 }
 
 // ── Toast notification system ──
@@ -171,8 +183,6 @@ const _TOAST_TR_EN = {
     'Book Bar desactivada':'Book Bar disabled',
     'Limpieza completada':'Cleanup complete',
     'Programado para esta noche':'Scheduled for tonight',
-    'Tema lockscreen activado':'Lockscreen theme enabled',
-    'Tema lockscreen desactivado':'Lockscreen theme disabled',
     'Tema SDDM activado':'SDDM theme enabled',
     'Tema SDDM desactivado':'SDDM theme disabled',
     'Reconexión automática activada':'Auto-reconnect enabled',
@@ -269,13 +279,8 @@ const _TOAST_TR_EN = {
     'Contraseña cambiada con éxito':'Password changed successfully',
     // ── Maintenance ──
     'Error en limpieza':'Cleanup error',
-    'Reglas Polkit configuradas con éxito!':'Polkit rules configured!',
-    'Error al configurar':'Configuration error',
     // ── Routines / wellbeing ──
     'Rutina actualizada':'Routine updated',
-    'Objetivo actualizado':'Goal updated',
-    'Modo enfoque activado':'Focus mode on',
-    'Modo enfoque desactivado':'Focus mode off',
     // ── Labs / compositor ──
     'Desenfoque activado':'Blur enabled',
     'Desenfoque desactivado':'Blur disabled',
@@ -308,10 +313,6 @@ const _TOAST_TR_EN = {
     'Carpeta actualizada':'Folder updated',
     'Sin dispositivos cercanos encontrados':'No nearby devices found',
     // ── Misc ──
-    'Reindexando en segundo plano…':'Reindexing in background…',
-    'Ubicación activada':'Location on',
-    'Ubicación desactivada':'Location off',
-    'Información médica guardada':'Medical info saved',
     'Tamaño de icono':'Icon size',
 };
 
@@ -510,6 +511,16 @@ function renderCard(items){
 }
 function renderInfoItem(title, subtitle=''){
     return `<div class="detail-item"><span class="dt">${_tr(title)}</span>${subtitle?`<span class="ds">${_tr(subtitle)}</span>`:''}</div>`;
+}
+function renderServiceError(error, domain='sistema'){
+    const message=String(error||'');
+    if(/todavía|cargando|esperando/i.test(message))
+        return renderInfoItem('Cargando…','Esperando datos del servicio BookOS');
+    if(/sin dispositivo|no hay (?:ningún |ningun )?(?:adaptador|dispositivo)|no se detectó|no se detecto/i.test(message))
+        return renderInfoItem(`Sin dispositivo ${domain}`, message.slice(0,180));
+    if(/no disponible|desconectado|conexión|servicio/i.test(message))
+        return renderInfoItem('Servicio BookOS no disponible','Comprueba que la sesión BookOS esté activa');
+    return renderInfoItem(`No se pudo leer ${domain}`,message.slice(0,180));
 }
 // Runtime ES->EN dict for all UI labels (rows, sections, headers).
 // Auto-translates any string that contains a known ES phrase when bookos_lang=en.
@@ -738,9 +749,9 @@ const _UI_TR_EN = {
     'Audio':'Audio',
     'Historial':'History',
     'Historial de notificaciones':'Notification history',
-    'Abre el historial de Plasma':'Opens Plasma history',
+    'Abre el historial de notificaciones':'Opens notification history',
     'Ajustes de notificaciones':'Notification settings',
-    'Configura el historial y el comportamiento en Plasma':'Configure history and behavior in Plasma',
+    'Configura el historial y el comportamiento en BookOS':'Configure history and behavior in BookOS',
     'Abriendo ajustes de notificaciones':'Opening notification settings',
     'No se pudo abrir':'Could not open',
     'Ventanas emergentes (BookOS)':'Popups (BookOS)',
@@ -767,9 +778,6 @@ const _UI_TR_EN = {
     'Posición actualizada':'Position updated',
     'Duración actualizada':'Duration updated',
     'Tema de popups actualizado':'Popup theme updated',
-    'Desinstalar búsqueda semántica':'Uninstall semantic search',
-    'Se borrará el modelo, el índice y las dependencias (~500 MB).':'The model, index and dependencies (~500 MB) will be removed.',
-    'Desinstalar':'Uninstall',
     'Navegador web':'Web browser',
     'Cliente de correo':'Email client',
     'Gestor de archivos':'File manager',
@@ -801,7 +809,7 @@ const _UI_TR_EN = {
     'Silenciado en todo el sistema':'Muted system-wide',
     'Privacidad':'Privacy',
     'Historial de actividades':'Activity history',
-    'Plasma registra tus archivos y apps recientes':'Plasma tracks your recent files and apps',
+    'BookOS registra tus archivos y apps recientes':'BookOS tracks your recent files and apps',
     'Borrar historial de actividades':'Clear activity history',
     // Wallpaper / theme picker
     'Oscuro':'Dark',
@@ -838,7 +846,7 @@ const _UI_TR_EN = {
     'Accesos directos':'Shortcuts',
     'Atajos de teclado':'Keyboard shortcuts',
     'Atajos del sistema':'System shortcuts',
-    'Asigna teclas a acciones de KDE Plasma':'Assign keys to KDE Plasma actions',
+    'Asigna teclas a acciones de BookOS':'Assign keys to BookOS actions',
     'Atajos personalizados':'Custom shortcuts',
     'Crea atajos para lanzar apps':'Create shortcuts to launch apps',
     // Admin general
@@ -1061,9 +1069,9 @@ const _UI_TR_EN = {
     'Bloqueo de mayúsculas activado':'Caps Lock enabled',
     'Reposo':'Sleep',
     'Cambiar usuario':'Switch user',
-    // Lockscreen install toggles
+    // SDDM theme install toggles
     'Tema BookOS — Pantalla de bloqueo':'BookOS theme — Lock screen',
-    'Reemplaza el lockscreen de Plasma':'Replaces the Plasma lockscreen',
+    'Configura la pantalla de bloqueo':'Configures the lock screen',
     'Tema BookOS — SDDM (login)':'BookOS theme — SDDM (login)',
     'Activa el tema BookOS al iniciar sesión':'Enable BookOS theme at login',
     // Sound additional
@@ -1107,7 +1115,7 @@ const _UI_TR_EN = {
     'Ahora':'Now',
     'Ahorra batería':'Save battery',
     'Ahorro activado · procesos en segundo plano limitados':'Saver on · background processes limited',
-    'Ajusta KWin para menor latencia de entrada':'Adjusts KWin for lower input latency',
+    'Ajusta la entrada para menor latencia':'Adjusts input for lower latency',
     'Ajustes del modo ':'Mode settings ',
     'Ajustes exportados a ':'Settings exported to ',
     'Ajustes importados':'Settings imported',
@@ -1123,7 +1131,6 @@ const _UI_TR_EN = {
     'Animaciones reducidas activadas':'Reduced motion enabled',
     'Animaciones restauradas':'Animations restored',
     'Añade imágenes a ~/Imágenes o /usr/share/wallpapers':'Add images to ~/Pictures or /usr/share/wallpapers',
-    'Añade reglas polkit para obviar contraseñas en control':'Add polkit rules to skip passwords in control',
     'Añadir acción':'Add action',
     'Añadir condición':'Add condition',
     'Archivo':'File',
@@ -1326,9 +1333,6 @@ const _UI_TR_EN = {
     'Añadir y configurar impresoras':'Add and configure printers',
     'Abriendo impresoras':'Opening printers',
     'No hay gestor de impresoras instalado':'No printer manager installed',
-    'Búsqueda semántica':'Semantic search',
-    'Compartir ubicación':'Share location',
-    'Llamada de emergencia rápida':'Quick emergency call',
     'Mostrar batería':'Show battery',
     'Mostrar fecha':'Show date',
     'Mostrar porcentaje batería':'Show battery percentage',
@@ -1337,10 +1341,8 @@ const _UI_TR_EN = {
     'Conecta los buds cuando estén cerca y encendidos':'Connect buds when nearby and on',
     'Día de la semana bajo el reloj':'Day of week under the clock',
     'En el widget de batería':'In the battery widget',
-    'Envía tu posición al contacto de emergencia':'Send your location to the emergency contact',
     'Pastilla con porcentaje de batería':'Pill with battery percentage',
     'Pastilla con rutina activa o batería':'Pill with active routine or battery',
-    'Pulsa el botón de encendido 3 veces':'Press the power button 3 times',
     'Filtros':'Filters',
     'Finalizado':'Finished',
     'Fluidez de movimientos':'Motion smoothness',
@@ -1550,8 +1552,6 @@ const _UI_TR_EN = {
     'Tema aplicado':'Theme applied',
     'Tema global':'Global theme',
     'Tema BookOS':'BookOS theme',
-    'Tema lockscreen activado':'Lockscreen theme enabled',
-    'Tema lockscreen desactivado':'Lockscreen theme disabled',
     'Tema SDDM activado':'SDDM theme enabled',
     'Tema SDDM desactivado':'SDDM theme disabled',
     'Temas':'Themes',
@@ -1614,9 +1614,8 @@ const _UI_TR_EN = {
     'Tamaño de texto':'Text size',
     'Tamaño del cursor':'Cursor size',
     'Colores invertidos':'Inverted colors',
-    'Invierte los colores (KWin)':'Inverts colors (KWin)',
+    'Invierte los colores':'Inverts colors',
     'Minimiza animaciones del compositor':'Minimize compositor animations',
-    'Servicios de ubicación':'Location services',
     'Desactivados':'Disabled',
     'Alta precisión':'High precision',
     'GPS, WiFi y redes móviles':'GPS, WiFi and mobile networks',
@@ -1625,8 +1624,6 @@ const _UI_TR_EN = {
     'Sin conexión a internet':'No internet connection',
     'Siempre':'Always',
     'Preguntar':'Ask',
-    'Privacidad de ubicación':'Location privacy',
-    'La ubicación exacta solo se usa para funciones que la requieran. Nunca se envía sin permiso.':'Exact location is only used for features that need it. Never sent without permission.',
     'Nombre visible':'Display name',
     'Cambiar foto':'Change photo',
     'Foto actualizada':'Photo updated',
@@ -1643,7 +1640,6 @@ const _UI_TR_EN = {
     'Limpia archivos de Paru/Pacman':'Clean Paru/Pacman files',
     'Miniaturas temporales':'Temporary thumbnails',
     'Clear thumbnail cache':'Clear thumbnail cache',
-    'Permisos de Hardware':'Hardware permissions',
     'Configurar':'Configure',
     'Exportar a JSON':'Export to JSON',
     'Exportar configuración de BookOS':'Export BookOS settings',
@@ -1656,7 +1652,7 @@ const _UI_TR_EN = {
     'Efecto de movimiento suave al arrastrar':'Smooth motion effect when dragging',
     'Animación al minimizar ventanas':'Animation when minimizing windows',
     'Optimizar latencia del cursor':'Optimize cursor latency',
-    'Ajusta KWin para menor latencia de entrada':'Adjusts KWin for lower input latency',
+    'Optimizar latencia del cursor':'Optimize cursor latency',
     'Reiniciar compositor':'Restart compositor',
     'Útil si hay artefactos gráficos':'Useful if there are graphical artifacts',
     'Reiniciar':'Restart',
@@ -1687,7 +1683,7 @@ const _UI_TR_EN = {
     'No hay datos':'No data',
     'No hay otros usuarios':'No other users',
     'Atajos del sistema':'System shortcuts',
-    'Asigna teclas a acciones de KDE Plasma':'Assign keys to KDE Plasma actions',
+    'Asigna teclas a acciones de BookOS':'Assigns keys to BookOS actions',
     'Atajos personalizados':'Custom shortcuts',
     'Crea atajos para lanzar apps':'Create shortcuts to launch apps',
     'Guardar':'Save',
@@ -1713,13 +1709,7 @@ const _UI_TR_EN = {
     'Energía · Carga · Samsung Book':'Power · Charging · Samsung Book',
     'Fondo de pantalla':'Wallpaper',
     'Firewall · Permisos':'Firewall · Permissions',
-    'Ubicación':'Location',
-    'Solicitudes':'Requests',
-    'Seguridad y emergencia':'Safety and emergency',
-    'Datos médicos':'Medical info',
     'Perfil · Nombre · Hostname':'Profile · Name · Hostname',
-    'Salud digital':'Digital wellbeing',
-    'Tiempo de uso':'Screen time',
     'Mantenimiento':'Maintenance',
     'Almacenamiento · Cache':'Storage · Cache',
     'Apps predeterminadas':'Default apps',
@@ -1750,19 +1740,14 @@ const _UI_TR_EN = {
     'Logs del sistema':'System logs',
     'Modelo del equipo':'Device model',
     'Memoria RAM':'RAM',
-    'Versión de Plasma':'Plasma version',
+    'Versión del escritorio':'Desktop version',
     'Actualizaciones del sistema':'System updates',
-    'Tiempo en pantalla':'Screen time',
-    'Límites de uso':'Usage limits',
-    'Asistente de escritura':'Writing assistant',
     'Modos predefinidos':'Preset modes',
     'Lupa':'Magnifier',
     'Lector de pantalla':'Screen reader',
     'Alto contraste':'High contrast',
     'Navegador predeterminado':'Default browser',
     'Reproductor multimedia':'Media player',
-    'Información médica':'Medical information',
-    'Contactos de emergencia':'Emergency contacts',
     'Ethernet (cable)':'Ethernet (wired)',
     'Lámpara mágica':'Magic lamp',
     'Latencia del cursor':'Cursor latency',
@@ -1891,10 +1876,6 @@ const _UI_TR_EN = {
     // ── Emergency / misc placeholders ──
     'Eliminar cuenta':'Delete account',
     'Buscar Buds':'Search for Buds',
-    'Ej. A+':'e.g. A+',
-    'Ej. Penicilina':'e.g. Penicillin',
-    'Ej. Ibuprofeno':'e.g. Ibuprofen',
-    'Ej. Diabetes':'e.g. Diabetes',
     // Dock (pantalla de inicio)
     'Efecto lupa':'Magnification',
     'Los iconos crecen al pasar el cursor, estilo macOS. Al desactivarlo se quedan siempre a tamaño completo':'Icons grow under the cursor, macOS style. Turn it off to keep them always at full size',
@@ -1906,8 +1887,8 @@ const _UI_TR_EN = {
     'Normal':'Normal',
     'Fuerte':'Strong',
     'Paleta dinámica de BookOS':'BookOS dynamic palette',
-    'Acento automático de Plasma':'Automatic Plasma accent',
-    'Color de acento nativo de KDE según el fondo':"KDE's native accent color, based on the wallpaper",
+    'Acento automático de BookOS':'Automatic BookOS accent',
+    'Color de acento del escritorio según el fondo':'Desktop accent color based on wallpaper',
 };
 
 function _tr(str){
@@ -2108,13 +2089,17 @@ function setupToggle(id, callback){
     requestAnimationFrame(()=>{
         const el=document.querySelector(`[data-toggle="${id}"]`);
         if(!el)return;
-        el.addEventListener('click',function(){
+        el.addEventListener('click',async function(){
+            if(this.dataset.pending)return;
+            this.dataset.pending='true';
             this.classList.toggle('active');
             const active=this.classList.contains('active');
             this.setAttribute('aria-checked',active?'true':'false');
             const sub=this.closest('.detail-item-row')?.querySelector('.ds');
             if(sub&&!sub.querySelector('span')&&!sub.dataset.custom) sub.textContent=active?t('enabled'):t('disabled');
-            callback(active);
+            try{await callback(active);}catch(e){
+                this.classList.toggle('active',!active);this.setAttribute('aria-checked',String(!active));toast(String(e),'❌');
+            }finally{delete this.dataset.pending;}
         });
     });
 }
@@ -2170,8 +2155,8 @@ function lockIcon(){return`<svg viewBox="0 0 24 24" width="14" height="14" fill=
 export{
     tauriInvoke,getAssetUrl,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,
-    esc,addInterval,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
-    renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,
+    esc,addInterval,addSystemListener,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
+    renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,
     renderError,renderEmptyState,renderNavRow,
     _tr,renderRowItem,renderToggle,renderSlider,renderHeader,renderSection,
     popoverSelect,themeColor,setupToggle,setupSlider,wifiIcon,btIcon,chevron,lockIcon

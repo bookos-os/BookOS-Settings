@@ -1,19 +1,18 @@
 # BookOS Settings
 
-A native system settings application for KDE Plasma 6, designed for Samsung Galaxy Book laptops running BookOS — an Arch-based Linux distribution.
+A native system settings application for the BookOS compositor, designed for Samsung Galaxy Book laptops running BookOS — an Arch-based Linux distribution.
 
 Built with Tauri 2 and vanilla JavaScript. Lightweight, fast, hardware-aware.
 
 [![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/Evelynx08/BookOS-Settings/releases)
 [![Platform](https://img.shields.io/badge/platform-Arch%20%7C%20Debian%20%7C%20Ubuntu-1793D1?style=flat-square)](#installation)
-[![KDE Plasma](https://img.shields.io/badge/KDE%20Plasma-6.6-1d4ed8?style=flat-square)](https://kde.org)
 [![License](https://img.shields.io/badge/license-GPLv3-green?style=flat-square)](LICENSE)
 
 ---
 
 ## Overview
 
-BookOS Settings is a unified control panel that consolidates hardware-specific controls, system preferences, and appearance options into a single cohesive interface. It complements KDE System Settings by exposing Samsung Galaxy Book features (fan control, battery protection, keyboard backlight, USB-C charging) that are not surfaced by the standard KDE modules.
+BookOS Settings is a unified control panel that consolidates hardware-specific controls, system preferences, and appearance options into a single cohesive interface. It configures the BookOS desktop and exposes supported Samsung Galaxy Book hardware controls.
 
 ---
 
@@ -22,10 +21,10 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 | Category | Capabilities |
 |---|---|
 | Battery | Performance mode, fan control, adaptive charging, battery protection limit, USB-C charging |
-| Display | Brightness, resolution, refresh rate, eye comfort mode, HDR, Vision Booster |
-| Sound | Per-app volume, output and input device selection, system sounds, media controls |
-| Lock screen | SDDM theme, fingerprint enrollment, Always-On Display, Book Bar |
-| Themes | Kvantum theme, Plasma color scheme, dark and light mode toggle, scheduled switching |
+| Display | Brightness, resolution, refresh rate, scale and external displays |
+| Sound | Per-app volume, output and input selection, mute, balance and audio profiles |
+| Lock screen | Native clock, avatar, media controls, inactivity lock and SDDM editor |
+| Themes | BookOS accent, dark and light modes, scheduled switching and optional Kvantum palette |
 | Wallpaper | Wallpaper picker with color palette extraction |
 | Connections | Wi-Fi, Bluetooth, VPN, airplane mode |
 | Devices | Quick Share (rquickshare), Galaxy Buds |
@@ -33,11 +32,10 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 | Accounts | Username, hostname, avatar |
 | General | Language (Spanish and English with auto-detection), keyboard layout, date and time |
 | Maintenance | Disk usage, cache cleanup, system logs |
-| Digital wellbeing | Per-application screen time tracking |
-| Advanced | KWin compositor effects, autostart manager |
+| Advanced | BookOS effects, activities and autostart manager |
 | Updates | System packages (paru), Flatpak updates |
 | Accessibility | Vision aids, magnifier, high contrast |
-| About | Hardware information, CPU, RAM, GPU, kernel, Plasma version |
+| About | Hardware information, CPU, RAM, GPU, kernel, BookOS desktop |
 
 ### Additional capabilities
 
@@ -47,7 +45,6 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 - Smooth page transitions on navigation.
 - Routines engine for automating combinations of toggles, with snapshot-based undo.
 - Bundled systemd units for adaptive charging, thermal logging, and hardware permissions.
-- KRunner integration via a semantic search plugin.
 
 ---
 
@@ -59,9 +56,8 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 | Frontend | Vanilla JavaScript ES modules (no framework) |
 | Styling | Plain CSS with custom properties |
 | System integration | D-Bus (zbus), sysfs, shell commands |
-| Hardware control | `kscreen-doctor`, `qdbus6`, `pactl`, `ufw`, sysfs backlight |
+| Hardware control | `org.bookos.System1`, `org.bookos.Desktop`, `ufw`, sysfs backlight |
 | Background services | systemd system and user units |
-| Search | Python semantic indexer with KRunner D-Bus plugin |
 
 ---
 
@@ -112,7 +108,7 @@ sudo pacman -S rust cargo webkit2gtk-4.1 gtk3 libsoup3 protobuf
 Optional dependencies:
 
 ```bash
-sudo pacman -S colord kscreen qdbus6 inotify-tools python python-dbus python-gobject
+sudo pacman -S colord inotify-tools python python-dbus python-gobject
 ```
 
 Clone and build:
@@ -133,7 +129,7 @@ The compiled binary is at `src-tauri/target/release/bookos-settings`. Distributi
 bookos-settings
 ```
 
-A `.desktop` entry is installed automatically and the application appears in the KDE menu under Settings.
+A `.desktop` entry is installed automatically and the application appears in the BookOS launchpad under Settings.
 
 To launch at login in the background, enable the option inside *General Management → Autostart → Launch at login*.
 
@@ -159,9 +155,7 @@ BookOS-Settings/
 │   │   ├── quickshare.rs    rquickshare integration
 │   │   ├── buds.rs          Galaxy Buds via BlueZ
 │   │   ├── p2p.rs
-│   │   └── search.rs        Semantic search backend
 │   ├── extra/               systemd units, udev rules, shell scripts
-│   │   └── search/          KRunner plugin and Python indexer
 │   └── tauri.conf.json
 ├── scripts/
 │   └── publish-apt.sh       APT repository update automation
@@ -192,15 +186,6 @@ Hardware permissions for keyboard backlight and sensor access:
 sudo systemctl enable --now bookos-hw-perms.service
 ```
 
-Semantic search with KRunner integration:
-
-```bash
-cd /opt/bookos-search
-sudo ./setup.sh
-systemctl --user enable --now bookos-search-watcher.service
-systemctl --user enable --now bookos-krunner.service
-```
-
 ---
 
 ## Language
@@ -216,7 +201,7 @@ Primary target hardware:
 - Samsung Galaxy Book 5 Pro (Intel Core Ultra)
 - Samsung Galaxy Book 4 series
 
-Most features work on any KDE Plasma 6 system. Hardware-specific features (fan control, battery protection limit, keyboard backlight) require the Samsung Galaxy Book sysfs interfaces provided by recent Linux kernels.
+Desktop controls require a BookOS session. Hardware-specific features (fan control, battery protection limit, keyboard backlight) require the Samsung Galaxy Book sysfs interfaces provided by recent Linux kernels.
 
 ---
 
@@ -225,7 +210,7 @@ Most features work on any KDE Plasma 6 system. Hardware-specific features (fan c
 | Requirement | Version |
 |---|---|
 | Operating system | Arch Linux, Debian 12+, Ubuntu 22.04+ |
-| KDE Plasma | 6.6 or newer |
+| Desktop | BookOS compositor and bookos-system service |
 | Linux kernel | 6.x with Samsung sysfs support |
 | WebKit2GTK | 4.1 |
 | Rust toolchain | stable (build only) |
@@ -243,3 +228,20 @@ Issues and pull requests are welcome at [github.com/Evelynx08/BookOS-Settings](h
 Released under the GNU General Public License v3.0. See [LICENSE](LICENSE) for the full text.
 
 Copyright (C) 2026 Jose Reyes (Evelynx08).
+
+## Shared system service
+
+Wi-Fi, Bluetooth and audio use `org.bookos.System1` on the session bus. Build and
+install `bookos-system` with the desktop's `session/instalar.sh`; it activates on
+demand through D-Bus/systemd. The service needs NetworkManager, BlueZ and a
+PulseAudio-compatible server (normally PipeWire with pipewire-pulse), `pactl`,
+`wpctl` and `rfkill`. Settings subscribes to state changes; it does not poll these
+command-line tools. Bluetooth pairing asks for confirmation or a code in Settings.
+Failures are displayed instead of being reported as successful changes.
+
+Appearance, displays, lock screen and activities use `org.bookos.Desktop`.
+Keyboard, pointer and desktop-count changes are saved for the next login.
+The old desktop-specific control bridges and generic shell-command bridge have
+been removed. Unsupported controls are absent from pages and search.
+Existing routines using removed display effects report an unsupported action.
+Buds, sharing, routines, SDDM, updates and hardware-specific controls remain.

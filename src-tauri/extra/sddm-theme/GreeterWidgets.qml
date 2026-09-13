@@ -89,7 +89,7 @@ Item {
 
     // ── Fuentes que solo existen en la sesión ─────────────────────────────
     // Notificaciones y eventos llegan YA construidos desde fuera en vez de
-    // importarse aquí: `org.kde.notificationmanager` y el plugin de calendario
+    // importarse aquí: el gestor de notificaciones y el plugin de calendario
     // no existen en el greeter de SDDM, y un import que no resuelve tumba el
     // componente entero — con él, los widgets de batería y tiempo que sí
     // funcionan allí. Con las listas vacías la tarjeta no se dibuja.
@@ -102,7 +102,7 @@ Item {
 
     // ── Música ────────────────────────────────────────────────────────────
     // Igual que las notificaciones: los datos llegan YA resueltos desde fuera.
-    // El modelo MPRIS de Plasma no existe en el greeter de SDDM y un import que
+    // El modelo MPRIS de la sesión no existe en el greeter de SDDM y un import que
     // no resuelve tumba este componente entero, con él los widgets que allí sí
     // funcionan. La pantalla de bloqueo lo pasa desde la BookBar, que ya tiene
     // el reproductor abierto — un segundo modelo sería otra conexión al bus
@@ -212,7 +212,7 @@ Item {
         }
     }
     // JSON del tiempo ya leído por quien nos instancia. La pantalla de bloqueo
-    // lo pasa por aquí porque kscreenlocker no arranca con
+    // lo pasa por aquí porque el bloqueo de sesión no arranca con
     // QML_XHR_ALLOW_FILE_READ=1 y cualquier XHR sobre file:// le vuelve vacío.
     // Si llega vacío se lee la caché como siempre (camino del greeter de SDDM).
     property string weatherJson: ""

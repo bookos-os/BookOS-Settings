@@ -18,9 +18,6 @@ Enable optional services if you want them running:
     sudo systemctl enable --now bookos-battery-train.timer
     sudo systemctl enable --now bookos-hw-perms.service
 
-Or, as a regular user, the per-user services:
-    systemctl --user enable --now bookos-search-watcher.service
-
 EOF
 }
 

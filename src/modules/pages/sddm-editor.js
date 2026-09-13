@@ -29,7 +29,7 @@ import { t, getLang } from '../i18n.js';
 
 // Textos que el greeter de SDDM y la pantalla de bloqueo NO pueden traducir por
 // su cuenta: el primero arranca antes de que haya sesión y el segundo es un QML
-// de Plasma, así que ninguno ve el diccionario de la app. Se escriben en
+// del sistema de acceso, así que ninguno ve el diccionario de la app. Se escriben en
 // theme.conf ya traducidos al idioma en el que está BookOS Settings al guardar,
 // y el QML los pinta tal cual. Clave del .conf → clave del diccionario.
 const LS_STRINGS = {

@@ -1,13 +1,22 @@
-/* BookOS Settings v5 for KDE Plasma 6.6 */
+/* BookOS Settings */
 :root{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#8e8e93;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
 :root.light-mode{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#8e8e93;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
 :root.dark-mode{--bg:#000;--card:#1c1c1e;--tx:#fff;--tx2:#8e8e93;--div:rgba(255,255,255,.08);--brd:rgba(255,255,255,.06);--hov:rgba(255,255,255,.06);--act:rgba(255,255,255,.1);--blue:#0a84ff;--sbg:rgba(255,255,255,.08);--toff:#48484a;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--yellow:#ffd60a}
 @media(prefers-color-scheme:dark){:root:not(.light-mode){--bg:#000;--card:#1c1c1e;--tx:#fff;--tx2:#8e8e93;--div:rgba(255,255,255,.08);--brd:rgba(255,255,255,.06);--hov:rgba(255,255,255,.06);--act:rgba(255,255,255,.1);--blue:#0a84ff;--sbg:rgba(255,255,255,.08);--toff:#48484a;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--yellow:#ffd60a}}
+/* El tinte del acento sobre los grises. Estaba en `.main-container`, que es el
+   nodo donde cuelga toda la interfaz: declarado ahí ganaba siempre a la hoja de
+   la paleta dinámica, que declara en `:root`, y Ajustes era la única app de
+   BookOS que no se teñía con el color del fondo de pantalla. En `:root` gana la
+   paleta, que se inyecta al final de <head> y desempata por orden. Los valores
+   son los mismos, así que sin paleta el aspecto no cambia. */
+:root,:root.light-mode{--sbg:color-mix(in srgb,var(--blue) 6%,transparent);--div:color-mix(in srgb,var(--blue) 12%,transparent);--brd:color-mix(in srgb,var(--blue) 10%,transparent);--hov:color-mix(in srgb,var(--blue) 5%,transparent);--act:color-mix(in srgb,var(--blue) 10%,transparent)}
+:root.dark-mode{--sbg:color-mix(in srgb,var(--blue) 10%,transparent);--div:color-mix(in srgb,var(--blue) 12%,transparent);--brd:color-mix(in srgb,var(--blue) 10%,transparent);--hov:color-mix(in srgb,var(--blue) 8%,transparent);--act:color-mix(in srgb,var(--blue) 14%,transparent)}
+@media(prefers-color-scheme:dark){:root:not(.light-mode){--sbg:color-mix(in srgb,var(--blue) 10%,transparent);--div:color-mix(in srgb,var(--blue) 12%,transparent);--brd:color-mix(in srgb,var(--blue) 10%,transparent);--hov:color-mix(in srgb,var(--blue) 8%,transparent);--act:color-mix(in srgb,var(--blue) 14%,transparent)}}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,sans-serif;color:var(--tx);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .main-container{width:100%;height:100%;background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
-.main-container.windowed{border-radius:20px;border:1px solid var(--brd);overflow:hidden}
+.main-container.windowed{border-radius:20px;border:1px solid var(--brd);overflow:hidden;clip-path:inset(0 round 20px)}
 .titlebar{height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 12px;user-select:none;flex-shrink:0}
 .sb-toggle{background:0;border:0;color:var(--tx);cursor:pointer;opacity:.55;width:32px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:.12s;-webkit-app-region:no-drag}
 .sb-toggle:hover{opacity:1;background:var(--hov)}
@@ -18,6 +27,33 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 .sidebar{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
 .main-container.sidebar-collapsed .sidebar{width:0;padding-left:0;padding-right:0;opacity:0;pointer-events:none;overflow:hidden}
 .split-view{display:flex;flex:1;min-height:0}
+
+/* Home landing: keep the detail pane useful instead of leaving a blank
+   canvas when no category is selected. The layout follows the HIG detail
+   column while keeping quick actions one clear action per card. */
+.home-landing{width:min(760px,100%);margin:clamp(24px,8vh,84px) auto 0;padding:0 4px 36px;color:var(--tx);animation:fadeIn .22s cubic-bezier(.25,.46,.45,.94)}
+.home-landing-hero{display:flex;align-items:stretch;gap:18px;padding:24px 28px;background:var(--card);border-radius:22px;box-shadow:0 1px 3px rgba(0,0,0,.05),0 0 0 .5px rgba(0,0,0,.02)}
+:root.dark-mode .home-landing-hero{box-shadow:none}
+@media(prefers-color-scheme:dark){:root:not(.light-mode) .home-landing-hero{box-shadow:none}}
+.home-landing-accent{width:4px;flex:0 0 4px;border-radius:999px;background:var(--blue)}
+.home-landing-copy{min-width:0}
+.home-landing-eyebrow{margin-bottom:5px;color:var(--blue);font-size:11px;font-weight:600;letter-spacing:.08em}
+.home-landing-copy h2{font-size:24px;font-weight:700;letter-spacing:-.3px;line-height:1.15}
+.home-landing-copy p{margin-top:7px;color:var(--tx2);font-size:14px;line-height:1.4}
+.home-landing-section{margin-top:28px}
+.home-landing-section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:0 4px 10px;font-size:12px;font-weight:600;color:var(--tx2)}
+.home-landing-hint{font-size:11px;font-weight:400}
+.home-quick-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.home-quick-card{display:flex;align-items:center;gap:12px;min-height:86px;padding:16px 14px;background:var(--card);border:1px solid var(--brd);border-radius:18px;color:var(--tx);font:inherit;text-align:left;cursor:pointer;transition:background .12s,transform .12s,border-color .12s}
+.home-quick-card:hover{background:var(--hov);border-color:var(--div)}
+.home-quick-card:active{background:var(--act);transform:scale(.985)}
+.home-quick-card:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.home-quick-icon{width:36px;height:36px;flex:0 0 36px;border-radius:11px;object-fit:cover}
+.home-quick-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.home-quick-copy strong{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-quick-copy small{color:var(--tx2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-quick-chevron{display:grid;place-items:center;color:var(--tx2);line-height:1}.home-quick-chevron svg{width:18px;height:18px}
+@media(max-width:900px){.home-landing{margin-top:24px}.home-quick-grid{grid-template-columns:1fr}}
 
 /* Sidebar */
 .sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;scroll-behavior:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none;transform:translateZ(0);will-change:transform}
@@ -53,6 +89,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 .item-texts .title{font-size:14px;font-weight:500;line-height:1.25}
 .item-texts .subtitle{font-size:11px;color:var(--tx2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .item.active-item{background:var(--hov)}
+
+/* La portada enseña primero lo que se usa a diario. Las páginas de laboratorio,
+   mantenimiento y diagnóstico siguen disponibles en búsqueda, pero no ocupan
+   espacio visual hasta que se necesitan. */
+.home-more-card{overflow:hidden}
+.home-more-toggle{width:100%;min-height:62px;padding:0 18px;border:0;background:transparent;color:var(--tx);display:flex;align-items:center;justify-content:space-between;text-align:left;cursor:pointer;font:inherit;transition:background .12s}
+.home-more-toggle:hover{background:var(--hov)}
+.home-more-toggle:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.home-more-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.home-more-copy .title{font-size:14px;font-weight:600}
+.home-more-copy .subtitle{font-size:12px;color:var(--tx2)}
+.home-more-chevron{font-size:26px;line-height:1;color:var(--tx2);transform:rotate(90deg);transition:transform .2s ease}
+.home-more-card.is-collapsed .home-more-chevron{transform:rotate(0)}
+.home-more-card.is-collapsed .home-more-items{display:none}
 
 /* Profile Card */
 .card-profile .item{justify-content:space-between;height:70px;padding:0 16px}
@@ -723,7 +773,7 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .light-inner .tp-line{background:rgba(0,0,0,.1)}
 .dark-inner .tp-line{background:rgba(255,255,255,.15)}
 /* Large 2-up theme cards */
-/* ── Pages opting into the Temas card style (e.g. Lockscreen/AOD) ── */
+/* ── Pages opting into the theme card style ── */
 .themed-page .detail-card{border-radius:24px;padding:6px 22px;margin-bottom:18px}
 .themed-page .detail-item{padding-left:0;padding-right:0;padding-top:16px;padding-bottom:16px}
 .themed-page .detail-item:not(:last-child)::after{left:0;right:0}
@@ -971,7 +1021,7 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 /* Legacy taskbar */
 .wp-desktop-taskbar{display:none}
 .wp-tb-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.3);flex-shrink:0}
-/* Top bar — thin KDE panel matching real desktop */
+/* Top bar */
 .wp-top-bar{position:absolute;top:0;left:0;right:0;height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .wp-top-bar-title{font-size:9px;font-weight:700;letter-spacing:.5px}
 .wp-top-bar-tray{display:flex;align-items:center;gap:5px}

@@ -1,8 +1,8 @@
 # Maintainer: Jose <josrebe333@gmail.com>
 pkgname=bookos-settings
 pkgver=0.6.0
-pkgrel=1
-pkgdesc="BookOS Settings — settings application for KDE Plasma (Samsung Galaxy Book / BookOS)"
+pkgrel=2
+pkgdesc="BookOS Settings — native settings for the BookOS desktop"
 arch=('x86_64')
 url="https://github.com/Evelynx08/BookOS-Settings"
 license=('GPL3')
@@ -12,11 +12,6 @@ install=bookos-settings.install
 depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'python' 'upower')
 optdepends=(
     'colord: ICC profile support'
-    'kscreen: display control via kscreen-doctor'
-    'qdbus6: brightness control via KDE D-Bus'
-    'inotify-tools: watcher for semantic search'
-    'python-dbus: KRunner semantic search plugin'
-    'python-gobject: KRunner semantic search plugin'
 )
 makedepends=('rust' 'cargo' 'protobuf' 'git')
 
@@ -37,7 +32,6 @@ package() {
     local _builddir="${startdir}"
     local _bin="${_builddir}/src-tauri/target/release"
     local _extra="${_builddir}/src-tauri/extra"
-    local _search="${_builddir}/src-tauri/extra/search"
     local _src="${_builddir}/src"
 
     # Binary
@@ -50,7 +44,7 @@ package() {
 [Desktop Entry]
 Name=BookOS Settings
 Name[es]=Ajustes de BookOS
-Comment=Settings for BookOS KDE Plasma
+Comment=Settings for the BookOS desktop
 Exec=bookos-settings
 Icon=bookos-settings
 Terminal=false
@@ -82,16 +76,6 @@ EOF
     install -Dm644 "$_extra/bookos-thermal-logger.service" \
         "$pkgdir/usr/lib/systemd/system/bookos-thermal-logger.service"
 
-    # Systemd user units
-    install -Dm644 "$_search/bookos-krunner.service" \
-        "$pkgdir/usr/lib/systemd/user/bookos-krunner.service"
-    install -Dm644 "$_search/bookos-search-reindex.service" \
-        "$pkgdir/usr/lib/systemd/user/bookos-search-reindex.service"
-    install -Dm644 "$_search/bookos-search-reindex.timer" \
-        "$pkgdir/usr/lib/systemd/user/bookos-search-reindex.timer"
-    install -Dm644 "$_search/bookos-search-watcher.service" \
-        "$pkgdir/usr/lib/systemd/user/bookos-search-watcher.service"
-
     # udev rules
     install -Dm644 "$_extra/99-bookos-power.rules" \
         "$pkgdir/usr/lib/udev/rules.d/99-bookos-power.rules"
@@ -109,17 +93,12 @@ EOF
         "$pkgdir/usr/lib/bookos/bookos-battery-logger.sh"
     install -Dm755 "$_extra/bookos-thermal-logger.sh" \
         "$pkgdir/usr/lib/bookos/bookos-thermal-logger.sh"
-    install -Dm755 "$_extra/bookos-register-shortcut.sh" \
-        "$pkgdir/usr/lib/bookos/bookos-register-shortcut.sh"
     install -Dm755 "$_extra/bookos-toggle-as-user.sh" \
         "$pkgdir/usr/lib/bookos/bookos-toggle-as-user.sh"
     install -Dm755 "$_extra/scripts/bookos-reapply-theme.sh" \
         "$pkgdir/usr/lib/bookos/bookos-reapply-theme.sh"
 
-    # pacman hook: re-apply the lockscreen patch after plasma-workspace upgrades
-    # (Plasma overwrites the patched shell QML, reverting the BookOS lockscreen)
-    # AND after bookos-settings itself upgrades, para que los QML nuevos de una
-    # version nueva lleguen a las copias en uso sin volver a pulsar "instalar".
+    # Actualizar únicamente el tema de inicio de sesión SDDM.
     install -Dm644 "$_extra/bookos-theme-reapply.hook" \
         "$pkgdir/usr/share/libalpm/hooks/95-bookos-theme-reapply.hook"
 
@@ -136,19 +115,8 @@ EOF
     install -Dm644 "$_extra/kvantum/bookos-light-blue.kvconfig.tmpl" \
         "$pkgdir/usr/share/bookos-settings/kvantum/bookos-light-blue.kvconfig.tmpl"
 
-    # BookOS lockscreen QML — installed by the app (toggle in Settings).
-    # Se copia el directorio ENTERO, no una lista fija: al anadir
-    # LockNotifications.qml la lista se quedo corta y el lockscreen habria
-    # fallado al cargar por un fichero que si referencia LockScreenUi.qml.
-    install -dm755 "$pkgdir/usr/share/bookos-settings/lockscreen"
-    cp -r "$_extra/lockscreen/." "$pkgdir/usr/share/bookos-settings/lockscreen/"
-    # Los widgets (bateria/tiempo/fecha) son EL MISMO componente que usa el tema
-    # SDDM, parametrizado por propiedades. Se copia desde sddm-theme en vez de
-    # duplicar el fichero en el repo: dos copias divergen en cuanto se toca una.
-    cp -f "$_extra/sddm-theme/GreeterWidgets.qml" "$_extra/sddm-theme/WxIcon.qml" \
-        "$_extra/sddm-theme/DeviceIcon.qml" "$_extra/sddm-theme/GlyphIcon.qml" \
-        "$pkgdir/usr/share/bookos-settings/lockscreen/"
-    find "$pkgdir/usr/share/bookos-settings/lockscreen" -type f -exec chmod 644 {} +
+    # El tema SDDM se instala desde el bloque siguiente. Este paquete no
+    # contiene una segunda copia del greeter.
 
     # BookOS SDDM theme — staged under /usr/share/bookos-settings/sddm-theme.
     # install_sddm_theme() (Settings app) copies it to /usr/share/sddm/themes/bookos
@@ -166,21 +134,6 @@ EOF
             install -Dm644 "$f" "$pkgdir/usr/share/bookos-settings/sddm-theme/$rel"
         done
     fi
-
-    # D-Bus service
-    install -Dm644 "$_search/org.bookos.SemanticSearch.service" \
-        "$pkgdir/usr/share/dbus-1/services/org.bookos.SemanticSearch.service"
-
-    # KRunner plugin
-    install -Dm644 "$_search/bookos-semantic-krunner.desktop" \
-        "$pkgdir/usr/share/krunner/dbusplugins/bookos-semantic-krunner.desktop"
-
-    # bookos-search scripts
-    install -Dm755 "$_search/bookos-krunner.py"  "$pkgdir/opt/bookos-search/bookos-krunner.py"
-    install -Dm755 "$_search/buscar.py"           "$pkgdir/opt/bookos-search/buscar.py"
-    install -Dm755 "$_search/indexador.py"        "$pkgdir/opt/bookos-search/indexador.py"
-    install -Dm755 "$_search/setup.sh"            "$pkgdir/opt/bookos-search/setup.sh"
-    install -Dm755 "$_search/watcher.sh"          "$pkgdir/opt/bookos-search/watcher.sh"
 
     # AI battery prediction (Python venv installed by .install hook)
     local _ai="${_extra}/ai"

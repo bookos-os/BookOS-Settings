@@ -84,18 +84,17 @@ export function paletteToCss(p){
 
 // ── Integración a nivel de sistema (futuro, sin activar) ───────────────────
 // Hoy la paleta solo tiñe las apps Tauri de BookOS que importan este módulo.
-// Para que tiña también Plasma/widgets/qml habría que escribir los mismos
+// Para que tiña también widgets externos habría que escribir los mismos
 // roles en un formato que esas piezas puedan leer. Boceto de lo que faltaría,
 // sin activar hasta decidir el formato final y probarlo con calma:
 //
-// 1) Plasma (kdeglobals / colores de Qt/Kirigami):
+// 1) Aplicaciones Qt:
 //    El backend (`dynamic_color_apply` en src-tauri) ya calcula la paleta;
 //    solo faltaría, tras generarla, volcar los tonos primary/accent a un
-//    esquema de color Plasma (~/.local/share/color-schemes/BookOSDynamic.colors)
-//    y aplicarlo con `kwriteconfig6`+`plasma-apply-colorscheme`, igual que ya
+//    esquema de color del escritorio, gestionado por BookOS,
 //    se hace para AccentColorFromWallpaper en renderFondos().
 //
-// 2) Widgets Plasma en QML (com.bookos.bookbar, KdeControlStation…):
+// 2) Widgets BookOS en QML:
 //    export function paletteToQml(p){
 //        if(!p||!p.light||!p.dark)return '';
 //        // Un JSON plano que un Kirigami.Theme personalizado o un Plasmoid
@@ -104,10 +103,10 @@ export function paletteToCss(p){
 //        return JSON.stringify({light:p.light,dark:p.dark});
 //    }
 //
-// 3) SDDM / lockscreen (ya reciben `bookos-reapply-theme.sh`):
+// 3) SDDM (ya recibe `bookos-reapply-theme.sh`):
 //    El hook `bookos-theme-reapply.hook` podría, al detectar un cambio en
 //    palette.css, regenerar también el `theme.conf` del greeter con los
-//    mismos tonos — hoy ese hook solo reacciona a temas Kvantum/Plasma, no
+//    mismos tonos — hoy ese hook solo reacciona a temas Kvantum, no
 //    a la paleta dinámica.
 //
 // Nada de esto se activa aquí: es la lista de qué tocaría para que "tintar

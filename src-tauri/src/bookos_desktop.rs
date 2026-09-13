@@ -1,10 +1,7 @@
 //! Cliente de `org.bookos.Desktop`: la gestión de pantallas de una sesión
 //! BookOS.
 //!
-//! Reemplaza a `kscreen-doctor` **solo cuando el compositor de BookOS está en
-//! el bus**. En Plasma este módulo contesta que no hay nadie y la interfaz sigue
-//! usando `kscreen_get`/`kscreen_set` como siempre: no se escribe en los dos
-//! sitios a la vez, y por eso la detección es lo primero que se pregunta.
+//! Los controles nativos requieren una sesión BookOS activa.
 //!
 //! Los tipos de aquí son la otra mitad del contrato que documenta
 //! `bookos-comp/src/ajustes.rs`. Tienen que coincidir campo a campo y en orden:
@@ -74,7 +71,7 @@ async fn proxy<'a>(conn: &'a zbus::Connection) -> Result<zbus::Proxy<'a>, String
 /// ¿Hay una sesión BookOS Desktop escuchando?
 ///
 /// Se pregunta por el dueño del nombre y no se llama a un método: activar el
-/// servicio por accidente en una sesión de Plasma sería justo lo que no
+/// servicio por accidente fuera de una sesión BookOS sería justo lo que no
 /// queremos, y `NameHasOwner` no arranca nada.
 #[tauri::command]
 pub async fn bookos_desktop_available() -> bool {
@@ -180,4 +177,29 @@ pub async fn bookos_reload_config(section: String) -> bool {
     p.call::<_, _, bool>("ReloadConfig", &(section,))
         .await
         .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn bookos_get_config() -> Result<String, String> {
+    let c = zbus::Connection::session().await.map_err(|e| e.to_string())?;
+    proxy(&c).await?.call("GetConfig", &()).await.map_err(|e|e.to_string())
+}
+#[tauri::command]
+pub async fn bookos_apply_config(config: serde_json::Value) -> Result<String, String> {
+    let c = zbus::Connection::session().await.map_err(|e| e.to_string())?;
+    let (ok,error):(bool,String) = proxy(&c).await?.call("ApplyConfig",&(config.to_string(),)).await.map_err(|e|e.to_string())?;
+    if !ok {return Err(error);}
+    Ok(serde_json::json!({"ok":true}).to_string())
+}
+
+pub async fn config_value() -> Result<serde_json::Value,String> {
+    serde_json::from_str(&bookos_get_config().await?).map_err(|e|e.to_string())
+}
+pub async fn dnd(value:Option<bool>)->Result<bool,String> {
+    let c=zbus::Connection::session().await.map_err(|e|e.to_string())?;
+    let p=proxy(&c).await?;
+    match value {
+        Some(v)=>p.call("SetDoNotDisturb",&(v,)).await,
+        None=>p.call("GetDoNotDisturb",&()).await,
+    }.map_err(|e|e.to_string())
 }

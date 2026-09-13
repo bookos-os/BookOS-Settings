@@ -32,15 +32,11 @@ export async function executeRoutine(routine){
             else if(a.type==='brightness')await tauriInvoke('set_brightness',{value:parseInt(a.value)});
             else if(a.type==='volume')await tauriInvoke('set_volume',{value:parseInt(a.value)});
             else if(a.type==='dnd')await tauriInvoke('toggle_dnd',{enable:a.value==='true'});
-            else if(a.type==='nightlight')await tauriInvoke('set_nightlight',{active:a.value==='true',temperature:null});
+            else if(['vision_booster','hdr','nightlight','icc_profile','screen_saver'].includes(a.type))throw new Error('Esta acción no está disponible en BookOS');
             else if(a.type==='theme'){await tauriInvoke('set_color_scheme',{scheme:a.value});document.documentElement.className=/dark/i.test(a.value)?'dark-mode':'light-mode';}
             else if(a.type==='kbd_brightness')await tauriInvoke('set_kbd_brightness',{level:parseInt(a.value)});
             // ── New actions ──
-            else if(a.type==='vision_booster')await tauriInvoke(a.value==='true'?'activar_vision_booster':'desactivar_vision_booster');
-            else if(a.type==='hdr')await tauriInvoke(a.value==='true'?'activar_hdr':'desactivar_hdr');
-            else if(a.type==='screen_saver')await tauriInvoke(a.value==='true'?'activar_ahorro_pantalla':'desactivar_ahorro_pantalla');
             else if(a.type==='thermal')await tauriInvoke('aplicar_perfil_termico',{modo:a.value});
-            else if(a.type==='icc_profile')await tauriInvoke('aplicar_perfil_color',{nombreArchivo:a.value});
             else if(a.type==='fan_mode')await tauriInvoke('set_fan_mode',{mode:a.value});
             else if(a.type==='charge_limit')await tauriInvoke('set_charge_limit',{limit:parseInt(a.value)});
         }catch(e){}
@@ -59,7 +55,6 @@ export async function snapshotForRoutine(routine){
     if(types.has('bluetooth'))promises.push(tauriInvoke('get_bluetooth_status').then(r=>{snap.bluetooth=JSON.parse(r).enabled;}).catch(()=>{}));
     if(types.has('airplane'))promises.push(tauriInvoke('get_airplane_mode').then(r=>{snap.airplane=JSON.parse(r).enabled;}).catch(()=>{}));
     if(types.has('dnd'))promises.push(tauriInvoke('get_dnd_status').then(r=>{snap.dnd=JSON.parse(r).dnd_active;}).catch(()=>{}));
-    if(types.has('nightlight'))promises.push(tauriInvoke('get_nightlight').then(r=>{snap.nightlight=JSON.parse(r).active;}).catch(()=>{}));
     if(types.has('kbd_brightness'))promises.push(tauriInvoke('get_kbd_brightness').then(r=>{snap.kbd_brightness=JSON.parse(r).level;}).catch(()=>{}));
     // New action types snapshot
     if(types.has('hdr')||types.has('vision_booster')||types.has('thermal')){
@@ -83,7 +78,6 @@ export async function restoreSnapshot(snap){
     if('bluetooth' in snap)promises.push(tauriInvoke('toggle_bluetooth',{enable:snap.bluetooth}).catch(()=>{}));
     if('airplane' in snap)promises.push(tauriInvoke('toggle_airplane_mode',{enable:snap.airplane}).catch(()=>{}));
     if('dnd' in snap)promises.push(tauriInvoke('toggle_dnd',{enable:snap.dnd}).catch(()=>{}));
-    if('nightlight' in snap)promises.push(tauriInvoke('set_nightlight',{active:snap.nightlight,temperature:null}).catch(()=>{}));
     if('kbd_brightness' in snap)promises.push(tauriInvoke('set_kbd_brightness',{level:parseInt(snap.kbd_brightness)}).catch(()=>{}));
     // New action types restore
     if('hdr_active' in snap)promises.push(tauriInvoke(snap.hdr_active?'activar_hdr':'desactivar_hdr').catch(()=>{}));

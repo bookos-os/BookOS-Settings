@@ -282,116 +282,19 @@ pub fn json(seed: &str, style: Style, s: &Scheme) -> String {
         tones(&s.primary), tones(&s.secondary), tones(&s.tertiary), tones(&s.neutral))
 }
 
-// ── Esquema de color nativo de KDE Plasma (.colors) ──────────────────────
+// ── Esquema de color del escritorio (.colors) ───────────────────────────
 //
 // Mismo reparto de tonos que `roles()`, pero en el formato `r,g,b` que usa
-// KDE (kdeglobals / plasma-apply-colorscheme) en vez de CSS. Esto es lo que
-// hace que KdeControlStation y los SVG del desktoptheme (que ya leen
-// Kirigami.Theme / current-color-scheme) sigan la paleta sin tocarles una
-// línea: heredan el esquema de color de Plasma como cualquier app Qt/QML.
+// El formato se conserva para aplicaciones externas que leen archivos de
+// colores, mientras BookOS usa CSS y Kvantum como salida principal.
 //
 // Los semánticos (negativo/neutro/positivo) se dejan fijos, calcados de los
 // esquemas estáticos de BookOS — mismo criterio que en `roles()`. "Visited"
 // no es semántico de verdad (es un matiz de enlace visitado), así que ahí
 // sí se usa el secundario de la paleta en vez de un valor fijo.
-fn rgb_str(c: (u8, u8, u8)) -> String { format!("{},{},{}", c.0, c.1, c.2) }
 
-pub fn kde_colors(s: &Scheme, dark: bool) -> String {
-    let p = &s.primary;
-    let n = &s.neutral;
-    let nv = &s.neutral_variant;
 
-    let (bg, chrome, card, tx, tx2, accent, visited, negative, neutral_c, positive, name) = if dark {
-        (n.tone_rgb(6.0), n.tone_rgb(3.0), n.tone_rgb(12.0), n.tone_rgb(96.0), nv.tone_rgb(68.0),
-         p.tone_rgb(80.0), s.secondary.tone_rgb(70.0),
-         (255u8,69u8,58u8), (255u8,214u8,10u8), (48u8,209u8,88u8), "BookOS Dinámico Oscuro")
-    } else {
-        (n.tone_rgb(96.0), n.tone_rgb(90.0), n.tone_rgb(100.0), n.tone_rgb(12.0), nv.tone_rgb(45.0),
-         p.tone_rgb(42.0), s.secondary.tone_rgb(45.0),
-         (255u8,59u8,48u8), (255u8,204u8,0u8), (52u8,199u8,89u8), "BookOS Dinámico Claro")
-    };
 
-    let block = |bg_normal: (u8,u8,u8), bg_alt: (u8,u8,u8)| format!(
-"BackgroundAlternate={}
-BackgroundNormal={}
-DecorationFocus={acc}
-DecorationHover={acc}
-ForegroundActive={acc}
-ForegroundInactive={tx2}
-ForegroundLink={acc}
-ForegroundNegative={neg}
-ForegroundNeutral={neu}
-ForegroundNormal={tx}
-ForegroundPositive={pos}
-ForegroundVisited={vis}
-", rgb_str(bg_alt), rgb_str(bg_normal),
-        acc=rgb_str(accent), tx2=rgb_str(tx2), neg=rgb_str(negative), neu=rgb_str(neutral_c),
-        tx=rgb_str(tx), pos=rgb_str(positive), vis=rgb_str(visited));
-
-    format!(
-"[ColorEffects:Inactive]
-ChangeSelectionColor=true
-
-[ColorScheme]
-Name={name}
-
-[Colors:Button]
-{button}
-[Colors:Complementary]
-{complementary}
-[Colors:Header]
-{header}
-[Colors:NormalBackground]
-BackgroundNormal={bg}
-ForegroundNormal={tx}
-
-[Colors:Selection]
-BackgroundAlternate={acc}
-BackgroundNormal={acc}
-DecorationFocus={acc}
-DecorationHover={acc}
-ForegroundActive=255,255,255
-ForegroundInactive=200,200,200
-ForegroundLink=255,255,255
-ForegroundNegative={neg}
-ForegroundNeutral={neu}
-ForegroundNormal=255,255,255
-ForegroundPositive={pos}
-ForegroundVisited={vis}
-
-[Colors:Tooltip]
-{tooltip}
-[Colors:View]
-{view}
-[Colors:Window]
-{window}
-[General]
-ColorScheme={id}
-Name={name}
-shadeSortColumn=true
-
-[KDE]
-contrast=4
-
-[WM]
-activeBackground={bg}
-activeBlend={bg}
-activeForeground={tx}
-inactiveBackground={chrome}
-inactiveBlend={chrome}
-inactiveForeground={tx2}
-",
-        name=name, id=if dark {"BookOSDynamicDark"} else {"BookOSDynamicLight"},
-        bg=rgb_str(bg), chrome=rgb_str(chrome), tx=rgb_str(tx), tx2=rgb_str(tx2),
-        acc=rgb_str(accent), neg=rgb_str(negative), neu=rgb_str(neutral_c), pos=rgb_str(positive), vis=rgb_str(visited),
-        button=block(card, card),
-        complementary=block(chrome, card),
-        header=block(chrome, card),
-        tooltip=block(chrome, card),
-        view=block(bg, card),
-        window=block(bg, card),
-    )
-}
 
 // ── Kvantum (apps Qt que no leen Kirigami.Theme) ─────────────────────────
 //

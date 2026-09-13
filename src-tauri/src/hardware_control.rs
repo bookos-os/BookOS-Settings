@@ -2,8 +2,6 @@
 // Reverse engineered from Samsung Settings (Windows ProcMon + EC-Probe analysis)
 
 use std::fs;
-use tokio::process::Command;
-use std::time::Duration;
 
 // ── Sysfs paths (verified on hardware) ───────────────────────────────────────
 const RAPL_PL1: &str = "/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw";
@@ -12,11 +10,6 @@ const PLATFORM_PROFILE: &str = "/sys/firmware/acpi/platform_profile";
 const PLATFORM_PROFILE_MODERN: &str = "/sys/class/platform-profile/platform-profile-0/profile";
 const BACKLIGHT: &str = "/sys/class/backlight/intel_backlight/brightness";
 const BACKLIGHT_MAX: u32 = 400;
-const BACKLIGHT_DEFAULT_RAW: u32 = 160; // 40% — user default observed in kscreen-doctor
-const GPU_POWER: &str = "/sys/bus/pci/devices/0000:00:02.0/power/control";
-const ICC_DIR: &str = "/usr/share/color/icc/BookOS";
-const DISPLAY: &str = "eDP-1";
-const COLORD_DEVICE: &str = "xrandr-eDP-1";
 
 // ── Low-level helpers ─────────────────────────────────────────────────────────
 
@@ -64,43 +57,10 @@ fn write_sysfs_soft(path: &str, value: &str) -> Option<String> {
 
 /// Run command with 5 s timeout. Returns Err only if the command itself fails.
 /// "already" messages are treated as success.
-async fn run_cmd_capture(program: &str, args: &[&str], timeout_ms: u64) -> Result<String, String> {
-    let child = Command::new(program)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("No se pudo ejecutar {}: {}", program, e))?;
 
-    let result = tokio::time::timeout(
-        Duration::from_millis(timeout_ms),
-        child.wait_with_output()
-    ).await;
 
-    match result {
-        Ok(Ok(out)) => {
-            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if out.status.success() { return Ok(stdout); }
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let stderr = stderr.trim();
-            if stderr.contains("already") || stderr.contains("Already") { return Ok(stdout); }
-            let detail = if stderr.is_empty() { "sin respuesta" } else { stderr };
-            Err(format!("{} falló: {}", program, detail))
-        }
-        Ok(Err(e)) => Err(format!("Error al esperar {}: {}", program, e)),
-        Err(_) => {
-            // child was consumed by wait_with_output; tokio drops & kills it on timeout
-            Err(format!("{} no respondió en {}s", program, timeout_ms / 1000))
-        }
-    }
-}
-async fn run_cmd(program: &str, args: &[&str]) -> Result<(), String> {
-    run_cmd_timeout(program, args, 5_000).await
-}
 
-async fn run_cmd_timeout(program: &str, args: &[&str], timeout_ms: u64) -> Result<(), String> {
-    run_cmd_capture(program, args, timeout_ms).await.map(|_| ())
-}
+
 
 
 fn read_sysfs(path: &str) -> Option<String> {
@@ -204,186 +164,37 @@ pub async fn aplicar_perfil_termico(modo: String) -> Result<String, String> {
 
 // ── ICC background helper ─────────────────────────────────────────────────────
 // Spawns ICC application in a detached thread so toggles return immediately.
-fn spawn_icc(profile: &'static str) {
-    tokio::spawn(async move {
-        let _ = aplicar_perfil_color_interno(profile).await;
-    });
-}
 
 // ── 2. Vision Booster ─────────────────────────────────────────────────────────
 // WCG and ICC are fire-and-forget (spawned threads) so the toggle returns
 // as soon as the core backlight write succeeds. No more multi-second freeze.
 
-#[tauri::command]
-pub async fn activar_vision_booster() -> Result<String, String> {
-    // Set brightness to 100% via KDE D-Bus (keeps KDE in sync)
-    let max: u64 = run_cmd_capture("qdbus6", &[
-        "org.kde.Solid.PowerManagement",
-        "/org/kde/Solid/PowerManagement/Actions/BrightnessControl",
-        "brightnessMax",
-    ], 2_000).await.unwrap_or_default().trim().parse().unwrap_or(400);
-    run_cmd_timeout("qdbus6", &[
-        "org.kde.Solid.PowerManagement",
-        "/org/kde/Solid/PowerManagement/Actions/BrightnessControl",
-        "setBrightness",
-        &max.to_string(),
-    ], 2_000).await?;
 
-    let display = DISPLAY.to_string();
-    tokio::spawn(async move {
-        let _ = run_cmd_timeout("kscreen-doctor", &[&format!("output.{}.wcg.enable", display)], 5_000).await;
-    });
-    spawn_icc("SDC4189P.icm");
 
-    Ok("Vision Booster activado: brillo máximo".to_string())
-}
 
-#[tauri::command]
-pub async fn desactivar_vision_booster() -> Result<String, String> {
-    // Restore to 40% via KDE D-Bus
-    let max: u64 = run_cmd_capture("qdbus6", &[
-        "org.kde.Solid.PowerManagement",
-        "/org/kde/Solid/PowerManagement/Actions/BrightnessControl",
-        "brightnessMax",
-    ], 2_000).await.unwrap_or_default().trim().parse().unwrap_or(400);
-    let raw_40 = max * 40 / 100;
-    run_cmd_timeout("qdbus6", &[
-        "org.kde.Solid.PowerManagement",
-        "/org/kde/Solid/PowerManagement/Actions/BrightnessControl",
-        "setBrightness",
-        &raw_40.to_string(),
-    ], 2_000).await?;
-
-    let display = DISPLAY.to_string();
-    tokio::spawn(async move {
-        let _ = run_cmd_timeout("kscreen-doctor", &[&format!("output.{}.wcg.disable", display)], 5_000).await;
-    });
-    spawn_icc("SDC4189.icm");
-
-    Ok("Vision Booster desactivado: brillo restaurado".to_string())
-}
 
 // ── 3. HDR ────────────────────────────────────────────────────────────────────
-// HDR enable/disable via kscreen-doctor are the primary operations (fatal if
-// kscreen-doctor not found). WCG and ICC are non-fatal.
+// Las funciones de pantalla no disponibles en BookOS se mantienen ausentes.
 
-#[tauri::command]
-pub async fn activar_hdr() -> Result<String, String> {
-    // Primary: HDR signal (fatal — this is the whole point of the toggle)
-    run_cmd("kscreen-doctor", &[&format!("output.{}.hdr.enable", DISPLAY)]).await?;
 
-    let display = DISPLAY.to_string();
-    tokio::spawn(async move {
-        let _ = run_cmd_timeout("kscreen-doctor", &[&format!("output.{}.wcg.enable", display)], 5_000).await;
-        if let Ok(m) = run_cmd_capture("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","brightnessMax"],2_000).await{
-            if let Ok(max)=m.trim().parse::<u64>(){
-                let _=run_cmd_timeout("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","setBrightness",&max.to_string()],2_000).await;
-            }
-        }
-    });
 
-    Ok("HDR activado".to_string())
-}
 
-#[tauri::command]
-pub async fn desactivar_hdr() -> Result<String, String> {
-    run_cmd("kscreen-doctor", &[&format!("output.{}.hdr.disable", DISPLAY)]).await?;
-
-    let display = DISPLAY.to_string();
-    tokio::spawn(async move {
-        let _ = run_cmd_timeout("kscreen-doctor", &[&format!("output.{}.wcg.disable", display)], 5_000).await;
-        if let Ok(m) = run_cmd_capture("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","brightnessMax"],2_000).await{
-            if let Ok(max)=m.trim().parse::<u64>(){
-                let raw_40=max*40/100;
-                let _=run_cmd_timeout("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","setBrightness",&raw_40.to_string()],2_000).await;
-            }
-        }
-    });
-    spawn_icc("SDC4189.icm");
-
-    Ok("HDR desactivado: brillo restaurado".to_string())
-}
 
 // ── 4. Ahorro de pantalla ─────────────────────────────────────────────────────
 // Hz change and GPU power management. GPU power write is non-fatal.
 
-#[tauri::command]
-pub async fn activar_ahorro_pantalla() -> Result<String, String> {
-    let mut warns: Vec<String> = Vec::new();
 
-    let _ = run_cmd("kscreen-doctor", &[&format!("output.{}.mode.2880x1800@90", DISPLAY)]).await;
-    let _ = run_cmd("kscreen-doctor", &[&format!("output.{}.vrrpolicy.1", DISPLAY)]).await;
 
-    // Core: backlight (fatal — needs video group)
-    write_sysfs(BACKLIGHT, &BACKLIGHT_DEFAULT_RAW.to_string())?;
 
-    // Non-fatal: GPU runtime PM (needs power group / bookos-hw-perms.service)
-    if let Some(e) = write_sysfs_soft(GPU_POWER, "auto") { warns.push(e); }
-
-    let note = if warns.is_empty() { String::new() } else { format!(" (no crítico: {})", warns.join("; ")) };
-    Ok(format!("Ahorro de pantalla activado: 90Hz, brillo al 40%{}", note))
-}
-
-#[tauri::command]
-pub async fn desactivar_ahorro_pantalla() -> Result<String, String> {
-    let mut warns: Vec<String> = Vec::new();
-
-    let _ = run_cmd("kscreen-doctor", &[&format!("output.{}.mode.2880x1800@120", DISPLAY)]).await;
-    // Restore VRR to "automatic" (only when app requests it) at 120Hz
-    let _ = run_cmd("kscreen-doctor", &[&format!("output.{}.vrrpolicy.2", DISPLAY)]).await;
-
-    if let Some(e) = write_sysfs_soft(GPU_POWER, "auto") { warns.push(e); }
-
-    let note = if warns.is_empty() { String::new() } else { format!(" (no crítico: {})", warns.join("; ")) };
-    Ok(format!("Ahorro de pantalla desactivado: 120Hz restaurado{}", note))
-}
 
 // ── 5. Color profile (internal + command) ────────────────────────────────────
 
-#[allow(dead_code)]
-fn extract_object_path(output: &str) -> Option<String> {
-    output.lines().find_map(|l| {
-        let l = l.trim();
-        if l.starts_with("Object path:") {
-            Some(l["Object path:".len()..].trim().to_string())
-        } else {
-            None
-        }
-    })
-}
 
-// ── ICC via KWin (Plasma 6 Wayland gestiona ICC directamente, no colord) ─────
-// KWin lee el perfil desde ~/.local/share/icc/ y se aplica con kscreen-doctor.
-async fn aplicar_perfil_color_interno(nombre_archivo: &str) -> Result<(), String> {
-    let valid = ["SDC4189.icm", "SDC4189S.icm", "SDC4189A.icm", "SDC4189P.icm"];
-    if !valid.contains(&nombre_archivo) {
-        return Err(format!("Perfil no válido: '{}'", nombre_archivo));
-    }
-    let src = format!("{}/{}", ICC_DIR, nombre_archivo);
-    if !std::path::Path::new(&src).exists() {
-        return Err(format!("Perfil no encontrado en {}", ICC_DIR));
-    }
 
-    // Copiar al directorio de usuario que KWin monitoriza
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
-    let icc_user_dir = format!("{}/.local/share/icc", home);
-    std::fs::create_dir_all(&icc_user_dir).ok();
-    let dest = format!("{}/{}", icc_user_dir, nombre_archivo);
-    std::fs::copy(&src, &dest).map_err(|e| format!("No se pudo copiar el perfil: {}", e))?;
+// Los perfiles ICC se gestionan fuera de este módulo y no se anuncian como
+// controles editables hasta que exista una API de BookOS.
 
-    // Aplicar vía kscreen-doctor (Plasma 6 Wayland)
-    run_cmd_timeout("kscreen-doctor", &[
-        &format!("output.{}.icc.profile.{}", DISPLAY, dest),
-    ], 5_000).await?;
 
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn aplicar_perfil_color(nombre_archivo: String) -> Result<String, String> {
-    aplicar_perfil_color_interno(&nombre_archivo).await?;
-    Ok(format!("Perfil ICC '{}' aplicado en {}", nombre_archivo, COLORD_DEVICE))
-}
 
 // ── 6. Brillo ─────────────────────────────────────────────────────────────────
 
@@ -430,21 +241,7 @@ pub async fn obtener_estado_pantalla() -> Result<EstadoPantalla, String> {
         .or_else(|| read_sysfs(PLATFORM_PROFILE))
         .unwrap_or_else(|| "desconocido".to_string());
 
-    // HDR — parseamos la salida de kscreen-doctor (vía Tokio)
-    let hdr_activo = {
-        let result = tokio::time::timeout(
-            Duration::from_millis(1_500),
-            Command::new("kscreen-doctor").arg("-o").output()
-        ).await;
-
-        match result {
-            Ok(Ok(o)) => {
-                let out = String::from_utf8_lossy(&o.stdout).to_lowercase();
-                out.contains("hdr: enabled") || out.contains("hdr:enabled") || out.contains("hdr: 1")
-            }
-            _ => false,
-        }
-    };
+    let hdr_activo = false; // El compositor BookOS no anuncia HDR.
 
     Ok(EstadoPantalla { brillo_porcentaje, modo_termico, platform_profile, pl1_watts, hdr_activo })
 }

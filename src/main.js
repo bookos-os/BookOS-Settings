@@ -1,3 +1,4 @@
+import {startSystemEvents} from './modules/system-events.js';
 import{renderHome,searchIndex,subSearchIndex}from'./modules/home.js';
 import{t,getLang}from'./modules/i18n.js';
 // Routines engine is light and needed at startup (seeding + system-event
@@ -9,12 +10,45 @@ const _loadPages=()=>(_pagesPromise||(_pagesPromise=import('./modules/pages.js')
 import{tauriInvoke,isTauri}from'./tauri-api.js';
 import{applyCachedPalette,syncPalette}from'./modules/dynamic-color.js';
 
+function renderHomeLanding(){
+    const quick=[
+        ['conexiones','wifi.svg','connections','connections_sub'],
+        ['pantalla','brightness.svg','display','display_sub'],
+        ['sonido','sound.svg','sound','sound_sub'],
+        ['bateria','battery.svg','battery','battery_sub'],
+    ];
+    return `<section class="home-landing" aria-label="${t('settings')}">
+        <div class="home-landing-hero">
+            <span class="home-landing-accent" aria-hidden="true"></span>
+            <div class="home-landing-copy">
+                <div class="home-landing-eyebrow">${t('settings')} · BOOKOS</div>
+                <h2>${t('home_welcome_title')}</h2>
+                <p>${t('home_welcome_sub')}</p>
+            </div>
+        </div>
+        <div class="home-landing-section">
+            <div class="home-landing-section-head">
+                <span>${t('home_quick_title')}</span>
+                <span class="home-landing-hint">${t('home_quick_hint')}</span>
+            </div>
+            <div class="home-quick-grid">
+                ${quick.map(([page,icon,title,sub])=>`<button class="home-quick-card" type="button" data-page="${page}">
+                    <img src="assets/${icon}" alt="" class="home-quick-icon">
+                    <span class="home-quick-copy"><strong>${t(title)}</strong><small>${t(sub)}</small></span>
+                    <span class="home-quick-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
+                </button>`).join('')}
+            </div>
+        </div>
+    </section>`;
+}
+
 // La paleta dinámica se aplica desde la caché ANTES de que corra nada más: si
 // esperase al backend, la ventana abriría con los colores de fábrica y saltaría
 // al color del fondo medio segundo después, que es peor que no teñir nada.
 applyCachedPalette();
 
 document.addEventListener('DOMContentLoaded',async()=>{
+    startSystemEvents().catch(console.error);
     const sb=document.getElementById('sb'),app=document.getElementById('app'),mc=document.getElementById('mc');
     // Apply translations to static index.html elements
     document.documentElement.lang=getLang();
@@ -33,6 +67,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     let userInfo=null;
     try{userInfo=JSON.parse(localStorage.getItem('__user_info__')||'null');}catch{}
     if(sb)sb.innerHTML=renderHome(userInfo);
+    if(app)app.innerHTML=renderHomeLanding();
 
     // ── Backend corrections (non-blocking) ──
     tauriInvoke('get_current_theme').then(j=>{try{const th=JSON.parse(j);_applyTheme(!!th.is_dark);localStorage.setItem('__theme_dark__',th.is_dark?'1':'0');}catch(e){}}).catch(()=>{});
@@ -60,7 +95,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
             .forEach(c=>tauriInvoke(c).catch(()=>{}));
     },1200);
     setTimeout(()=>{
-        ['get_audio_devices','get_bluetooth_devices','get_available_themes',
+        ['get_audio_devices','get_bluetooth_devices',
          'get_theme_schedule','get_datetime_info','get_locale_info','get_lock_timeout']
             .forEach(c=>tauriInvoke(c).catch(()=>{}));
     },3000);
@@ -75,12 +110,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
         dispositivos:'renderDispositivos',
         teclado:'renderTeclado',
         touchpadmouse:'renderTouchpadMouse',
-        ai:'renderAI',
         modos:'renderModos',
-        ubicacion:'renderUbicacion',
-        emergencia:'renderEmergencia',
         avanzadas:'renderAvanzadas',
-        salud:'renderSaludDigital',
         accesibilidad:'renderAccesibilidad',
         inicio:'renderPantallaInicio',
         sddmeditor:'renderSddmEditor'
@@ -102,6 +133,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // ── Navigation ──
     const _navHistory=[];
     function clearPageIntervals(){
+        (window._pageCleanups||[]).splice(0).forEach(fn=>fn());
         if(window._pageIntervals){window._pageIntervals.forEach(clearInterval);window._pageIntervals=[];}
     }
     // Wrap the page container so async renders can't overwrite a newer page.
@@ -281,6 +313,13 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // openConnectedBuds) is loaded first.
     const _openBuds=()=>{ if(window.openConnectedBuds)window.openConnectedBuds(); else _loadPages().then(()=>window.openConnectedBuds?.()); };
     sb?.addEventListener('click',e=>{
+        const more=e.target.closest('.home-more-toggle');
+        if(more){
+            const card=more.closest('.home-more-card');
+            const collapsed=card?.classList.toggle('is-collapsed');
+            more.setAttribute('aria-expanded',String(!collapsed));
+            return;
+        }
         if(e.target.closest('#home-buds')){_openBuds();return;}
         const item=e.target.closest('[data-page]');
         if(item)openPage(item.dataset.page);
@@ -288,9 +327,15 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // Keyboard activation for the focusable (role="button") sidebar items.
     sb?.addEventListener('keydown',e=>{
         if(e.key!=='Enter'&&e.key!==' ')return;
+        const more=e.target.closest('.home-more-toggle');
+        if(more){e.preventDefault();more.click();return;}
         if(e.target.closest('#home-buds')){e.preventDefault();_openBuds();return;}
         const item=e.target.closest('[data-page]');
         if(item){e.preventDefault();openPage(item.dataset.page);}
+    });
+    app?.addEventListener('click',e=>{
+        const item=e.target.closest('.home-quick-card[data-page]');
+        if(item)openPage(item.dataset.page);
     });
 
     // Keep the Home profile-card buds shortcut in sync with the connected device.
@@ -371,7 +416,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
         const q=_norm((raw||'').trim());
         const cards=sb.querySelectorAll('.card:not(.sub-results-card)');let any=false;
         const subCard=_ensureSubResultsCard();
-        if(!q){cards.forEach(c=>{c.classList.remove('hidden');c.querySelectorAll('.item').forEach(i=>i.classList.remove('hidden'));});subCard.style.display='none';subCard.innerHTML='';noR.style.display='none';return;}
+        if(!q){cards.forEach(c=>{c.classList.remove('hidden');c.querySelectorAll('.item').forEach(i=>i.classList.remove('hidden'));if(c.classList.contains('home-more-card')){c.classList.add('is-collapsed');c.querySelector('.home-more-toggle')?.setAttribute('aria-expanded','false');}});subCard.style.display='none';subCard.innerHTML='';noR.style.display='none';return;}
         cards.forEach(card=>{
             if(card.classList.contains('card-profile')){const m=_hit(q,['cuenta','perfil','profile','account','usuario','user']);card.classList.toggle('hidden',!m);if(m)any=true;return;}
             let vis=false;
@@ -382,6 +427,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
                 item.classList.toggle('hidden',!ok);if(ok)vis=true;
             });
             card.classList.toggle('hidden',!vis);if(vis)any=true;
+            if(vis&&card.classList.contains('home-more-card')){card.classList.remove('is-collapsed');card.querySelector('.home-more-toggle')?.setAttribute('aria-expanded','true');}
         });
         // Sub-setting matches — show items that didn't already match by parent page
         const visiblePages=new Set([...sb.querySelectorAll('.card:not(.hidden) .item[data-page]:not(.hidden)')].map(i=>i.dataset.page));
@@ -578,7 +624,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
         // gestiona el suyo) ni mientras se escribe en un campo — antes se iba
         // hacia atrás dejando el diálogo huérfano encima de la página nueva.
         if(e.key==='Escape'){
-            if(document.querySelector('.bk-overlay,#bk-popover')||e.target?.matches?.('input,textarea'))return;
+            if(document.querySelector('.bk-overlay,#bk-popover,dialog[open]')||e.target?.matches?.('input,textarea'))return;
             goBackExt();
         }
         if(e.key==='ArrowDown'||e.key==='ArrowUp'){
@@ -589,21 +635,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
         }
         if(e.key==='Enter'&&document.activeElement?.dataset?.page)openPage(document.activeElement.dataset.page);
     });
-
-    // ── Theme schedule ──
-    setInterval(async()=>{
-        try{
-            // Always re-read: the old early-return on a cached flag meant that
-            // enabling the schedule in the UI did nothing until app restart.
-            const s=JSON.parse(await tauriInvoke('get_theme_schedule'));
-            if(!s.enabled)return;
-            const now=new Date();
-            const h=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-            const cur=JSON.parse(await tauriInvoke('get_current_theme'));
-            if(h>=s.dark_time||h<s.light_time){if(!cur.is_dark)await tauriInvoke('set_color_scheme',{scheme:s.dark_theme});}
-            else{if(cur.is_dark)await tauriInvoke('set_color_scheme',{scheme:s.light_theme});}
-        }catch(e){}
-    },60000);
 
     // ── Routine automation ──────────────────────────────────────────────
     // Opposite trigger map: when a trigger fires, which trigger is its "undo" event?
@@ -722,21 +753,13 @@ document.addEventListener('DOMContentLoaded',async()=>{
         try{
             const r = JSON.parse(await tauriInvoke('buds_audio_switch_check',{mac}));
             if(r.action==='connect'){
-                await tauriInvoke('run_command',{cmd:'bluetoothctl',args:['connect',mac]}).catch(()=>{});
+                await tauriInvoke('connect_bluetooth',{mac}).catch(()=>{});
             } else if(r.action==='disconnect'){
                 await tauriInvoke('buds_disconnect').catch(()=>{});
-                await tauriInvoke('run_command',{cmd:'bluetoothctl',args:['disconnect',mac]}).catch(()=>{});
+                await tauriInvoke('disconnect_bluetooth',{mac}).catch(()=>{});
             }
         }catch(e){}
     },5000);
-
-    // Digital wellbeing: log the active app every 60s while the app runs in the
-    // background, so usage data accumulates beyond just the Salud Digital page.
-    if(isTauri()){
-        setInterval(()=>{
-            tauriInvoke('track_active_app').catch(()=>{});
-        },60000);
-    }
 
     // Watchdog: time-based routines. Window-based comparison instead of exact
     // HH:MM equality — interval drift or webview timer throttling used to skip
@@ -774,4 +797,3 @@ document.addEventListener('DOMContentLoaded',async()=>{
         }
     },20000);
 });
-

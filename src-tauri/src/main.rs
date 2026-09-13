@@ -24,9 +24,10 @@ mod buds;
 mod bluez_profile;
 mod quickshare;
 mod p2p;
-mod search;
 mod system_extras;
 mod bookos_desktop;
+mod system_client;
+mod system_settings;
 
 // ── Estado global de actualización ───────────────────────────────────────────
 #[derive(Clone, serde::Serialize)]
@@ -73,153 +74,6 @@ async fn run_timeout(cmd: &str, args: &[&str], timeout_ms: u64) -> String {
 }
 fn read(p: &str) -> String { fs::read_to_string(p).unwrap_or_default().trim().to_string() }
 fn esc(s: &str) -> String { s.replace('\\',"\\\\").replace('"',"\\\"").replace('\n',"\\n").replace('\r',"") }
-
-// ── BookOS Desktop: pantalla de bloqueo nativa ──────────────────────────
-// Esta configuración pertenece al compositor, no a Plasma ni a SDDM. El
-// fichero sigue siendo texto para poder editarlo a mano y compartirlo con el
-// resto del shell sin añadir otra base de datos de ajustes.
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-struct DesktopLockscreenConfig {
-    animaciones: bool,
-    fecha: bool,
-    medios: bool,
-    reloj_y: f32,
-    acceso_y: f32,
-    medios_y: f32,
-    reloj_tamano: f32,
-    avatar_tamano: f32,
-}
-
-impl Default for DesktopLockscreenConfig {
-    fn default() -> Self {
-        Self {
-            animaciones: true,
-            fecha: true,
-            medios: true,
-            reloj_y: 0.08,
-            acceso_y: 0.36,
-            medios_y: 0.68,
-            reloj_tamano: 144.0,
-            avatar_tamano: 132.0,
-        }
-    }
-}
-
-impl DesktopLockscreenConfig {
-    fn validada(mut self) -> Self {
-        let defaults = Self::default();
-        if !self.reloj_y.is_finite() { self.reloj_y = defaults.reloj_y; }
-        if !self.acceso_y.is_finite() { self.acceso_y = defaults.acceso_y; }
-        if !self.medios_y.is_finite() { self.medios_y = defaults.medios_y; }
-        if !self.reloj_tamano.is_finite() { self.reloj_tamano = defaults.reloj_tamano; }
-        if !self.avatar_tamano.is_finite() { self.avatar_tamano = defaults.avatar_tamano; }
-        self.reloj_y = self.reloj_y.clamp(0.02, 0.40);
-        self.acceso_y = self.acceso_y.clamp(0.18, 0.72);
-        self.medios_y = self.medios_y.clamp(0.42, 0.88);
-        self.reloj_tamano = self.reloj_tamano.clamp(72.0, 220.0);
-        self.avatar_tamano = self.avatar_tamano.clamp(64.0, 220.0);
-        self
-    }
-}
-
-fn desktop_panel_path() -> std::path::PathBuf {
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    std::path::PathBuf::from(home).join(".config/bookos/panel.conf")
-}
-
-fn parse_desktop_bool(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "si" | "sí" | "true" | "1" | "on" => Some(true),
-        "no" | "false" | "0" | "off" => Some(false),
-        _ => None,
-    }
-}
-
-fn read_desktop_lockscreen_config() -> DesktopLockscreenConfig {
-    let mut cfg = DesktopLockscreenConfig::default();
-    let text = fs::read_to_string(desktop_panel_path()).unwrap_or_default();
-    for line in text.lines() {
-        let Some((key, value)) = line.split_once('=') else { continue };
-        let key = key.trim();
-        let value = value.trim();
-        match key {
-            "bloqueo_animaciones" => if let Some(v) = parse_desktop_bool(value) { cfg.animaciones = v },
-            "bloqueo_fecha" => if let Some(v) = parse_desktop_bool(value) { cfg.fecha = v },
-            "bloqueo_medios" => if let Some(v) = parse_desktop_bool(value) { cfg.medios = v },
-            "bloqueo_reloj_y" => if let Ok(v) = value.parse() { cfg.reloj_y = v },
-            "bloqueo_acceso_y" => if let Ok(v) = value.parse() { cfg.acceso_y = v },
-            "bloqueo_medios_y" => if let Ok(v) = value.parse() { cfg.medios_y = v },
-            "bloqueo_reloj_tamano" => if let Ok(v) = value.parse() { cfg.reloj_tamano = v },
-            "bloqueo_avatar_tamano" => if let Ok(v) = value.parse() { cfg.avatar_tamano = v },
-            _ => {}
-        }
-    }
-    cfg.validada()
-}
-
-const DESKTOP_LOCK_KEYS: &[&str] = &[
-    "bloqueo_animaciones", "bloqueo_fecha", "bloqueo_medios",
-    "bloqueo_reloj_y", "bloqueo_acceso_y", "bloqueo_medios_y",
-    "bloqueo_reloj_tamano", "bloqueo_avatar_tamano",
-];
-
-fn write_desktop_lockscreen_config(cfg: DesktopLockscreenConfig) -> Result<(), String> {
-    let path = desktop_panel_path();
-    let dir = path.parent().ok_or("Ruta de configuración inválida")?;
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let old = fs::read_to_string(&path).unwrap_or_default();
-    let mut kept = old.lines().filter(|line| {
-        if line.trim() == "# Pantalla de bloqueo nativa (BookOS Settings)" {
-            return false;
-        }
-        line.split_once('=')
-            .map(|(key, _)| !DESKTOP_LOCK_KEYS.contains(&key.trim()))
-            .unwrap_or(true)
-    }).collect::<Vec<_>>().join("\n");
-    while kept.ends_with("\n\n") { kept.pop(); }
-    if !kept.is_empty() && !kept.ends_with('\n') { kept.push('\n'); }
-    kept.push_str("# Pantalla de bloqueo nativa (BookOS Settings)\n");
-    kept.push_str(&format!(
-        "bloqueo_animaciones = {}\nbloqueo_fecha = {}\nbloqueo_medios = {}\n\
-         bloqueo_reloj_y = {:.3}\nbloqueo_acceso_y = {:.3}\nbloqueo_medios_y = {:.3}\n\
-         bloqueo_reloj_tamano = {:.1}\nbloqueo_avatar_tamano = {:.1}\n",
-        if cfg.animaciones { "si" } else { "no" },
-        if cfg.fecha { "si" } else { "no" },
-        if cfg.medios { "si" } else { "no" },
-        cfg.reloj_y, cfg.acceso_y, cfg.medios_y, cfg.reloj_tamano, cfg.avatar_tamano,
-    ));
-    let tmp = dir.join(format!(".panel.conf.{}.tmp", std::process::id()));
-    fs::write(&tmp, kept).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, &path).map_err(|e| e.to_string())
-}
-
-async fn reload_bookos_desktop_lockscreen() -> bool {
-    let Ok(conn) = zbus::Connection::session().await else { return false };
-    let Ok(proxy) = zbus::Proxy::new(
-        &conn,
-        "org.bookos.Desktop",
-        "/org/bookos/Desktop",
-        "org.bookos.Desktop",
-    ).await else { return false };
-    let result: zbus::Result<bool> = proxy.call("ReloadConfig", &("lockscreen",)).await;
-    result.unwrap_or(false)
-}
-
-#[tauri::command]
-fn get_desktop_lockscreen_config() -> String {
-    serde_json::to_string(&read_desktop_lockscreen_config()).unwrap_or_else(|_| "{}".into())
-}
-
-#[tauri::command]
-async fn set_desktop_lockscreen_config(config: DesktopLockscreenConfig) -> String {
-    let config = config.validada();
-    if let Err(error) = write_desktop_lockscreen_config(config) {
-        return serde_json::json!({"ok": false, "live": false, "error": error}).to_string();
-    }
-    let live = reload_bookos_desktop_lockscreen().await;
-    serde_json::json!({"ok": true, "live": live, "config": config}).to_string()
-}
 
 // ── User ─────────────────────────────────────────────────────────────────
 /// Locate user picture and return (path, base64-data-url) — searches the
@@ -915,12 +769,12 @@ fn detect_book_model() -> Option<String> {
             s.trim().to_string()
         })
         .unwrap_or_default();
-    let plasma = { let v = run("plasmashell",&["--version"]).await; v.split_whitespace().last().unwrap_or(&v).to_string() };
+    let desktop = "BookOS".to_string();
     // Commercial model name (Galaxy Book4/5 …) from DMI, else raw product_name.
     let model = detect_book_model()
         .unwrap_or_else(|| { let p = read("/sys/class/dmi/id/product_name").trim().to_string(); if p.is_empty() { "—".into() } else { p } });
-    format!(r#"{{"hostname":"{}","kernel":"{}","distro":"{}","cpu":"{}","ram":"{}","gpu":"{}","plasma":"{}","model":"{}"}}"#,
-        esc(&host),esc(&kern),esc(&distro),esc(&cpu),esc(&ram),esc(&gpu),esc(&plasma),esc(&model))
+    format!(r#"{{"hostname":"{}","kernel":"{}","distro":"{}","cpu":"{}","ram":"{}","gpu":"{}","desktop":"{}","model":"{}"}}"#,
+        esc(&host),esc(&kern),esc(&distro),esc(&cpu),esc(&ram),esc(&gpu),esc(&desktop),esc(&model))
 }
 
 // ── Hardware feature detection (generic Linux — no vendor assumptions) ────
@@ -946,10 +800,12 @@ fn detect_book_model() -> Option<String> {
     ];
     let mut cl = String::new();
     for p in &bat_paths {
-        let v = read(p);
-        if !v.trim().is_empty() { cl = v.trim().to_string(); break; }
+        if std::path::Path::new(p).exists() {
+            cl = read(p);
+            break;
+        }
     }
-    let charge_limit_supported = !cl.is_empty();
+    let charge_limit_supported = !cl.is_empty() || bat_paths.iter().any(|p| std::path::Path::new(p).exists());
 
     format!(r#"{{"perf_supported":{},"charge_limit_supported":{},"performance_mode":"{}","charge_limit":"{}"}}"#,
         perf_supported, charge_limit_supported, esc(perf.trim()), esc(&cl))
@@ -1060,153 +916,99 @@ fn detect_book_model() -> Option<String> {
     }
     format!(r#"{{"ok":true,"governor":"{}","cpus_changed":{}}}"#, gov, gov_changed)
 }
-#[tauri::command] async fn set_charge_limit(limit: u32) -> String {
-    // Standard Linux ACPI charge threshold — supported on many laptops
+/// Set the battery charge threshold and verify the value the kernel accepted.
+///
+/// The sysfs file is normally writable through `bookos-hw-perms.service` and
+/// the `power` group.  A stock install may not have that optional service yet,
+/// so the UI can provide a password for one privileged write instead of
+/// silently showing 80% while the firmware remains at 100%.
+#[tauri::command] async fn set_charge_limit(limit: u32, password: Option<String>) -> String {
+    use tokio::io::AsyncWriteExt;
     let end_limit = limit.clamp(50, 100);
     let bat_paths = [
         "/sys/class/power_supply/BAT0/charge_control_end_threshold",
         "/sys/class/power_supply/BAT1/charge_control_end_threshold",
         "/sys/class/power_supply/BATT/charge_control_end_threshold",
     ];
-    // Persist limit for adaptive charging script
-    if let Ok(()) = fs::create_dir_all("/etc/bookos") {
-        let _ = fs::write("/etc/bookos/charge_limit", end_limit.to_string());
-    }
     for p in &bat_paths {
         if std::path::Path::new(p).exists() {
-            return match fs::write(p, end_limit.to_string()) {
-                Ok(_) => format!(r#"{{"ok":true,"limit":{}}}"#, end_limit),
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied =>
-                    r#"{"ok":false,"error":"sin permisos — instala bookos-hw-perms.service"}"#.into(),
-                Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
+            let direct = fs::write(p, end_limit.to_string());
+            let accepted = || read(p).trim() == end_limit.to_string();
+            if direct.is_ok() && accepted() {
+                return format!(r#"{{"ok":true,"limit":{}}}"#, end_limit);
+            }
+
+            let pw = match password.as_deref().filter(|s| !s.is_empty()) {
+                Some(pw) => pw,
+                None => return format!(r#"{{"ok":false,"needs_auth":true,"limit":{},"error":"Se requieren permisos para modificar el límite de carga"}}"#, end_limit),
             };
+            let mut child = match Command::new("sudo")
+                .args(["-S", "-p", "", "tee", p])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(format!("{}\n{}\n", pw, end_limit).as_bytes()).await;
+            }
+            return match child.wait_with_output().await {
+                Ok(output) if output.status.success() && accepted() => {
+                    // Best effort: the adaptive timer uses this same value.
+                    if let Ok(()) = fs::create_dir_all("/etc/bookos") {
+                        let _ = fs::write("/etc/bookos/charge_limit", end_limit.to_string());
+                    }
+                    format!(r#"{{"ok":true,"limit":{}}}"#, end_limit)
+                }
+                Ok(output) => {
+                    let err = String::from_utf8_lossy(&output.stderr);
+                    if err.trim().is_empty() {
+                        r#"{"ok":false,"error":"El hardware no aceptó el límite solicitado"}"#.into()
+                    } else {
+                        format!(r#"{{"ok":false,"error":"{}"}}"#, esc(err.trim()))
+                    }
+                }
+                Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
+            }
         }
     }
     r#"{"ok":false,"error":"límite de carga no compatible con este hardware"}"#.into()
 }
 
 // ── WiFi ─────────────────────────────────────────────────────────────────
-#[tauri::command] async fn get_wifi_status() -> String {
-    let st = run("nmcli",&["-t","-f","WIFI","radio"]).await;
-    let conn = run("nmcli",&["-t","-f","NAME,TYPE","connection","show","--active"]).await;
-    let ssid = conn.lines().find(|l| l.contains("wireless")||l.contains("wifi")).map(|l| l.split(':').next().unwrap_or("").to_string()).unwrap_or_default();
-    format!(r#"{{"enabled":{},"ssid":"{}"}}"#,st=="enabled",esc(&ssid))
-}
-#[tauri::command] async fn toggle_wifi(enable: bool) -> String { run("nmcli",&["radio","wifi",if enable{"on"}else{"off"}]).await; format!(r#"{{"ok":true}}"#) }
-#[tauri::command] async fn get_wifi_list() -> String {
-    let scan = run("nmcli",&["-t","-f","SSID,SIGNAL,SECURITY,IN-USE,FREQ","device","wifi","list","--rescan","no"]).await;
-    let mut seen = std::collections::HashSet::new();
-    let nets: Vec<String> = scan.lines().filter(|l| !l.is_empty()).filter_map(|l| {
-        let p: Vec<&str> = l.splitn(5,':').collect();
-        let ssid = p.first().unwrap_or(&"").to_string();
-        if ssid.is_empty() || !seen.insert(ssid.clone()) { return None; }
-        let freq_str = p.get(4).unwrap_or(&"").replace("\\:",":");
-        let freq_mhz: u32 = freq_str.split_whitespace().next().unwrap_or("0").parse().unwrap_or(0);
-        let band = if freq_mhz >= 5925 { "6G" } else if freq_mhz >= 3000 { "5G" } else if freq_mhz > 0 { "2.4G" } else { "" };
-        Some(format!(r#"{{"ssid":"{}","signal":{},"security":"{}","active":{},"band":"{}"}}"#,
-            esc(&ssid),p.get(1).unwrap_or(&"0"),esc(p.get(2).unwrap_or(&"")),p.get(3).unwrap_or(&"")==&"*",band))
-    }).collect();
-    format!("[{}]",nets.join(","))
-}
-#[tauri::command] async fn connect_wifi(ssid: String, password: String) -> String {
-    let r = if password.is_empty() { run("nmcli",&["device","wifi","connect",&ssid]).await }
-    else { run("nmcli",&["device","wifi","connect",&ssid,"password",&password]).await };
-    format!(r#"{{"ok":{},"result":"{}"}}"#,r.contains("successfully")||r.contains("activated"),esc(&r))
-}
-#[tauri::command] async fn wifi_rescan() -> String { run("nmcli",&["device","wifi","rescan"]).await; r#"{"ok":true}"#.into() }
+
+
+
+
+
 
 // ── Bluetooth ────────────────────────────────────────────────────────────
-#[tauri::command] async fn get_bluetooth_status() -> String {
-    let s = run("bluetoothctl",&["show"]).await;
-    format!(r#"{{"enabled":{}}}"#,s.lines().any(|l| l.contains("Powered:")&&l.contains("yes")))
-}
-#[tauri::command] async fn toggle_bluetooth(enable: bool) -> String {
-    run("rfkill",&[if enable{"unblock"}else{"block"},"bluetooth"]).await;
-    run("bluetoothctl",&["power",if enable{"on"}else{"off"}]).await;
-    format!(r#"{{"ok":true}}"#)
-}
-#[tauri::command] async fn get_bluetooth_devices() -> String {
-    // "devices Paired" needs bluez ≥5.65. Fall back to plain "devices" (all known) if empty.
-    let mut paired = run("bluetoothctl",&["devices","Paired"]).await;
-    if paired.trim().is_empty() || paired.to_lowercase().contains("invalid") {
-        paired = run("bluetoothctl",&["devices"]).await;
-    }
-    let connected_out = run("bluetoothctl",&["devices","Connected"]).await;
 
-    // Strip ANSI escapes that some bluetoothctl builds emit
-    let strip_ansi = |s: &str| -> String {
-        let mut out = String::with_capacity(s.len());
-        let mut chars = s.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' { while let Some(nc) = chars.next() { if nc.is_ascii_alphabetic() { break; } } }
-            else { out.push(c); }
-        }
-        out
-    };
-    let paired_clean = strip_ansi(&paired);
 
-    let entries: Vec<(String,String,bool)> = paired_clean.lines().filter_map(|l| {
-        let l = l.trim();
-        // Skip prompts like "[bluetooth]#" or "[NEW]" prefixes
-        let l = l.trim_start_matches(|c: char| c=='[' || c==']' || c=='#' || c.is_whitespace());
-        let idx = l.find("Device ")?;
-        let rest = &l[idx + "Device ".len()..];
-        let (mac, name) = rest.split_once(' ')?;
-        // MAC sanity: 17 chars with colons
-        if mac.len()!=17 || mac.matches(':').count()!=5 { return None; }
-        Some((mac.to_string(), name.trim().to_string(), connected_out.contains(mac)))
-    }).collect();
 
-    // Fetch info for all devices in parallel
-    let mut tasks = Vec::new();
-    for (mac, name, is_conn) in entries {
-        tasks.push(tokio::spawn(async move {
-            let info = run_timeout("bluetoothctl",&["info",&mac], 2_000).await;
-            let icon = info.lines().find(|l| l.trim_start().starts_with("Icon:"))
-                .map(|l| l.split(':').nth(1).unwrap_or("").trim().to_string())
-                .unwrap_or_default();
-            format!(r#"{{"mac":"{}","name":"{}","connected":{},"icon":"{}"}}"#,
-                esc(&mac),esc(&name),is_conn,esc(&icon))
-        }));
-    }
-    
-    let mut devs = Vec::new();
-    for t in futures::future::join_all(tasks).await {
-        if let Ok(d) = t { devs.push(d); }
-    }
-    format!("[{}]",devs.join(","))
-}
-#[tauri::command] async fn connect_bluetooth(mac: String) -> String { let r=run("bluetoothctl",&["connect",&mac]).await; format!(r#"{{"ok":{}}}"#,r.contains("successful")||r.contains("Connected")) }
-#[tauri::command] async fn disconnect_bluetooth(mac: String) -> String { run("bluetoothctl",&["disconnect",&mac]).await; r#"{"ok":true}"#.into() }
-#[tauri::command] async fn bluetooth_scan() -> String {
-    tokio::spawn(async move {
-        let _ = Command::new("bluetoothctl")
-            .args(["--timeout","6","scan","on"])
-            .output()
-            .await;
-    });
-    r#"{"ok":true}"#.into()
-}
+
+
+
 
 // ── Airplane ─────────────────────────────────────────────────────────────
-#[tauri::command] async fn get_airplane_mode() -> String {
-    let r = run("rfkill",&["list"]).await;
-    format!(r#"{{"enabled":{}}}"#,r.lines().filter(|l| l.contains("Soft blocked:")).all(|l| l.contains("yes")))
-}
-#[tauri::command] async fn toggle_airplane_mode(enable: bool) -> String { run("rfkill",&[if enable{"block"}else{"unblock"},"all"]).await; r#"{"ok":true}"#.into() }
+
+
 
 // ── Brightness ───────────────────────────────────────────────────────────
 #[tauri::command] async fn get_brightness() -> String {
-    let c: f64 = run("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","brightness"]).await.parse().unwrap_or(0.0);
-    let m: f64 = run("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","brightnessMax"]).await.parse().unwrap_or(100.0);
-    format!(r#"{{"brightness":{}}}"#,if m>0.0{(c/m*100.0)as u32}else{0})
+    match native_backlight() {Ok((_,current,max))=>serde_json::json!({"brightness":current*100/max.max(1)}).to_string(),Err(e)=>system_client::failure(e)}
 }
 #[tauri::command] async fn set_brightness(value: u32) -> String {
-    // Get max from KDE, convert percentage to raw value, set via KDE D-Bus
-    let m: f64 = run("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","brightnessMax"]).await.parse().unwrap_or(100.0);
-    let raw = (m * value as f64 / 100.0).round() as u32;
-    run("qdbus6",&["org.kde.Solid.PowerManagement","/org/kde/Solid/PowerManagement/Actions/BrightnessControl","setBrightness",&raw.to_string()]).await;
-    r#"{"ok":true}"#.into()
+    let result=async {
+        let (name,_,max)=native_backlight()?;
+        let c=zbus::Connection::system().await.map_err(|e|e.to_string())?;
+        let p=zbus::Proxy::new(&c,"org.freedesktop.login1","/org/freedesktop/login1/session/auto","org.freedesktop.login1.Session").await.map_err(|e|e.to_string())?;
+        p.call::<_,_,()>("SetBrightness",&("backlight",name,max*value.min(100)/100)).await.map_err(|e|e.to_string())
+    }.await;
+    match result {Ok(())=>serde_json::json!({"ok":true}).to_string(),Err(e)=>system_client::failure(e)}
 }
 
 // ── Keyboard Brightness (3 levels: 0,1,2) ────────────────────────────────
@@ -1223,107 +1025,25 @@ fn detect_book_model() -> Option<String> {
 }
 
 // ── Night Light ──────────────────────────────────────────────────────────
-#[tauri::command] async fn get_nightlight() -> String {
-    let a = run("kreadconfig6",&["--file","kwinrc","--group","NightColor","--key","Active"]).await;
-    let t = run("kreadconfig6",&["--file","kwinrc","--group","NightColor","--key","NightTemperature"]).await;
-    // Mode: 0=auto location, 1=manual times, 2=location coords, 3=constant
-    let mode = run("kreadconfig6",&["--file","kwinrc","--group","NightColor","--key","Mode"]).await;
-    let begin = run("kreadconfig6",&["--file","kwinrc","--group","NightColor","--key","EveningBeginFixed"]).await;
-    let morn = run("kreadconfig6",&["--file","kwinrc","--group","NightColor","--key","MorningBeginFixed"]).await;
-    // KDE stores HHMMSS strings (e.g. "1800"). Normalise to HH:MM.
-    let fmt = |s: &str, def: &str| -> String {
-        let s = if s.is_empty() { def } else { s };
-        let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-        let p = format!("{:0>4}", digits);
-        if p.len() >= 4 { format!("{}:{}", &p[0..2], &p[2..4]) } else { def.to_string() }
-    };
-    format!(r#"{{"active":{},"temperature":{},"mode":"{}","evening":"{}","morning":"{}"}}"#,
-        a=="true", if t.is_empty(){"4500".into()}else{t},
-        if mode.is_empty(){"0".into()}else{esc(mode.trim())},
-        fmt(begin.trim(),"18:00"), fmt(morn.trim(),"06:00"))
-}
+
 
 // Configure a fixed-time night light schedule (Mode=1). Times are "HH:MM".
-#[tauri::command] async fn set_nightlight_schedule(scheduled: bool, evening: String, morning: String, temperature: Option<u32>) -> String {
-    // Mode 1 = custom times, Mode 3 = always on (constant).
-    let mode = if scheduled { "1" } else { "3" };
-    run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","Active","true"]).await;
-    run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","Mode",mode]).await;
-    if scheduled {
-        let to_kde = |hhmm: &str| hhmm.chars().filter(|c| c.is_ascii_digit()).collect::<String>();
-        let ev = to_kde(&evening); let mo = to_kde(&morning);
-        run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","EveningBeginFixed",&ev]).await;
-        run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","MorningBeginFixed",&mo]).await;
-    }
-    if let Some(t) = temperature {
-        run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","NightTemperature",&t.to_string()]).await;
-    }
-    run("qdbus6",&["org.kde.KWin","/KWin","reconfigure"]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn set_nightlight(active: bool, temperature: Option<u32>) -> String {
-    run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","Active",if active{"true"}else{"false"}]).await;
-    if let Some(t) = temperature {
-        run("kwriteconfig6",&["--file","kwinrc","--group","NightColor","--key","NightTemperature",&t.to_string()]).await;
-    }
-    run("qdbus6",&["org.kde.KWin","/KWin","reconfigure"]).await;
-    if temperature.is_none() {
-        // Toggle only: force immediate re-apply via inhibit+uninhibit cycle
-        run("dbus-send",&["--session","--dest=org.kde.KWin","--type=method_call",
-            "/org/kde/KWin/NightLight","org.kde.KWin.NightLight.inhibit"]).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
-        run("dbus-send",&["--session","--dest=org.kde.KWin","--type=method_call",
-            "/org/kde/KWin/NightLight","org.kde.KWin.NightLight.uninhibit"]).await;
-    }
-    r#"{"ok":true}"#.into()
-}
+
+
 
 // ── Sound ────────────────────────────────────────────────────────────────
-#[tauri::command] async fn get_volume() -> String {
-    let v = run("pactl",&["get-sink-volume","@DEFAULT_SINK@"]).await;
-    let m = run("pactl",&["get-sink-mute","@DEFAULT_SINK@"]).await;
-    let pct = v.split('/').nth(1).map(|s| s.trim().trim_end_matches('%').trim().to_string()).unwrap_or("50".into());
-    format!(r#"{{"volume":{},"muted":{}}}"#,pct,m.contains("yes"))
-}
-#[tauri::command] async fn set_volume(value: u32) -> String {
-    run("pactl",&["set-sink-volume","@DEFAULT_SINK@",&format!("{}%",value)]).await;
-    set_bookos_setting("Volume".into(), value.to_string());
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn toggle_mute() -> String { run("pactl",&["set-sink-mute","@DEFAULT_SINK@","toggle"]).await; r#"{"ok":true}"#.into() }
+
+
+
 
 /// Balance: -100=full left, 0=center, 100=full right.
 /// Converts to pactl dual-channel volume: e.g. balance=+50 → L=75%, R=100%
 /// Balance: -100=full left, 0=center, 100=full right.
 /// Sets per-channel volume on the default sink, scaling current overall volume.
 /// Requires pactl/pipewire-pulse. Uses `wpctl` as fallback for native PipeWire.
-#[tauri::command] async fn set_balance(balance: i32) -> String {
-    let b = balance.clamp(-100, 100);
-    // Read current overall volume so we don't reset it.
-    let cur = run("pactl", &["get-sink-volume", "@DEFAULT_SINK@"]).await;
-    let base: u32 = cur.split('/').nth(1)
-        .and_then(|s| s.trim().trim_end_matches('%').trim().parse().ok())
-        .unwrap_or(50);
-    // Compute per-channel percentages relative to base
-    let (l_pct, r_pct): (u32, u32) = if b <= 0 {
-        (base, ((base as i32 + (base as i32 * b / 100)).max(0)) as u32)
-    } else {
-        (((base as i32 - (base as i32 * b / 100)).max(0)) as u32, base)
-    };
-    // Pactl accepts: "set-sink-volume SINK 80% 60%" (one value per channel)
-    let l_str = format!("{}%", l_pct);
-    let r_str = format!("{}%", r_pct);
-    let _ = run("pactl", &["set-sink-volume", "@DEFAULT_SINK@", &l_str, &r_str]).await;
-    set_bookos_setting("AudioBalance".into(), b.to_string());
-    eprintln!("[balance] base={}% L={} R={} balance={}", base, l_pct, r_pct, b);
-    format!(r#"{{"ok":true,"l":{},"r":{},"base":{}}}"#, l_pct, r_pct, base)
-}
 
-#[tauri::command] fn get_balance() -> String {
-    let b = get_bookos_setting("AudioBalance".into(), "0".into())
-        .parse::<i32>().unwrap_or(0).clamp(-100, 100);
-    format!(r#"{{"balance":{}}}"#, b)
-}
+
+
 
 #[tauri::command] async fn get_battery_status() -> String {
     let path = upower_bat_path().await;
@@ -1584,34 +1304,9 @@ fn parse_upower(info: &str) -> String {
 }
 
 /// Microphone global mute — via PulseAudio/PipeWire.
-#[tauri::command] async fn set_mic_muted(muted: bool) -> String {
-    let val = if muted { "1" } else { "0" };
-    let r = Command::new("pactl")
-        .args(&["set-source-mute", "@DEFAULT_SOURCE@", val])
-        .output().await;
-    // También mutear todas las sources de entrada para bloqueo total
-    if let Ok(list) = Command::new("pactl").args(&["list","short","sources"]).output().await {
-        let s = String::from_utf8_lossy(&list.stdout);
-        for line in s.lines() {
-            if let Some(name) = line.split_whitespace().nth(1) {
-                if name.contains(".monitor") { continue; }
-                let _ = Command::new("pactl").args(&["set-source-mute", name, val]).output().await;
-            }
-        }
-    }
-    match r {
-        Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
-        _ => format!(r#"{{"ok":false}}"#),
-    }
-}
 
-#[tauri::command] async fn get_mic_muted() -> String {
-    let r = Command::new("pactl")
-        .args(&["get-source-mute", "@DEFAULT_SOURCE@"])
-        .output().await;
-    let muted = r.map(|o| String::from_utf8_lossy(&o.stdout).contains("yes")).unwrap_or(false);
-    format!(r#"{{"muted":{}}}"#, muted)
-}
+
+
 
 /// Computes median disconnect times per weekday from the CSV.
 /// Disconnect = transition Charging/Full → Discharging.
@@ -1699,62 +1394,9 @@ fn parse_upower(info: &str) -> String {
 }
 
 // ── Display / Resolution ─────────────────────────────────────────────────
-#[tauri::command] async fn get_display_info() -> String {
-    let raw = run("kscreen-doctor",&["-o"]).await;
-    // kscreen-doctor emits ANSI colour codes even when piped — strip them or
-    // line prefixes like "Output:" never match.
-    let mut out = String::with_capacity(raw.len());
-    {
-        let mut chars = raw.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' { while let Some(nc) = chars.next() { if nc.is_ascii_alphabetic() { break; } } }
-            else { out.push(c); }
-        }
-    }
-    // Parse outputs and their modes
-    let mut outputs = Vec::new();
-    let mut current_output = String::new();
-    let mut modes = Vec::new();
-    let mut current_res = String::new();
-    for line in out.lines() {
-        let t = line.trim();
-        if t.starts_with("Output:") {
-            if !current_output.is_empty() {
-                outputs.push(format!(r#"{{"name":"{}","modes":[{}],"current":"{}"}}"#,esc(&current_output),modes.join(","),esc(&current_res)));
-                modes.clear();
-            }
-            current_output = t.trim_start_matches("Output:").trim().split_whitespace().next().unwrap_or("").to_string();
-        }
-        if t.starts_with("Modes:") || (t.contains("x") && t.contains("@")) {
-            for mode_part in t.split_whitespace() {
-                if !mode_part.contains("x") || !mode_part.contains("@") { continue; }
-                let mut res = mode_part.to_string();
-                if let Some(pos) = res.find(':') {
-                    res = res[pos+1..].to_string();
-                }
-                let is_current = res.contains("*");
-                res = res.trim_end_matches('*').trim_end_matches('!').to_string();
-                if is_current { current_res = res.clone(); }
-                let quoted = format!(r#""{}""#, esc(&res));
-                if !res.is_empty() && !modes.contains(&quoted) {
-                    modes.push(quoted);
-                }
-            }
-        }
-    }
-    if !current_output.is_empty() {
-        outputs.push(format!(r#"{{"name":"{}","modes":[{}],"current":"{}"}}"#,esc(&current_output),modes.join(","),esc(&current_res)));
-    }
-    format!("[{}]",outputs.join(","))
-}
-#[tauri::command] async fn set_resolution(output: String, resolution: String) -> String {
-    run("kscreen-doctor",&[&format!("output.{}.mode.{}",output,resolution)]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn set_vrr_policy(output: String, policy: String) -> String {
-    run("kscreen-doctor",&[&format!("output.{}.vrrpolicy.{}",output,policy)]).await;
-    r#"{"ok":true}"#.into()
-}
+
+
+
 
 // Detección de tema oscuro — keywords de claro tienen prioridad sobre keywords de oscuro
 // Ej: "Claro Frappe" → light (claro gana sobre frappe)
@@ -1773,40 +1415,39 @@ fn theme_is_dark(name: &str) -> bool {
 
 // ── Themes ───────────────────────────────────────────────────────────────
 #[tauri::command] async fn get_current_theme() -> String {
-    // Primero leer preferencia guardada en nuestro JSON (fuente de verdad para la app)
-    let cfg = load_bookos_settings();
-    let saved_dark = cfg.get("ThemeIsDark").and_then(|v| {
-        v.as_bool().or_else(|| v.as_str().map(|s| s == "true"))
-    });
-    if let Some(is_dark) = saved_dark {
-        let scheme = cfg.get("ThemeScheme").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        return format!(r#"{{"scheme":"{}","is_dark":{}}}"#, esc(&scheme), is_dark);
+    match bookos_desktop::config_value().await {
+        Ok(d) => {
+            // El escritorio ya dice qué color está pintado; con «automatico»
+            // es la única respuesta fiable, porque quien programa el cambio de
+            // las ocho es él. Lo de abajo era rehacerle el cálculo a mano con
+            // `date` y comparación de cadenas, que además solo acierta si las
+            // horas vienen con el cero delante.
+            let dark = match d["tema_efectivo"].as_str() {
+                Some("claro")=>false, Some("oscuro")=>true,
+                // Compositor anterior a `tema_efectivo`: queda el cálculo viejo.
+                _=>match d["tema"].as_str().unwrap_or("oscuro") {
+                    "claro"=>false,"oscuro"=>true,_=>{
+                        let now=run("date", &["+%H:%M"]).await;
+                        let light=d["tema_claro_desde"].as_str().unwrap_or("07:00");
+                        let dark=d["tema_oscuro_desde"].as_str().unwrap_or("20:00");
+                        if light < dark { now.as_str() < light || now.as_str() >= dark } else { now.as_str() >= dark && now.as_str() < light }
+                    }
+                }
+            };
+            serde_json::json!({"scheme":d["tema"],"is_dark":dark}).to_string()
+        },Err(e)=>system_client::failure(e)
     }
-    // Fallback: leer de KDE
-    let scheme = run("kreadconfig6",&["--file","kdeglobals","--group","General","--key","ColorScheme"]).await;
-    let gtk = run("gsettings",&["get","org.gnome.desktop.interface","color-scheme"]).await;
-    let is_dark = theme_is_dark(&scheme) || gtk.contains("dark");
-    // Auto-sync Kvantum + Plasma Desktop Theme to match color scheme
-    let (kv, pt) = get_kv_pt(&cfg, is_dark);
-    run("kvantummanager",&["--set",&kv]).await;
-    run("plasma-apply-desktoptheme",&[&pt]).await;
-    apply_gtk_theme(&cfg, is_dark).await;
-    apply_lockscreen_theme(is_dark).await;
-    format!(r#"{{"scheme":"{}","is_dark":{}}}"#,esc(&scheme),is_dark)
 }
 
 /// Logout current session. Faster than reboot, applies theme to all apps cleanly.
 #[tauri::command]
 async fn logout_session() -> String {
-    // Plasma session manager — clean logout, no confirm dialog.
-    let _ = run("qdbus6", &["org.kde.LogoutPrompt","/LogoutPrompt","logout"]).await;
-    let _ = run("qdbus6", &["org.kde.Shutdown","/Shutdown","logout"]).await;
-    let _ = run("loginctl", &["terminate-session", "self"]).await;
-    r#"{"ok":true}"#.into()
+    let result=Command::new("loginctl").args(["terminate-session","self"]).status().await;
+    match result {Ok(s) if s.success()=>serde_json::json!({"ok":true}).to_string(),_=>system_client::failure("No se pudo cerrar la sesión")}
 }
 
-/// Sync the `variant=` line of the BookOS SDDM theme.conf so the lockscreen QML
-/// (which reads that file) picks up the user's chosen light/dark mode.
+/// Sync the `variant=` line of the BookOS SDDM theme.conf so the greeter
+/// picks up the user's chosen light/dark mode.
 /// Requires sudo cached or polkit rule; silent no-op if not writable.
 /// Sustituye (o añade) una línea `clave=valor` en un `theme.conf`-like,
 /// tirando de paso cualquier línea basura (self-heal: ni sección, ni
@@ -1832,48 +1473,11 @@ fn merge_conf_line(content: &str, key: &str, value: &str) -> String {
     out.join("\n") + "\n"
 }
 
-async fn sync_sddm_variant(is_dark: bool) {
-    // Per-user override mirrors /usr/share/.../theme.conf but is writable without sudo.
-    // Lockscreen QML reads /usr/share/sddm/themes/bookos/theme.conf; we use a separate
-    // user-writable file and let the lockscreen check both. To avoid root for routine
-    // theme switches, we ALSO write to ~/.config/bookos-sddm-variant which the
-    // lockscreen reads as override.
-    let home = match std::env::var("HOME") { Ok(h) => h, Err(_) => return };
-    let user_override = format!("{}/.config/bookos-sddm-variant", home);
-    let new_variant = if is_dark { "dark" } else { "light" };
-    let cur_override = std::fs::read_to_string(&user_override).unwrap_or_default();
-    let _ = std::fs::write(&user_override, merge_conf_line(&cur_override, "variant", new_variant));
 
-    // Also try silent direct write to /usr/share if user already has perm (no prompt).
-    let conf_path = "/usr/share/sddm/themes/bookos/theme.conf";
-    if let Ok(cur) = std::fs::read_to_string(conf_path) {
-        let new_content = merge_conf_line(&cur, "variant", new_variant);
-        if new_content != cur {
-            // Only direct fs::write — no pkexec. If it fails, the per-user
-            // override above is enough for the lockscreen.
-            let _ = std::fs::write(conf_path, &new_content);
-        }
-    }
-
-    // Self-heal: theme.conf.user takes precedence over the base file for the
-    // SDDM greeter. If it still has a literal "variant=auto" from before
-    // set_sddm_config stopped writing that line, it permanently shadows the
-    // live sync above — strip it so "auto" falls through to theme.conf.
-    if let Ok(cur_user) = std::fs::read_to_string(SDDM_CONF_USER) {
-        let filtered: Vec<&str> = cur_user.lines()
-            .filter(|l| l.trim() != "variant=auto")
-            .collect();
-        if filtered.len() != cur_user.lines().count() {
-            let new_user = filtered.join("\n") + "\n";
-            let _ = std::fs::write(SDDM_CONF_USER, &new_user);
-        }
-    }
-}
 
 /// Igual que `sync_sddm_variant`, pero para el acento de la paleta dinámica.
-/// El override de usuario (sin sudo) ya basta para que el lockscreen en vivo
-/// —que corre dentro de la sesión, no antes del login— lo recoja: MainBlock.qml
-/// ya lee `themeConf.accentColor` de esa cadena de ficheros. El saludo SDDM de
+/// El override de usuario (sin sudo) ya basta para que el greeter lo recoja.
+/// El saludo SDDM de
 /// verdad (pre-login) solo lo recibe si el intento silencioso sobre
 /// theme.conf tiene permisos (p.ej. tras "Instalar tema SDDM"); si no, se
 /// queda con el accent que dejó esa instalación hasta que el usuario la
@@ -1893,49 +1497,16 @@ async fn sync_sddm_accent(hex: &str) {
     }
 }
 
-/// Tell running apps a theme change happened so they re-style without restart.
-/// Strictly non-invasive: only fires D-Bus signals + gsettings. Does NOT restart
-/// plasmashell, kwin, or any service.
-async fn notify_theme_change(is_dark: bool) {
-    // Tell KDE platform theme module to reload palette (Qt apps with KDE integration).
-    // Soft refresh — module re-reads config files, no process restart.
-    run("qdbus6", &["org.kde.kded6", "/modules/kdeplatformtheme", "refresh"]).await;
-    // Broadcast KGlobalSettings palette-changed signal so all Qt apps repaint.
-    run("dbus-send", &["--session","--type=signal","/KGlobalSettings",
-        "org.kde.KGlobalSettings.notifyChange","int32:0","int32:0"]).await;
-    // GTK3/4 apps watch this gsetting and re-style automatically.
-    let gtk_color = if is_dark { "prefer-dark" } else { "prefer-light" };
-    run("gsettings", &["set","org.gnome.desktop.interface","color-scheme",gtk_color]).await;
-}
+/// Tell running apps that the BookOS theme changed without restarting them.
+
 
 // ── Theme config helpers ─────────────────────────────────────────────────
-fn get_kv_pt(cfg: &serde_json::Value, is_dark: bool) -> (String, String) {
-    let kv = if is_dark {
-        cfg.get("KvantumDark").and_then(|v|v.as_str()).unwrap_or("bookos-dark-blue").to_string()
-    } else {
-        cfg.get("KvantumLight").and_then(|v|v.as_str()).unwrap_or("bookos-light-blue").to_string()
-    };
-    let pt = if is_dark {
-        cfg.get("PlasmaDark").and_then(|v|v.as_str()).unwrap_or("bookos-dark").to_string()
-    } else {
-        cfg.get("PlasmaLight").and_then(|v|v.as_str()).unwrap_or("bookos-light").to_string()
-    };
-    (kv, pt)
+fn kvantum_theme(cfg:&serde_json::Value,is_dark:bool)->String {
+    let key=if is_dark {"KvantumDark"}else{"KvantumLight"};
+    cfg.get(key).and_then(|v|v.as_str()).unwrap_or(if is_dark {"bookos-dark-blue"}else{"bookos-light-blue"}).to_owned()
 }
-async fn apply_lockscreen_theme(is_dark: bool) {
-    let theme = if is_dark { "BookOS-Dark" } else { "BookOS-Light" };
-    run("kwriteconfig6",&["--file","kscreenlockerrc","--group","Greeter","--key","theme",theme]).await;
-}
-async fn apply_gtk_theme(cfg: &serde_json::Value, is_dark: bool) {
-    let gtk = if is_dark {
-        cfg.get("GtkDark").and_then(|v|v.as_str()).unwrap_or("BookOS-Dark").to_string()
-    } else {
-        cfg.get("GtkLight").and_then(|v|v.as_str()).unwrap_or("BookOS-Light").to_string()
-    };
-    let scheme = if is_dark { "prefer-dark" } else { "prefer-light" };
-    run("gsettings",&["set","org.gnome.desktop.interface","gtk-theme",&gtk]).await;
-    run("gsettings",&["set","org.gnome.desktop.interface","color-scheme",scheme]).await;
-}
+
+
 #[tauri::command] fn get_available_kvantum_themes() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let path = format!("{}/.config/Kvantum", home);
@@ -1958,166 +1529,17 @@ async fn apply_gtk_theme(cfg: &serde_json::Value, is_dark: bool) {
         .collect();
     format!("[{}]", items.join(","))
 }
-#[tauri::command] fn get_available_plasma_themes() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut themes = std::collections::BTreeSet::new();
-    for base in &[
-        format!("{}/.local/share/plasma/desktoptheme", home),
-        "/usr/share/plasma/desktoptheme".to_string(),
-    ] {
-        if let Ok(entries) = fs::read_dir(base) {
-            for e in entries.filter_map(|e| e.ok()) {
-                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    if let Ok(name) = e.file_name().into_string() {
-                        if !name.starts_with('.') { themes.insert(name); }
-                    }
-                }
-            }
-        }
-    }
-    let active = fs::read_to_string(format!("{}/.config/plasmarc", home))
-        .unwrap_or_default()
-        .lines()
-        .find_map(|l| l.strip_prefix("name=").map(|v| v.trim().to_string()))
-        .unwrap_or_default();
-    let items: Vec<String> = themes.iter()
-        .map(|n| format!(r#"{{"name":"{}","active":{}}}"#, esc(n), *n == active))
-        .collect();
-    format!("[{}]", items.join(","))
-}
-#[tauri::command] fn get_style_themes() -> String {
-    let cfg = load_bookos_settings();
-    let kv_dark  = cfg.get("KvantumDark").and_then(|v|v.as_str()).unwrap_or("bookos-dark-blue");
-    let kv_light = cfg.get("KvantumLight").and_then(|v|v.as_str()).unwrap_or("bookos-light-blue");
-    let pt_dark  = cfg.get("PlasmaDark").and_then(|v|v.as_str()).unwrap_or("bookos-dark");
-    let pt_light = cfg.get("PlasmaLight").and_then(|v|v.as_str()).unwrap_or("bookos-light");
-    format!(r#"{{"kvantum_dark":"{}","kvantum_light":"{}","plasma_dark":"{}","plasma_light":"{}"}}"#,
-        esc(kv_dark), esc(kv_light), esc(pt_dark), esc(pt_light))
-}
-#[tauri::command] async fn set_style_themes(
-    kvantum_dark: String, kvantum_light: String,
-    plasma_dark: String,  plasma_light: String,
-) -> String {
-    let mut cfg = load_bookos_settings();
-    cfg["KvantumDark"]  = serde_json::Value::String(kvantum_dark.clone());
-    cfg["KvantumLight"] = serde_json::Value::String(kvantum_light.clone());
-    cfg["PlasmaDark"]   = serde_json::Value::String(plasma_dark.clone());
-    cfg["PlasmaLight"]  = serde_json::Value::String(plasma_light.clone());
-    save_bookos_settings(&cfg);
-    // Apply immediately if we know current mode
-    if let Some(is_dark) = cfg.get("ThemeIsDark").and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s == "true"))) {
-        let (kv, pt) = get_kv_pt(&cfg, is_dark);
-        run("kvantummanager",&["--set",&kv]).await;
-        run("plasma-apply-desktoptheme",&[&pt]).await;
-        apply_gtk_theme(&cfg, is_dark).await;
-        apply_lockscreen_theme(is_dark).await;
-    }
-    r#"{"ok":true}"#.into()
-}
 
-// ── KDE Control Station theme integration ────────────────────────────────
-#[tauri::command] fn get_kde_light_dark_themes() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let cfg = format!("{}/.config/plasma-org.kde.plasma.desktop-appletsrc", home);
-    let content = fs::read_to_string(&cfg).unwrap_or_default();
-    // Find key=value anywhere in the file (KCS settings appear only once)
-    let find = |key: &str| -> String {
-        content.lines()
-            .find(|l| l.trim_start().starts_with(&format!("{}=", key)))
-            .and_then(|l| l.find('=').map(|i| l[i+1..].trim().to_string()))
-            .unwrap_or_default()
-    };
-    let prefer_global = find("preferChangeGlobalTheme") == "true";
-    let light = if prefer_global { find("lightGlobalTheme") } else { find("lightTheme") };
-    let dark  = if prefer_global { find("darkGlobalTheme")  } else { find("darkTheme")  };
-    format!(r#"{{"light":"{}","dark":"{}","is_global":{}}}"#, esc(&light), esc(&dark), prefer_global)
-}
-#[tauri::command] async fn apply_kde_theme(name: String, is_global: bool) -> String {
-    let is_dark = theme_is_dark(&name);
-    // Persist intent first so any failures still leave config consistent.
-    let mut cfg = load_bookos_settings();
-    cfg["ThemeIsDark"] = serde_json::Value::Bool(is_dark);
-    cfg["ThemeScheme"] = serde_json::Value::String(name.clone());
-    save_bookos_settings(&cfg);
 
-    let (kv, pt) = get_kv_pt(&cfg, is_dark);
-    let gtk_color = if is_dark {"prefer-dark"} else {"prefer-light"};
-    let name_ref = name.as_str();
-    let kv_ref = kv.as_str();
-    let pt_ref = pt.as_str();
 
-    let base_args_look: [&str; 2] = ["--apply", name_ref];
-    let base_args_color: [&str; 1] = [name_ref];
-    let kv_args: [&str; 2] = ["--set", kv_ref];
-    let pt_args: [&str; 1] = [pt_ref];
-    let gtk_args: [&str; 4] = ["set","org.gnome.desktop.interface","color-scheme",gtk_color];
 
-    let base_fut = async {
-        if is_global { run("plasma-apply-lookandfeel", &base_args_look).await }
-        else         { run("plasma-apply-colorscheme",  &base_args_color).await }
-    };
-    let (_a,_b,_c,_d) = tokio::join!(
-        base_fut,
-        run("kvantummanager", &kv_args),
-        run("plasma-apply-desktoptheme", &pt_args),
-        run("gsettings", &gtk_args),
-    );
-    let _ = tokio::join!(
-        apply_gtk_theme(&cfg, is_dark),
-        apply_lockscreen_theme(is_dark),
-    );
-    sync_sddm_variant(is_dark).await;
-    notify_theme_change(is_dark).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn get_available_themes() -> String {
-    let list = run("plasma-apply-colorscheme",&["--list-schemes"]).await;
-    let current = run("kreadconfig6",&["--file","kdeglobals","--group","General","--key","ColorScheme"]).await;
-    // Skip any line that doesn't look like a theme name (contains spaces at start = theme)
-    let themes: Vec<String> = list.lines().filter_map(|l| {
-        // Theme lines are indented with spaces, optionally with " * " for active
-        if !l.starts_with(' ') && !l.starts_with('*') { return None; }
-        let trimmed = l.trim().trim_start_matches("* ").trim_start_matches('*').trim();
-        if trimmed.is_empty() || trimmed.len() < 3 { return None; }
-        // Skip description lines (contain spaces in the middle typical of sentences)
-        if trimmed.contains("sistema") || trimmed.contains("system") || trimmed.contains("siguientes") || trimmed.contains("following") || trimmed.contains("esquemas") || trimmed.contains("schemes") { return None; }
-        let name = trimmed.to_string();
-        let is_dark = theme_is_dark(&name);
-        let active = name == current;
-        Some(format!(r#"{{"name":"{}","is_dark":{},"active":{}}}"#,esc(&name),is_dark,active))
-    }).collect();
-    format!("[{}]",themes.join(","))
-}
+// ── BookOS theme integration ─────────────────────────────────────────────
+
+
+
 #[tauri::command] async fn set_color_scheme(scheme: String) -> String {
-    let sl = scheme.to_lowercase();
-    let is_dark = sl.contains("dark") || sl.contains("mocha") || sl.contains("frappe") || sl.contains("macchiato") || sl.contains("noir") || sl.contains("night") || sl.contains("midnight") || sl.contains("dracula") || sl.contains("gruvbox") || sl.contains("nord") || sl.contains("tokyo") || sl.contains("onedark") || sl.contains("heimdal") || sl.contains("emerald-smooth") || sl.contains("cachyos-dark");
-    let mut cfg = load_bookos_settings();
-    cfg["ThemeIsDark"] = serde_json::Value::Bool(is_dark);
-    cfg["ThemeScheme"] = serde_json::Value::String(scheme.clone());
-    save_bookos_settings(&cfg);
-
-    let (kv, pt) = get_kv_pt(&cfg, is_dark);
-    let gtk_color = if is_dark {"prefer-dark"} else {"prefer-light"};
-    let scheme_ref = scheme.as_str();
-    let kv_ref = kv.as_str();
-    let pt_ref = pt.as_str();
-    let cs_args:  [&str; 1] = [scheme_ref];
-    let kv_args:  [&str; 2] = ["--set", kv_ref];
-    let pt_args:  [&str; 1] = [pt_ref];
-    let gtk_args: [&str; 4] = ["set","org.gnome.desktop.interface","color-scheme",gtk_color];
-    let _ = tokio::join!(
-        run("plasma-apply-colorscheme", &cs_args),
-        run("kvantummanager", &kv_args),
-        run("plasma-apply-desktoptheme", &pt_args),
-        run("gsettings", &gtk_args),
-    );
-    let _ = tokio::join!(
-        apply_gtk_theme(&cfg, is_dark),
-        apply_lockscreen_theme(is_dark),
-    );
-    sync_sddm_variant(is_dark).await;
-    notify_theme_change(is_dark).await;
-    r#"{"ok":true}"#.into()
+    let mode=match scheme.as_str() {"claro"|"oscuro"|"automatico"=>scheme.as_str(),_=>if theme_is_dark(&scheme){"oscuro"}else{"claro"}};
+    bookos_desktop::bookos_apply_config(serde_json::json!({"tema":mode})).await.unwrap_or_else(system_client::failure)
 }
 
 // ── BookOS icon style (Light / Dark / Tinted) ───────────────────────────
@@ -2181,7 +1603,7 @@ fn tint_rgb(hue: f64, strength: f64) -> (f64, f64, f64) {
     ((r1 + m).clamp(0.0, 1.0), (g1 + m).clamp(0.0, 1.0), (b1 + m).clamp(0.0, 1.0))
 }
 
-// QSvgRenderer (what KDE uses to rasterise icons) implements SVG Tiny and
+// SVG renderers implement SVG Tiny and
 // IGNORES <filter> elements entirely, so the tint cannot be a filter — it has
 // to be baked into the fills. We rewrite every hex colour in the logo to the
 // tint colour scaled by the original's luminance (same mapping the old
@@ -2252,7 +1674,7 @@ fn install_icon_pack(variant: &str, theme_name: &str, base_tint: Option<(f64, f6
         }
     }
 
-    // Set the theme Name= inside index.theme so KDE shows it distinctly.
+    // Set the theme Name= inside index.theme so it is distinguishable.
     let idx = dst.join("index.theme");
     if let Ok(content) = std::fs::read_to_string(&idx) {
         let new: String = content.lines().map(|l| {
@@ -2319,16 +1741,9 @@ fn install_icon_pack(variant: &str, theme_name: &str, base_tint: Option<(f64, f6
     Ok(theme_name.to_string())
 }
 
-// Apply the chosen icon theme to KDE live.
+// Apply the chosen icon theme to the running session.
 async fn apply_icon_theme(theme: &str) {
-    // plasma-changeicons no-ops when kdeglobals already names the target theme,
-    // so it must run BEFORE kwriteconfig (it lives outside PATH on Arch — try both).
-    let r = run("/usr/lib/plasma-changeicons", &[theme]).await;
-    if r.contains("No such file") { run("plasma-changeicons", &[theme]).await; }
-    run("kwriteconfig6", &["--file","kdeglobals","--group","Icons","--key","Theme", theme]).await;
-    // plasma-changeicons already notifies KIconLoader/Plasma; kbuildsycoca6 and
-    // extra dbus signals here only added seconds without visible effect.
-    run("dbus-send", &["--session","--type=signal","/KIconLoader","org.kde.KIconLoader.iconChanged","int32:0"]).await;
+    run("gsettings", &["set","org.gnome.desktop.interface","icon-theme",theme]).await;
 }
 
 /// Set the BookOS app-icon style.
@@ -2354,10 +1769,8 @@ async fn set_icon_style(mode: String, hue: Option<f64>, strength: Option<f64>, d
             let base = if tint_base.unwrap_or(true) { Some(tint_rgb(hue.unwrap_or(210.0), st)) } else { None };
             let logo = if tint_logo.unwrap_or(false) { Some(tint_rgb(logo_hue.or(hue).unwrap_or(210.0), st)) } else { None };
             let is_dark = dark.unwrap_or(true);
-            // Re-applying the SAME theme name is a no-op for Plasma (icon cache
-            // is keyed by name), so alternate between two names — each apply is
-            // then a real theme switch: one repaint, no cache nuking.
-            let cur = run("kreadconfig6", &["--file","kdeglobals","--group","Icons","--key","Theme"]).await;
+            // Alternate names so the session sees every palette change.
+            let cur = run("gsettings", &["get","org.gnome.desktop.interface","icon-theme"]).await;
             let name = if cur.trim() == "BookOS-Tinted" { "BookOS-Tinted-B" } else { "BookOS-Tinted" };
             // The pack rewrite touches ~8k SVGs — run it off the async runtime
             // so the UI stays responsive.
@@ -2377,27 +1790,23 @@ async fn set_icon_style(mode: String, hue: Option<f64>, strength: Option<f64>, d
 
 // ── Notifications ────────────────────────────────────────────────────────
 #[tauri::command] async fn get_dnd_status() -> String {
-    let d = run("kreadconfig6",&["--file","plasmanotifyrc","--group","DoNotDisturb","--key","Until"]).await;
-    format!(r#"{{"dnd_active":{}}}"#,!d.is_empty())
+    match bookos_desktop::dnd(None).await {Ok(v)=>serde_json::json!({"dnd_active":v}).to_string(),Err(e)=>system_client::failure(e)}
 }
 #[tauri::command] async fn toggle_dnd(enable: bool) -> String {
-    // Plasma stores Until as a KConfig QDateTime list ("y,M,d,h,m,s"), NOT ISO.
-    // An ISO string fails to parse and DnD silently never engages.
-    if enable { run("kwriteconfig6",&["--file","plasmanotifyrc","--group","DoNotDisturb","--key","Until","2099,12,31,23,59,59"]).await; }
-    else { run("kwriteconfig6",&["--file","plasmanotifyrc","--group","DoNotDisturb","--key","Until","--delete"]).await; }
-    r#"{"ok":true}"#.into()
+    match bookos_desktop::dnd(Some(enable)).await {Ok(v)=>serde_json::json!({"ok":true,"dnd_active":v}).to_string(),Err(e)=>system_client::failure(e)}
 }
 
 // ── Lock Screen ──────────────────────────────────────────────────────────
 #[tauri::command] async fn get_lock_timeout() -> String {
-    let t = run("kreadconfig6",&["--file","kscreenlockerrc","--group","Daemon","--key","Timeout"]).await;
-    format!(r#"{{"timeout":{}}}"#,if t.is_empty(){"5".into()}else{t})
+    match bookos_desktop::config_value().await {
+        Ok(d)=>serde_json::json!({"timeout":d["bloqueo_inactividad"].as_u64().unwrap_or(900)/60}).to_string(),Err(e)=>system_client::failure(e)
+    }
 }
 #[tauri::command] async fn get_autostart_bookos() -> String {
     let p = format!("{}/.config/autostart/bookos-settings.desktop", std::env::var("HOME").unwrap_or_default());
     format!(r#"{{"enabled":{}}}"#, std::path::Path::new(&p).exists())
 }
-const AUTOSTART_DESKTOP: &str = "[Desktop Entry]\nName=BookOS Settings\nExec=bookos-settings --hidden\nIcon=preferences-system\nType=Application\nNoDisplay=true\nX-KDE-autostart-phase=1\n";
+const AUTOSTART_DESKTOP: &str = "[Desktop Entry]\nName=BookOS Settings\nExec=bookos-settings --hidden\nIcon=preferences-system\nType=Application\nNoDisplay=true\n";
 fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autostart.disabled", std::env::var("HOME").unwrap_or_default()) }
 #[tauri::command] async fn toggle_autostart_bookos(enable: bool) -> String {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -2414,27 +1823,12 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
     r#"{"ok":true}"#.into()
 }
 #[tauri::command] async fn set_lock_timeout(minutes: u32) -> String {
-    run("kwriteconfig6",&["--file","kscreenlockerrc","--group","Daemon","--key","Timeout",&minutes.to_string()]).await;
-    // Reload kscreenlocker so change applies without logout
-    run("qdbus6",&["org.kde.screensaver","/ScreenSaver","org.kde.screensaver.configure"]).await;
-    r#"{"ok":true}"#.into()
+    bookos_desktop::bookos_apply_config(serde_json::json!({"bloqueo_inactividad":minutes.saturating_mul(60)})).await.unwrap_or_else(system_client::failure)
 }
 /// Grace period (seconds without prompting password after wake).
 /// Pass 0 for "immediately".
-#[tauri::command] async fn set_lock_grace(seconds: u32) -> String {
-    run("kwriteconfig6",&["--file","kscreenlockerrc","--group","Daemon","--key","LockGrace",&seconds.to_string()]).await;
-    run("qdbus6",&["org.kde.screensaver","/ScreenSaver","org.kde.screensaver.configure"]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn get_lock_grace() -> String {
-    let out = Command::new("kreadconfig6")
-        .args(&["--file","kscreenlockerrc","--group","Daemon","--key","LockGrace","--default","0"])
-        .output().await
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|_| "0".into());
-    let s: u32 = out.parse().unwrap_or(0);
-    format!(r#"{{"seconds":{}}}"#, s)
-}
+
+
 /// Validate the user's password without running anything privileged.
 /// Returns `{"ok":true}` if accepted, `{"ok":false}` otherwise.
 /// Uses `sudo -k` then `sudo -S -v` so PAM is the source of truth.
@@ -2831,12 +2225,12 @@ fn detect_pkg_mgr() -> &'static str {
 #[tauri::command] fn get_app_power_usage() -> String {
     // Known system/daemon process name prefixes (lowercase)
     let system_procs: &[&str] = &[
-        "kwin_wayland","kwin_x11","plasmashell","systemd","dbus-daemon","dbus-broker",
-        "xwayland","krunner","polkit-kde-au","gsd-","gnome-","akonadi",
+        "systemd","dbus-daemon","dbus-broker",
+        "xwayland","polkit","gsd-","gnome-","akonadi",
         "webkitwebproces","webkitnetworkpro","bwrap","dconf","pulseaudio","pipewire",
         "wireplumber","xdg-","at-spi","ibus","fcitx","udisksd","udevd","bluetoothd",
         "networkmanager","wpa_supplicant","thermald","tlp","irqbalance","alsactl",
-        "kaccess","kded","ksystemstats","ksmserver","kscreenlocker","kscreen","baloo",
+        "baloo",
         "akonadiserver","mysqld","gvfsd","gvfs-","pcscd","upowerd","logind",
         "accounts-daemon","colord","cups","avahi","chronyd","sshd","containerd",
         "dockerd","sh","bash","fish","zsh","cat","grep","sed","awk","ps","top",
@@ -2889,16 +2283,13 @@ fn detect_pkg_mgr() -> &'static str {
                 ("code",           &["visual-studio-code", "code", "code-oss", "vscode"]),
                 ("code-oss",       &["code-oss", "code"]),
                 ("electron",       &["electron"]),
-                ("konsole",        &["utilities-terminal", "konsole", "org.kde.konsole"]),
+                ("konsole",        &["utilities-terminal", "konsole"]),
                 ("kitty",          &["kitty"]),
                 ("alacritty",      &["alacritty"]),
-                ("dolphin",        &["system-file-manager", "dolphin", "org.kde.dolphin"]),
-                ("kate",           &["kate", "org.kde.kate"]),
-                ("gwenview",       &["gwenview", "org.kde.gwenview"]),
-                ("spectacle",      &["spectacle", "org.kde.spectacle"]),
-                ("plasmashell",    &["plasma", "plasmashell"]),
-                ("kwin_wayland",   &["kwin"]),
-                ("krunner",        &["krunner"]),
+                ("dolphin",        &["system-file-manager", "dolphin"]),
+                ("kate",           &["kate"]),
+                ("gwenview",       &["gwenview"]),
+                ("spectacle",      &["spectacle"]),
                 ("vlc",            &["vlc"]),
                 ("mpv",            &["mpv"]),
                 ("steam",          &["steam"]),
@@ -3083,12 +2474,12 @@ const SDDM_KEYS: &[(&str, &str)] = &[
     // Opacidad del fondo de cada widget, 20-100. Formato "battery:70;date:100".
     // El tiempo no admite: su color ES el diseño.
     ("widgetOpacity",   ""),
-    // Pantalla de bloqueo de Plasma (Win+L), no el greeter. Comparten fichero.
+    // Opciones del bloqueo de sesión y del greeter comparten fichero.
     ("lockNotifications",      "true"),
     ("lockNotificationContent", "false"),
     // ── Textos traducidos ────────────────────────────────────────────────
     // El greeter arranca ANTES de que haya sesión y la pantalla de bloqueo es
-    // un QML de Plasma: ninguno de los dos puede leer el idioma de BookOS
+    // un QML independiente: ninguno de los dos puede leer el idioma de BookOS
     // Settings ni su diccionario. Así que el idioma viaja con el texto: el
     // editor escribe aquí las cadenas ya traducidas al idioma en el que está
     // la app al guardar, y el QML las pinta tal cual. Los valores de abajo son
@@ -3672,177 +3063,26 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
     }
 }
 
-// ── BookOS lockscreen theme install/uninstall ───────────────────────────
-// The lockscreen QML lives in `/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/`
-// Plasma 6 doesn't honor look-and-feel for lockscreen, so we patch the shell directly.
-// Source files come from /usr/share/bookos-settings/lockscreen/ (installed by package)
-// or fall back to ~/.local/share/plasma/look-and-feel/BookOS-Light/contents/lockscreen/.
-const LOCKSCREEN_FILES: &[&str] = &[
-    "MainBlock.qml",
-    "LockScreenUi.qml",
-    "BookBar.qml",
-    "MediaControls.qml",
-    // Notificaciones en la pantalla de bloqueo. Si falta este fichero,
-    // LockScreenUi.qml no encuentra el componente y la pantalla no carga.
-    "LockNotifications.qml",
-    // Widgets (batería/tiempo/fecha): el mismo componente que el tema SDDM.
-    // El paquete los deja en el stage del lockscreen desde sddm-theme/.
-    "GreeterWidgets.qml",
-    "WxIcon.qml",
-    // Siluetas de los dispositivos de la tarjeta de batería. Dibujadas en QML
-    // justo para que sea UN fichero más de esta lista y no una carpeta de
-    // imágenes que se queda fuera al instalar.
-    "DeviceIcon.qml",
-    // Glifos rellenos (play/pausa/anterior/siguiente) del widget de música.
-    "GlyphIcon.qml",
-    // Notificaciones y eventos: módulos que solo existen en la sesión, aislados
-    // aquí para que un import ausente no tumbe LockScreenUi.qml entero.
-    "LockWidgetData.qml",
-];
-const LOCKSCREEN_DEST: &str = "/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen";
-const LOCKSCREEN_BACKUP: &str = "/usr/share/plasma/shells/org.kde.plasma.desktop/contents/lockscreen/.backup";
+// ── BookOS SDDM theme install/uninstall ─────────────────────────────────
 
-fn lockscreen_source() -> Option<String> {
-    let pkg = "/usr/share/bookos-settings/lockscreen";
-    if std::path::Path::new(pkg).is_dir() { return Some(pkg.into()); }
-    let home = std::env::var("HOME").ok()?;
-    let local = format!("{}/.local/share/plasma/look-and-feel/BookOS-Light/contents/lockscreen", home);
-    if std::path::Path::new(&local).is_dir() { return Some(local); }
-    None
-}
 
-// Carpetas lockscreen/ de todos los paquetes look-and-feel de BookOS que haya
+
+
+// Variantes del tema BookOS que haya
 // instalados, de usuario y de sistema. Se copian todas porque el nombre exacto
 // del paquete activo depende de la instalación.
-fn lockscreen_lnf_dirs() -> Vec<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut out = Vec::new();
-    for base in [format!("{}/.local/share/plasma/look-and-feel", home),
-                 "/usr/share/plasma/look-and-feel".to_string()] {
-        if let Ok(entries) = std::fs::read_dir(&base) {
-            for e in entries.flatten() {
-                let name = e.file_name().to_string_lossy().to_string();
-                if !name.starts_with("BookOS") { continue; }
-                let d = format!("{}/{}/contents/lockscreen", base, name);
-                if std::path::Path::new(&d).is_dir() { out.push(d); }
-            }
-        }
-    }
-    out
-}
 
-#[tauri::command] fn is_lockscreen_theme_installed() -> String {
-    // Marker file written when our theme is active.
-    let marker = format!("{}/.bookos-installed", LOCKSCREEN_DEST);
-    let installed = std::path::Path::new(&marker).exists();
-    format!(r#"{{"installed":{}}}"#, installed)
-}
 
-#[tauri::command] async fn install_lockscreen_theme(password: String) -> String {
-    use std::io::Write;
-    let src = match lockscreen_source() {
-        Some(s) => s,
-        None => return r#"{"ok":false,"error":"lockscreen QML stage not found at /usr/share/bookos-settings/lockscreen/ — reinstall bookos-settings"}"#.into(),
-    };
-    // Verify Plasma shell dir exists
-    if !std::path::Path::new(LOCKSCREEN_DEST).is_dir() {
-        return format!(r#"{{"ok":false,"error":"Plasma shell lockscreen not found at {}"}}"#, LOCKSCREEN_DEST).into();
-    }
-    // Verify source files actually exist
-    for f in LOCKSCREEN_FILES {
-        let p = format!("{}/{}", src, f);
-        if !std::path::Path::new(&p).is_file() {
-            return format!(r#"{{"ok":false,"error":"missing source file: {}"}}"#, esc(&p)).into();
-        }
-    }
 
-    // set -e = abort on first error so we get a real error code
-    let mut script = String::from("set -e; ");
-    script.push_str(&format!("mkdir -p '{}'; ", LOCKSCREEN_BACKUP));
-    for f in LOCKSCREEN_FILES {
-        // Backup original if not yet backed up
-        script.push_str(&format!(
-            "if [ -f '{dest}/{file}' ] && [ ! -f '{bk}/{file}' ]; then cp '{dest}/{file}' '{bk}/{file}'; fi; ",
-            dest=LOCKSCREEN_DEST, bk=LOCKSCREEN_BACKUP, file=f
-        ));
-        // Copy ours over — required, error if missing
-        script.push_str(&format!(
-            "cp '{src}/{file}' '{dest}/{file}'; ",
-            src=src, dest=LOCKSCREEN_DEST, file=f
-        ));
-    }
-    script.push_str(&format!("touch '{}/.bookos-installed'", LOCKSCREEN_DEST));
 
-    // Además del paquete del shell, hay que refrescar los look-and-feel de
-    // BookOS: si kscreenlockerrc apunta a uno de ellos (lo hace en cuanto se
-    // aplica el tema global), KScreenLocker carga SU lockscreen y el del shell
-    // ni se mira — que es justo por lo que Win+L se quedaba con el diseño viejo.
-    for dir in lockscreen_lnf_dirs() {
-        // `cp x x` aborta el script (set -e) si el origen ES uno de estos.
-        if dir == src { continue; }
-        for f in LOCKSCREEN_FILES {
-            script.push_str(&format!(" ; cp '{src}/{file}' '{d}/{file}'", src=src, d=dir, file=f));
-        }
-    }
 
-    eprintln!("[install_lockscreen] script:\n{}", script);
 
-    let mut child = match StdCommand::new("sudo")
-        .args(["-k", "-S", "-p", "", "--", "sh", "-c", &script])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn() { Ok(c) => c, Err(e) => return format!(r#"{{"ok":false,"error":"spawn: {}"}}"#, esc(&e.to_string())) };
-    if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(password.as_bytes());
-        let _ = sin.write_all(b"\n");
-        drop(sin);
-    }
-    match child.wait_with_output() {
-        Ok(o) if o.status.success() => {
-            eprintln!("[install_lockscreen] OK");
-            r#"{"ok":true}"#.into()
-        },
-        Ok(o) => {
-            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            eprintln!("[install_lockscreen] FAIL status={:?} stderr={}", o.status, err);
-            format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&err))
-        },
-        Err(e) => format!(r#"{{"ok":false,"error":"wait: {}"}}"#, esc(&e.to_string())),
-    }
-}
 
-#[tauri::command] async fn uninstall_lockscreen_theme(password: String) -> String {
-    use std::io::Write;
-    let mut script = String::new();
-    for f in LOCKSCREEN_FILES {
-        script.push_str(&format!(
-            "[ -f \"{bk}/{file}\" ] && cp \"{bk}/{file}\" \"{dest}/{file}\"; ",
-            bk=LOCKSCREEN_BACKUP, dest=LOCKSCREEN_DEST, file=f
-        ));
-    }
-    script.push_str(&format!("rm -f \"{}/.bookos-installed\"", LOCKSCREEN_DEST));
-
-    let mut child = match StdCommand::new("sudo")
-        .args(["-k", "-S", "--", "sh", "-c", &script])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn() { Ok(c) => c, Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())) };
-    if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", password).as_bytes());
-    }
-    match child.wait_with_output() {
-        Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
-        Ok(o) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&String::from_utf8_lossy(&o.stderr))),
-        Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
-    }
-}
 
 // ── BookOS SDDM theme toggle ────────────────────────────────────────────
 #[tauri::command] fn is_sddm_theme_installed() -> String {
     // The active SDDM theme can be selected from /etc/sddm.conf or *any* file in
-    // /etc/sddm.conf.d/ (Arch's KDE setup uses kde_settings.conf, not our own
+    // /etc/sddm.conf.d/ (las distribuciones pueden usar distintos nombres,
     // bookos-theme.conf), so scan all of them for Current=bookos.
     let mut installed = std::fs::read_to_string("/etc/sddm.conf")
         .map(|c| c.contains("Current=bookos")).unwrap_or(false);
@@ -3968,13 +3208,6 @@ fn lockscreen_lnf_dirs() -> Vec<String> {
     }
 }
 
-// Get digital wellbeing / app usage (reads from bookos usage log if available)
-#[tauri::command] fn get_app_usage() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let log = format!("{}/.local/share/bookos/app_usage.json", home);
-    fs::read_to_string(&log).unwrap_or_else(|_| "[]".into())
-}
-
 #[tauri::command] async fn run_flatpak_update() -> Result<String, String> {
     // A real update downloads runtimes/apps and takes minutes — the default 12s
     // run() would return early and make the UI report success prematurely.
@@ -4045,31 +3278,14 @@ fn lockscreen_lnf_dirs() -> Vec<String> {
 }
 
 // ── Scheduled Theme ──────────────────────────────────────────────────────
-#[tauri::command] fn get_theme_schedule() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = format!("{}/.config/bookos/settings.json", home);
-    let cfg: serde_json::Value = fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::json!({}));
-    let enabled = cfg.get("theme_schedule_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
-    let light_time = cfg.get("theme_light_time").and_then(|v| v.as_str()).unwrap_or("07:00").to_string();
-    let dark_time = cfg.get("theme_dark_time").and_then(|v| v.as_str()).unwrap_or("20:00").to_string();
-    let light_theme = cfg.get("theme_light").and_then(|v| v.as_str()).unwrap_or("BookOS-Light").to_string();
-    let dark_theme = cfg.get("theme_dark").and_then(|v| v.as_str()).unwrap_or("BookOS-Dark").to_string();
-    format!(r#"{{"enabled":{},"light_time":"{}","dark_time":"{}","light_theme":"{}","dark_theme":"{}"}}"#,
-        enabled,esc(&light_time),esc(&dark_time),esc(&light_theme),esc(&dark_theme))
+#[tauri::command] async fn get_theme_schedule() -> String {
+    match bookos_desktop::config_value().await {
+        Ok(d)=>serde_json::json!({"enabled":d["tema"]=="automatico","light_time":d["tema_claro_desde"],"dark_time":d["tema_oscuro_desde"],"light_theme":"claro","dark_theme":"oscuro"}).to_string(),Err(e)=>system_client::failure(e)
+    }
 }
-#[tauri::command] fn set_theme_schedule(enabled: bool, light_time: String, dark_time: String, light_theme: String, dark_theme: String) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let dir = format!("{}/.config/bookos", home);
-    let _ = fs::create_dir_all(&dir);
-    let p = format!("{}/settings.json", dir);
-    let mut cfg: serde_json::Value = fs::read_to_string(&p).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(serde_json::json!({}));
-    cfg["theme_schedule_enabled"] = serde_json::json!(enabled);
-    cfg["theme_light_time"] = serde_json::json!(light_time);
-    cfg["theme_dark_time"] = serde_json::json!(dark_time);
-    cfg["theme_light"] = serde_json::json!(light_theme);
-    cfg["theme_dark"] = serde_json::json!(dark_theme);
-    let _ = fs::write(&p, serde_json::to_string_pretty(&cfg).unwrap_or_default());
-    r#"{"ok":true}"#.into()
+#[tauri::command] async fn set_theme_schedule(enabled: bool, light_time: String, dark_time: String, light_theme: String, dark_theme: String) -> String {
+    let _ = (light_theme,dark_theme);
+    bookos_desktop::bookos_apply_config(serde_json::json!({"tema":if enabled{"automatico"}else{"oscuro"},"tema_claro_desde":light_time,"tema_oscuro_desde":dark_time})).await.unwrap_or_else(system_client::failure)
 }
 
 // ── Maintenance ────────────────────────────────────────────────────────
@@ -4099,95 +3315,6 @@ fn lockscreen_lnf_dirs() -> Vec<String> {
         _ => "Invalid target".to_string(),
     };
     format!(r#"{{"ok":true,"output":"{}"}}"#, esc(&r))
-}
-
-#[tauri::command] async fn setup_polkit_rules() -> String {
-    let rule = r#"polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.policykit.exec" && 
-        action.lookup("program") == "/usr/bin/bash" && 
-        subject.isInGroup("power")) {
-        return polkit.Result.YES;
-    }
-});"#;
-    use tokio::io::AsyncWriteExt;
-    let mut child = match Command::new("pkexec")
-        .args(["tee", "/etc/polkit-1/rules.d/51-bookos-hw.rules"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn() {
-        Ok(c) => c,
-        Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(rule.as_bytes()).await;
-    }
-    let _ = child.wait_with_output().await;
-    r#"{"ok":true}"#.into()
-}
-
-// ── KWin Effects ───────────────────────────────────────────────────────
-#[tauri::command] async fn get_kwin_effects() -> String {
-    let blur_t = run("kreadconfig6", &["--file", "kwinrc", "--group", "Plugins", "--key", "blurEnabled"]);
-    let wobbly_t = run("kreadconfig6", &["--file", "kwinrc", "--group", "Plugins", "--key", "wobblywindowsEnabled"]);
-    let magic_t = run("kreadconfig6", &["--file", "kwinrc", "--group", "Plugins", "--key", "magiclampEnabled"]);
-    
-    let (blur, wobbly, magic) = tokio::join!(blur_t, wobbly_t, magic_t);
-    
-    format!(r#"{{"blur":{},"wobbly":{},"magic":{}}}"#, blur == "true", wobbly == "true", magic == "true")
-}
-#[tauri::command] async fn toggle_kwin_effect(effect: String, enable: bool) -> String {
-    let key = match effect.as_str() {
-        "blur" => "blurEnabled",
-        "wobbly" => "wobblywindowsEnabled",
-        "magic" => "magiclampEnabled",
-        _ => return r#"{"ok":false}"#.into(),
-    };
-    run("kwriteconfig6", &["--file", "kwinrc", "--group", "Plugins", "--key", key, if enable { "true" } else { "false" }]).await;
-    // Plasma 6 ships qdbus6; older systems have qdbus. Try the former, fall back.
-    let r = run("qdbus6", &["org.kde.KWin", "/KWin", "reconfigure"]).await;
-    if r.contains("not found") || r.contains("No such") || r.is_empty() {
-        run("qdbus", &["org.kde.KWin", "/KWin", "reconfigure"]).await;
-    }
-    r#"{"ok":true}"#.into()
-}
-
-/// Fix cursor feeling laggy/low-Hz under KWin Wayland.
-/// - Forces hardware cursor (bypasses compositor latency for cursor rendering)
-/// - Sets MaxFPS to 0 (unlimited, vsync-driven) so KWin doesn't cap frame delivery
-/// - Enables unredirect for fullscreen to reduce compositing overhead
-#[tauri::command] async fn fix_cursor_hz() -> String {
-    // Hardware cursor — rendered directly by the GPU scanout, not composited
-    run("kwriteconfig6", &["--file","kwinrc","--group","Compositing","--key","HiddenPreviews","5"]).await;
-    // Allow KWin to deliver frames as fast as the display allows (no artificial cap)
-    run("kwriteconfig6", &["--file","kwinrc","--group","Compositing","--key","MaxFPS","0"]).await;
-    // Latency policy: prefer low latency over throughput
-    run("kwriteconfig6", &["--file","kwinrc","--group","Compositing","--key","LatencyPolicy","Low"]).await;
-    // Apply without restarting KWin
-    run("qdbus6", &["org.kde.KWin","/KWin","reconfigure"]).await;
-    r#"{"ok":true}"#.into()
-}
-
-#[tauri::command] async fn get_cursor_fix_status() -> String {
-    let latency_t = run("kreadconfig6",&["--file","kwinrc","--group","Compositing","--key","LatencyPolicy"]);
-    let maxfps_t  = run("kreadconfig6",&["--file","kwinrc","--group","Compositing","--key","MaxFPS"]);
-    let (latency, maxfps) = tokio::join!(latency_t, maxfps_t);
-    let enabled = latency == "Low" || maxfps == "0";
-    format!(r#"{{"enabled":{}}}"#, enabled)
-}
-
-// ── Input Devices ──────────────────────────────────────────────────────
-#[tauri::command] async fn get_input_devices() -> String {
-    let accel_t = run("kreadconfig6", &["--file", "kcminputrc", "--group", "Mouse", "--key", "Acceleration"]);
-    let tap_t = run("kreadconfig6", &["--file", "kcminputrc", "--group", "Touchpad", "--key", "Tapping"]);
-    let nat_t = run("kreadconfig6", &["--file", "kcminputrc", "--group", "Touchpad", "--key", "NaturalScrolling"]);
-    
-    let (accel, tap, nat) = tokio::join!(accel_t, tap_t, nat_t);
-    
-    format!(r#"{{"accel":"{}","tap":{},"natural":{}}}"#, esc(&accel), tap == "true", nat == "true")
-}
-#[tauri::command] async fn set_input_setting(group: String, key: String, value: String) -> String {
-    run("kwriteconfig6", &["--file", "kcminputrc", "--group", &group, "--key", &key, &value]).await;
-    r#"{"ok":true}"#.into()
 }
 
 // ── Firewall ───────────────────────────────────────────────────────────
@@ -4230,7 +3357,7 @@ fn lockscreen_lnf_dirs() -> Vec<String> {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                // KDE wallpapers are directories with contents/images/
+                // Los fondos pueden ser directorios con contents/images/.
                 let img_dir = path.join("contents").join("images");
                 if img_dir.is_dir() {
                     if let Ok(imgs) = fs::read_dir(&img_dir) {
@@ -4310,33 +3437,15 @@ fn lockscreen_lnf_dirs() -> Vec<String> {
     format!(r#"{{"ok":true,"added":{}}}"#, added)
 }
 #[tauri::command] async fn get_current_wallpaper() -> String {
-    let p = current_wallpaper_path();
-    format!(r#"{{"path":"{}"}}"#, esc(&p))
+    match bookos_desktop::config_value().await {
+        Ok(d)=>serde_json::json!({"path":d["fondo"]}).to_string(),Err(e)=>system_client::failure(e)
+    }
 }
 /// Ruta del fondo actual, sin envolver en JSON: la usa también el color
 /// dinámico, que necesita el path a secas para leer la imagen.
-fn current_wallpaper_path() -> String {
-    // Plasma stores the wallpaper inside a Containment whose number varies.
-    // Parse the appletsrc directly to find the first Wallpaper Image key.
-    let cfg = std::env::var("HOME").map(|h| format!("{}/.config/plasma-org.kde.plasma.desktop-appletsrc", h)).unwrap_or_default();
-    let contents = std::fs::read_to_string(&cfg).unwrap_or_default();
-    let mut in_image_general = false;
-    for line in contents.lines() {
-        let l = line.trim();
-        if l.starts_with('[') {
-            in_image_general = l.contains("Wallpaper") && l.contains("org.kde.image") && l.ends_with("][General]");
-            continue;
-        }
-        if in_image_general {
-            if let Some(val) = l.strip_prefix("Image=") {
-                return val.trim().replace("file://", "");
-            }
-        }
-    }
-    String::new()
-}
+
 #[tauri::command] async fn set_wallpaper(path: String) -> String {
-    run("plasma-apply-wallpaperimage", &[&path]).await;
+    if let Err(e)=bookos_desktop::bookos_apply_config(serde_json::json!({"fondo":path})).await {return system_client::failure(e);}
     // Con el color dinámico en automático, cambiar de fondo recalcula la paleta
     // con el MISMO estilo elegido. La semilla se recalcula porque es propiedad
     // de la imagen; el estilo es una preferencia del usuario y se respeta.
@@ -4394,7 +3503,7 @@ fn upower_kind(t: &str) -> Option<&'static str> {
 /// Devuelve (id, kind, nombre, %, cargando). Vacío si el demonio no responde:
 /// no tener Book Link es un estado normal, no un error que reportar.
 fn kdeconnect_devices() -> Vec<(String, String, String, i64, bool)> {
-    // `busctl` viene con systemd, así que está siempre; `qdbus` depende del
+    // `busctl` viene con systemd, así que está siempre; el cliente específico
     // paquete de Qt que haya instalado y en este equipo ni existe.
     let call = |args: &[&str]| -> Option<String> {
         let out = StdCommand::new("busctl").args(args).output().ok()?;
@@ -4493,8 +3602,8 @@ fn kdeconnect_devices() -> Vec<(String, String, String, i64, bool)> {
 
     // ── Móvil y tablet por BookOS Link ──
     // UPower solo ve la batería de un móvil si BlueZ la publica, cosa que pasa
-    // con pocos y solo por Bluetooth clásico. BookOS Link (el fork de KDE
-    // Connect) la tiene siempre que el móvil esté emparejado y a la vista, por
+    // con pocos y solo por Bluetooth clásico. BookOS Link la tiene siempre que
+    // el móvil esté emparejado y a la vista, por
     // Wi-Fi o por Bluetooth, y además con el nombre real del aparato.
     //
     // Se pregunta con `busctl` y no con zbus para no arrastrar el bus de sesión
@@ -4701,23 +3810,6 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     cfg["DynamicColorStyle"] = serde_json::Value::String(st.id().to_string());
     save_bookos_settings(&cfg);
 
-    // Esquema de color nativo de Plasma: esto es lo que hace que apps y
-    // plasmoides que ya leen Kirigami.Theme/current-color-scheme (p.ej.
-    // KdeControlStation, el desktoptheme bookos-dark/light) sigan la paleta
-    // sin haberles tocado una línea. Opt-in y best-effort: nunca debe tumbar
-    // la escritura de palette.css/json, que es lo único de lo que dependen
-    // las apps de BookOS.
-    if cfg.get("DynamicColorPlasma").and_then(|v| v.as_bool()).unwrap_or(false) {
-        let colors_dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
-            .join(".local/share/color-schemes");
-        let _ = fs::create_dir_all(&colors_dir);
-        let _ = fs::write(colors_dir.join("BookOSDynamicDark.colors"), palette::kde_colors(&scheme, true));
-        let _ = fs::write(colors_dir.join("BookOSDynamicLight.colors"), palette::kde_colors(&scheme, false));
-        let is_dark = cfg.get("ThemeIsDark").and_then(|v| v.as_bool()).unwrap_or(true);
-        let variant = if is_dark { "BookOSDynamicDark" } else { "BookOSDynamicLight" };
-        run("plasma-apply-colorscheme", &[variant]).await;
-    }
-
     // Kvantum: solo hay plantilla para bookos-dark-blue/bookos-light-blue,
     // así que se escriben esos dos siempre que el flag esté activo, y solo
     // se reaplica si es el tema Kvantum que el usuario tiene puesto ahora
@@ -4742,7 +3834,7 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
         write_kv("bookos-light-blue", "bookos-light-blue.kvconfig.tmpl", false);
 
         let is_dark = cfg.get("ThemeIsDark").and_then(|v| v.as_bool()).unwrap_or(true);
-        let (kv, _) = get_kv_pt(&cfg, is_dark);
+        let kv = kvantum_theme(&cfg, is_dark);
         if kv == "bookos-dark-blue" || kv == "bookos-light-blue" {
             run("kvantummanager", &["--set", &kv]).await;
         }
@@ -4759,8 +3851,10 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
 }
 
 /// Colores candidatos del fondo actual (o de `path` si se pasa uno).
-#[tauri::command] fn dynamic_color_seeds(path: Option<String>) -> String {
-    let p = path.filter(|s| !s.is_empty()).unwrap_or_else(current_wallpaper_path);
+#[tauri::command] async fn dynamic_color_seeds(path: Option<String>) -> String {
+    let p = if let Some(path)=path.filter(|s|!s.is_empty()){path}else{
+        match bookos_desktop::config_value().await {Ok(d)=>d["fondo"].as_str().unwrap_or_default().to_owned(),Err(e)=>return system_client::failure(e)}
+    };
     if p.is_empty() { return r#"{"ok":false,"error":"no hay fondo de pantalla"}"#.into(); }
     match palette::seeds_from_image(&p) {
         Ok(seeds) => {
@@ -4795,11 +3889,10 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     let seed = cfg.get("DynamicColorSeed").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let style = cfg.get("DynamicColorStyle").and_then(|v| v.as_str()).unwrap_or("vibrant").to_string();
     let css = fs::read_to_string(bookos_shared_dir().join("palette.css")).unwrap_or_default();
-    let plasma = cfg.get("DynamicColorPlasma").and_then(|v| v.as_bool()).unwrap_or(false);
     let kvantum = cfg.get("DynamicColorKvantum").and_then(|v| v.as_bool()).unwrap_or(false);
     let lockscreen = cfg.get("DynamicColorLockscreen").and_then(|v| v.as_bool()).unwrap_or(false);
-    format!(r#"{{"enabled":{},"seed":"{}","style":"{}","css":"{}","plasma":{},"kvantum":{},"lockscreen":{}}}"#,
-            dynamic_color_enabled(), esc(&seed), esc(&style), esc(&css), plasma, kvantum, lockscreen)
+    format!(r#"{{"enabled":{},"seed":"{}","style":"{}","css":"{}","kvantum":{},"lockscreen":{}}}"#,
+            dynamic_color_enabled(), esc(&seed), esc(&style), esc(&css), kvantum, lockscreen)
 }
 
 /// Apaga o vuelve a encender el color dinámico. Al apagarlo se borra el CSS
@@ -4820,22 +3913,10 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     r#"{"ok":true}"#.into()
 }
 
-/// Enciende o apaga que la paleta también se aplique como esquema de color
-/// nativo de Plasma (KdeControlStation, desktoptheme). Independiente del
 /// interruptor de iconos: mismo patrón, cada uno se recuerda por su cuenta.
-#[tauri::command] async fn dynamic_color_set_plasma(enabled: bool) -> String {
-    let mut cfg = load_bookos_settings();
-    cfg["DynamicColorPlasma"] = serde_json::Value::Bool(enabled);
-    let seed = cfg.get("DynamicColorSeed").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let style = cfg.get("DynamicColorStyle").and_then(|v| v.as_str()).unwrap_or("vibrant").to_string();
-    save_bookos_settings(&cfg);
-    if enabled && dynamic_color_enabled() && !seed.is_empty() {
-        let _ = write_dynamic_palette(&seed, &style).await;
-    }
-    r#"{"ok":true}"#.into()
-}
 
-/// Igual que `dynamic_color_set_plasma`, pero para Kvantum (apps Qt que no
+
+/// Aplica la paleta a Kvantum (apps Qt que no
 /// leen Kirigami.Theme: Dolphin, Kate, VLC...).
 #[tauri::command] async fn dynamic_color_set_kvantum(enabled: bool) -> String {
     let mut cfg = load_bookos_settings();
@@ -4849,7 +3930,7 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     r#"{"ok":true}"#.into()
 }
 
-/// Igual que `dynamic_color_set_plasma`, pero para la pantalla de bloqueo
+/// Aplica la paleta al tema de acceso
 /// (y, best-effort sin sudo, el saludo SDDM si ya tiene permisos).
 #[tauri::command] async fn dynamic_color_set_lockscreen(enabled: bool) -> String {
     let mut cfg = load_bookos_settings();
@@ -4895,7 +3976,7 @@ fn desktop_field(path: &std::path::Path, key: &str) -> String {
     String::new()
 }
 // Friendly Name + Icon for a .desktop id (e.g. "firefox.desktop").
-// Resolve a freedesktop icon *name* (e.g. "firefox", "org.kde.dolphin") to an
+// Resolve a freedesktop icon *name* (e.g. "firefox") to an
 // absolute file path by scanning the common theme dirs. If `name` is already an
 // absolute path, it's returned as-is. Returns "" if nothing is found.
 fn resolve_icon_file(name: &str) -> String {
@@ -5041,9 +4122,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     args.extend(mimes.iter());
     run("xdg-mime", &args).await;
 
-    // …but xdg-mime is unreliable on KDE (Wayland/portals), so also write the
-    // associations directly into ~/.config/mimeapps.list under [Default Applications].
-    // This is what KIO/Plasma actually reads.
+    // Keep the standard mimeapps file in sync for desktop applications.
     if let Ok(home) = std::env::var("HOME") {
         let path = format!("{}/.config/mimeapps.list", home);
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -5080,57 +4159,13 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     format!(r#"{{"ok":{},"applied":"{}"}}"#, ok, esc(got.trim()))
 }
 
-#[tauri::command] async fn open_mime_settings() -> String {
-    run("xdg-open", &["settings://filetypes"]).await;
-    // Fallback: open KDE systemsettings
-    run("kcmshell6", &["filetypes"]).await;
-    r#"{"ok":true}"#.into()
-}
-
 // ── BookOS Generic Settings ─────────────────────────────────────────────
 // ── Accessibility / Display Scale ────────────────────────────────────────
-#[tauri::command] async fn get_accessibility_settings() -> String {
-    let scale = run("kreadconfig6",&["--file","kcmfonts","--group","General","--key","forceFontDPI","--default","0"]).await;
-    let contrast = run("kreadconfig6",&["--file","kdeglobals","--group","KDE","--key","contrast","--default","5"]).await;
-    let invert = run("kreadconfig6",&["--file","kwinrc","--group","Plugins","--key","invertEnabled","--default","false"]).await;
-    let large_cursor = run("kreadconfig6",&["--file","kcminputrc","--group","Mouse","--key","cursorSize","--default","24"]).await;
-    format!(r#"{{"font_dpi":"{}","contrast":"{}","invert":"{}","cursor_size":"{}"}}"#,
-        esc(&scale), esc(&contrast), esc(&invert), esc(&large_cursor))
-}
-#[tauri::command] async fn set_font_scale(dpi: i32) -> String {
-    run("kwriteconfig6",&["--file","kcmfonts","--group","General","--key","forceFontDPI",&dpi.to_string()]).await;
-    run("qdbus6",&["org.kde.KWin","/KWin","reconfigure"]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn set_display_scale(scale: f32) -> String {
-    let s = format!("{:.2}", scale);
-    run("kwriteconfig6",&["--file","kdeglobals","--group","KScreen","--key","ScaleFactor",&s]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn toggle_invert_colors(enable: bool) -> String {
-    run("kwriteconfig6",&["--file","kwinrc","--group","Plugins","--key","invertEnabled",if enable {"true"} else {"false"}]).await;
-    run("qdbus6",&["org.kde.KWin","/KWin","reconfigure"]).await;
-    // Trigger the effect via D-Bus (the plugin exposes Invert.toggleScreenInvert)
-    run("qdbus6",&["org.kde.KWin","/org/kde/KWin/Effect/Invert1","org.kde.kwin.Effect.toggleScreenInvert"]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn set_cursor_size(size: i32) -> String {
-    let s = size.to_string();
-    run("kwriteconfig6",&["--file","kcminputrc","--group","Mouse","--key","cursorSize",&s]).await;
-    // Also write to kdeglobals (used by some apps) and notify cursor change via KGlobalSettings
-    run("kwriteconfig6",&["--file","kdeglobals","--group","KDE","--key","CursorSize",&s]).await;
-    // Apply live: re-run the cursor-theme kcm init (reloads cursor at the new size
-    // without a relogin) and reconfigure KWin. kcminit is the piece that actually
-    // pushes the new size to the running Wayland/X cursor.
-    run("kcminit",&["kcm_cursortheme"]).await;
-    let r = run("qdbus6",&["org.kde.KWin","/KWin","reconfigure"]).await;
-    if r.contains("not found") || r.is_empty() {
-        run("dbus-send",&["--session","--dest=org.kde.KWin","--type=method_call","/KWin","org.kde.KWin.reconfigure"]).await;
-    }
-    // Nudge GTK/XSettings consumers too.
-    run("dbus-send",&["--session","--type=signal","/KGlobalSettings","org.kde.KGlobalSettings.notifyChange","int32:5","int32:0"]).await;
-    r#"{"ok":true}"#.into()
-}
+
+
+
+
+
 
 // ── Password change ──────────────────────────────────────────────────────
 #[tauri::command] fn change_password(username: String, old_pwd: String, new_pwd: String) -> String {
@@ -5324,7 +4359,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
 #[tauri::command] async fn set_autologin(enabled: bool, username: String, sudo_password: String) -> String {
     use tokio::io::AsyncWriteExt;
     let body = if enabled {
-        format!("[Autologin]\nUser={}\nSession=plasma\nRelogin=false\n", username)
+        format!("[Autologin]\nUser={}\nSession=bookos.desktop\nRelogin=false\n", username)
     } else {
         // Empty file disables it (overrides previous configs since drop-ins are sorted)
         "[Autologin]\nUser=\nSession=\n".to_string()
@@ -5352,343 +4387,42 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     }
 }
 
-// ── Labs / Advanced features ─────────────────────────────────────────────
-#[tauri::command] fn get_labs_settings() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p = format!("{}/.config/bookos/settings.json", home);
-    let cfg: serde_json::Value = fs::read_to_string(&p).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(serde_json::json!({}));
-    let get = |k: &str| cfg.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
-    format!(r#"{{"floating_taskbar":{},"transparency_effects":{},"adaptive_refresh":{},"smart_notifications":{},"experimental_widgets":{}}}"#,
-        get("lab_floating_taskbar"), get("lab_transparency_effects"),
-        get("lab_adaptive_refresh"), get("lab_smart_notifications"), get("lab_experimental_widgets"))
-}
-#[tauri::command] fn set_lab_setting(key: String, value: bool) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let dir = format!("{}/.config/bookos", home);
-    let _ = fs::create_dir_all(&dir);
-    let p = format!("{}/settings.json", dir);
-    let mut c: serde_json::Value = fs::read_to_string(&p).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(serde_json::json!({}));
-    c[format!("lab_{}", key)] = serde_json::json!(value);
-    let _ = fs::write(&p, serde_json::to_string_pretty(&c).unwrap_or_default());
-    r#"{"ok":true}"#.into()
-}
-
 // ── WiFi forget network ──────────────────────────────────────────────────
-#[tauri::command] async fn forget_wifi(ssid: String) -> String {
-    let list = run("nmcli",&["-t","-f","NAME,UUID","connection","show"]).await;
-    for line in list.lines() {
-        let parts: Vec<&str> = line.splitn(2,':').collect();
-        if parts.len()==2 && parts[0]==ssid {
-            run("nmcli",&["connection","delete",parts[1]]).await;
-            return r#"{"ok":true}"#.into();
-        }
-    }
-    r#"{"ok":false}"#.into()
-}
+
 
 // ── Connection details (IP, gateway, DNS, MAC, speed…) ───────────────────
 // Shared by WiFi and Ethernet. `kind` = "wifi" | "ethernet".
 // nmcli -t escapes ':' inside values as '\:' and returns DNS/ADDRESS with
 // indexed keys (IP4.DNS[1], IP4.ADDRESS[1]) regardless of the -f filter, so we
 // must match by prefix, not exact key, and unescape.
-fn nm_unescape(s: &str) -> String { s.replace("\\:", ":").replace("\\\\", "\\") }
 
-async fn connection_details_for_iface(iface: &str) -> (String,String,String,String,String,String,String,String) {
-    // ip(v4), ip6, gateway, dns (joined), mac, mtu, prefix, state
-    let info = run("nmcli",&["-t","-e","yes","-f",
-        "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.ADDRESS,GENERAL.HWADDR,GENERAL.MTU,GENERAL.STATE",
-        "device","show",iface]).await;
-    let mut ip = String::new(); let mut ip6 = String::new(); let mut gateway = String::new();
-    let mut dns_list: Vec<String> = Vec::new(); let mut mac = String::new();
-    let mut mtu = String::new(); let mut prefix = String::new(); let mut state = String::new();
-    for line in info.lines() {
-        let (key, val) = match line.split_once(':') { Some(kv) => kv, None => continue };
-        let val = nm_unescape(val.trim());
-        if key.starts_with("IP4.ADDRESS") {
-            let mut parts = val.splitn(2,'/');
-            ip = parts.next().unwrap_or("").to_string();
-            prefix = parts.next().unwrap_or("").to_string();
-        } else if key == "IP4.GATEWAY" { gateway = val; }
-        else if key.starts_with("IP4.DNS") { if !val.is_empty() { dns_list.push(val); } }
-        else if key.starts_with("IP6.ADDRESS") && ip6.is_empty() { ip6 = val.split('/').next().unwrap_or("").to_string(); }
-        else if key == "GENERAL.HWADDR" { mac = val; }
-        else if key == "GENERAL.MTU" { mtu = val; }
-        else if key == "GENERAL.STATE" { state = val; }
-    }
-    (ip, ip6, gateway, dns_list.join(", "), mac, mtu, prefix, state)
-}
+
+
 
 // Find the active interface of a given type ("wifi" | "ethernet").
-async fn active_iface_of(kind: &str) -> String {
-    let dev_out = run("nmcli",&["-t","-f","DEVICE,TYPE,STATE","device"]).await;
-    let needle = format!(":{}:", kind);
-    dev_out.lines()
-        .find(|l| l.contains(&needle) && l.contains("connected"))
-        .and_then(|l| l.split(':').next().map(|s| s.to_string()))
-        .unwrap_or_default()
-}
 
-#[tauri::command] async fn get_wifi_details(_ssid: String) -> String {
-    let iface = {
-        let i = active_iface_of("wifi").await;
-        if i.is_empty() { "wlan0".to_string() } else { i }
-    };
-    let (ip, ip6, gateway, dns, mac, mtu, prefix, state) = connection_details_for_iface(&iface).await;
-    // Link speed / rate (bitrate) for WiFi
-    let rate = run("nmcli",&["-t","-f","GENERAL.CONNECTION","device","show",&iface]).await;
-    let _ = rate; // connection name not needed here
-    format!(r#"{{"ip":"{}","ip6":"{}","gateway":"{}","dns":"{}","mac":"{}","mtu":"{}","prefix":"{}","state":"{}","iface":"{}"}}"#,
-        esc(&ip),esc(&ip6),esc(&gateway),esc(&dns),esc(&mac),esc(&mtu),esc(&prefix),esc(&state),esc(&iface))
-}
+
+
 
 // ── Ethernet (wired) ─────────────────────────────────────────────────────
-#[tauri::command] async fn get_ethernet_status() -> String {
-    let dev_out = run("nmcli",&["-t","-f","DEVICE,TYPE,STATE,CONNECTION","device"]).await;
-    for line in dev_out.lines() {
-        let p: Vec<&str> = line.splitn(4,':').collect();
-        if p.len() >= 3 && p.get(1) == Some(&"ethernet") {
-            let connected = p.get(2).map(|s| s.contains("connected") && !s.contains("disconnected")).unwrap_or(false);
-            let name = p.get(3).map(|s| nm_unescape(s)).unwrap_or_default();
-            return format!(r#"{{"present":true,"connected":{},"iface":"{}","connection":"{}"}}"#,
-                connected, esc(p.first().unwrap_or(&"")), esc(&name));
-        }
-    }
-    r#"{"present":false,"connected":false,"iface":"","connection":""}"#.into()
-}
 
-#[tauri::command] async fn get_ethernet_details() -> String {
-    let iface = active_iface_of("ethernet").await;
-    if iface.is_empty() {
-        // Fall back to first ethernet device even if not "connected"
-        let dev_out = run("nmcli",&["-t","-f","DEVICE,TYPE","device"]).await;
-        let fb = dev_out.lines().find(|l| l.contains(":ethernet"))
-            .and_then(|l| l.split(':').next().map(|s| s.to_string())).unwrap_or_default();
-        if fb.is_empty() { return r#"{"present":false}"#.into(); }
-        let (ip,ip6,gw,dns,mac,mtu,prefix,state)=connection_details_for_iface(&fb).await;
-        return format!(r#"{{"present":true,"ip":"{}","ip6":"{}","gateway":"{}","dns":"{}","mac":"{}","mtu":"{}","prefix":"{}","state":"{}","iface":"{}"}}"#,
-            esc(&ip),esc(&ip6),esc(&gw),esc(&dns),esc(&mac),esc(&mtu),esc(&prefix),esc(&state),esc(&fb));
-    }
-    let (ip,ip6,gw,dns,mac,mtu,prefix,state)=connection_details_for_iface(&iface).await;
-    format!(r#"{{"present":true,"ip":"{}","ip6":"{}","gateway":"{}","dns":"{}","mac":"{}","mtu":"{}","prefix":"{}","state":"{}","iface":"{}"}}"#,
-        esc(&ip),esc(&ip6),esc(&gw),esc(&dns),esc(&mac),esc(&mtu),esc(&prefix),esc(&state),esc(&iface))
-}
+
+
 
 // ── Get WiFi saved password (tries without sudo, then with sudo) ──────────
-#[tauri::command] async fn get_wifi_password(ssid: String, sudo_password: String) -> String {
-    // Try unprivileged first (works if user is in right group)
-    let out = run("nmcli",&["-s","-t","-f","802-11-wireless-security.psk","connection","show",&ssid]).await;
-    if let Some(line) = out.lines().find(|l| l.starts_with("802-11-wireless-security.psk:")) {
-        let psk = line.splitn(2,':').nth(1).unwrap_or("").to_string();
-        if !psk.is_empty() {
-            return format!(r#"{{"ok":true,"password":"{}","needs_auth":false}}"#,esc(&psk));
-        }
-    }
-    if sudo_password.is_empty() {
-        return r#"{"ok":false,"password":"","needs_auth":true}"#.into();
-    }
-    // Run with sudo -S (sync because it needs stdin piping)
-    let mut child = match StdCommand::new("sudo")
-        .args(["-k","-S","nmcli","-s","-t","-f","802-11-wireless-security.psk","connection","show",&ssid])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn() { Ok(c)=>c, Err(_)=>return r#"{"ok":false,"password":"","needs_auth":true}"#.into() };
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write; let _ = stdin.write_all(format!("{}\n",sudo_password).as_bytes());
-    }
-    let output = match child.wait_with_output() { Ok(o)=>o, Err(_)=>return r#"{"ok":false,"password":"","needs_auth":true}"#.into() };
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    if output.status.success() {
-        let psk = stdout.lines()
-            .find(|l| l.starts_with("802-11-wireless-security.psk:"))
-            .map(|l| l.splitn(2,':').nth(1).unwrap_or("").to_string())
-            .unwrap_or_default();
-        format!(r#"{{"ok":true,"password":"{}","needs_auth":false}}"#,esc(&psk))
-    } else {
-        r#"{"ok":false,"password":"","needs_auth":true,"error":"wrong_password"}"#.into()
-    }
-}
 
-// ── Salud digital daemon helper ──────────────────────────────────────────
-// Logs app focus events — called periodically from the frontend via a simple script
-// Detect active window's app name and log 1 minute of usage.
-// Uses `qdbus6 org.kde.KWin /KWin getWindowInfo` with a fallback to xprop.
-#[tauri::command] async fn track_active_app() -> String {
-    // Try to read the active window's resource class via xprop (works under XWayland)
-    let xprop_root = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        run("xprop", &["-root", "_NET_ACTIVE_WINDOW"])
-    ).await.unwrap_or_default();
-    let win_id = xprop_root.split_whitespace().last().unwrap_or("").trim().to_string();
-    let app_name = if win_id.starts_with("0x") && win_id.len() > 2 {
-        let info = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            run("xprop", &["-id", &win_id, "WM_CLASS"])
-        ).await.unwrap_or_default();
-        // WM_CLASS(STRING) = "instance", "class"
-        info.split('=').nth(1)
-            .and_then(|s| s.split(',').nth(1))
-            .map(|s| s.trim().trim_matches('"').to_string())
-            .unwrap_or_default()
-    } else { String::new() };
-    if app_name.is_empty() || app_name == "plasmashell" || app_name == "BookOS Settings" {
-        return r#"{"ok":false,"reason":"no_active_app"}"#.into();
-    }
-    log_app_usage(app_name, 1.0)
-}
-
-#[tauri::command] fn log_app_usage(app_name: String, minutes: f32) -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let dir = format!("{}/.local/share/bookos", home);
-    let _ = fs::create_dir_all(&dir);
-    let p = format!("{}/app_usage.json", dir);
-    let mut data: Vec<serde_json::Value> = fs::read_to_string(&p).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    let today = {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-        // Simple day bucket: seconds / 86400
-        t / 86400
-    };
-    // Find existing entry for today+app
-    if let Some(entry) = data.iter_mut().find(|e| e["name"]==app_name && e["day"]==today) {
-        let cur = entry["minutes"].as_f64().unwrap_or(0.0);
-        entry["minutes"] = serde_json::json!(cur + minutes as f64);
-    } else {
-        data.push(serde_json::json!({"name": app_name, "minutes": minutes, "day": today}));
-    }
-    // Keep only last 7 days
-    let cutoff = today.saturating_sub(7);
-    data.retain(|e| e["day"].as_u64().unwrap_or(0) >= cutoff);
-    let _ = fs::write(&p, serde_json::to_string(&data).unwrap_or_default());
-    r#"{"ok":true}"#.into()
-}
 
 // ── Audio devices + per-app volume ──────────────────────────────────────
-#[tauri::command] async fn get_audio_devices() -> String {
-    let (sinks_short, sources_short, default_sink, default_source) = tokio::join!(
-        run("pactl",&["list","short","sinks"]),
-        run("pactl",&["list","short","sources"]),
-        run("pactl",&["get-default-sink"]),
-        run("pactl",&["get-default-source"])
-    );
-    // Parse sinks: "idx\tname\tdriver\tformat\tstate"
-    let parse_short = |raw: &str, default: &str| -> Vec<serde_json::Value> {
-        raw.lines().filter(|l| !l.is_empty()).map(|l| {
-            let p: Vec<&str> = l.splitn(5,'\t').collect();
-            let name = p.get(1).unwrap_or(&"").trim().to_string();
-            let is_def = name == default.trim();
-            serde_json::json!({"index": p.first().unwrap_or(&"0").trim().parse::<u32>().unwrap_or(0), "name": name, "state": p.get(4).unwrap_or(&"").trim().to_string(), "isDefault": is_def})
-        }).collect()
-    };
-    let sinks = parse_short(&sinks_short, &default_sink);
-    // Filter out monitor sources
-    let sources: Vec<serde_json::Value> = parse_short(&sources_short, &default_source)
-        .into_iter().filter(|s| !s["name"].as_str().unwrap_or("").ends_with(".monitor")).collect();
-    format!(r#"{{"sinks":{},"sources":{},"defaultSink":"{}","defaultSource":"{}"}}"#,
-        serde_json::to_string(&sinks).unwrap_or_default(),
-        serde_json::to_string(&sources).unwrap_or_default(),
-        esc(default_sink.trim()), esc(default_source.trim()))
-}
-#[tauri::command] async fn set_default_sink(name: String) -> String {
-    run("pactl",&["set-default-sink",&name]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn set_default_source(name: String) -> String {
-    run("pactl",&["set-default-source",&name]).await;
-    r#"{"ok":true}"#.into()
-}
-#[tauri::command] async fn get_app_audio() -> String {
-    let out = run("pactl",&["list","sink-inputs"]).await;
-    let mut apps: Vec<serde_json::Value> = Vec::new();
-    let mut cur_idx: Option<u32> = None;
-    let mut cur_name = String::new();
-    let mut cur_vol: u32 = 100;
-    let mut cur_mute = false;
-    for line in out.lines() {
-        let t = line.trim();
-        if t.starts_with("Sink Input #") {
-            if let Some(idx) = cur_idx {
-                if !cur_name.is_empty() {
-                    apps.push(serde_json::json!({"index":idx,"name":cur_name,"volume":cur_vol,"muted":cur_mute}));
-                }
-            }
-            cur_idx = t.split('#').nth(1).and_then(|s| s.parse().ok());
-            cur_name = String::new(); cur_vol = 100; cur_mute = false;
-        } else if t.starts_with("application.name") {
-            if let Some(v) = t.split('"').nth(1) { cur_name = v.to_string(); }
-        } else if t.starts_with("Mute:") {
-            cur_mute = t.contains("yes");
-        } else if t.starts_with("Volume:") {
-            if let Some(pct) = t.split('/').nth(1) {
-                cur_vol = pct.trim().trim_end_matches('%').parse().unwrap_or(100);
-            }
-        }
-    }
-    if let Some(idx) = cur_idx {
-        if !cur_name.is_empty() { apps.push(serde_json::json!({"index":idx,"name":cur_name,"volume":cur_vol,"muted":cur_mute})); }
-    }
-    serde_json::to_string(&apps).unwrap_or_else(|_| "[]".into())
-}
-#[tauri::command] async fn set_app_volume(index: u32, volume: u32) -> String {
-    run("pactl",&["set-sink-input-volume",&index.to_string(),&format!("{}%",volume)]).await;
-    r#"{"ok":true}"#.into()
-}
+
+
+
+
+
 // Map an ugly PipeWire/ALSA description + active port into a friendly,
 // human label. Falls back to the raw description if nothing matches.
-fn friendly_audio_name(desc: &str, port: &str, lang_es: bool) -> String {
-    let p = port.to_lowercase();
-    let d = desc.to_lowercase();
-    let pick = |es: &str, en: &str| if lang_es { es.to_string() } else { en.to_string() };
-    // Bluetooth devices already have a clean name (the device name) — keep desc.
-    if d.contains("bluez") || p.contains("bluetooth") { return desc.to_string(); }
-    if p.contains("headphone") || d.contains("headphone") { return pick("Auriculares", "Headphones"); }
-    if p.contains("headset")   || d.contains("headset")   { return pick("Auriculares con micrófono", "Headset"); }
-    if p.contains("speaker")   || p.contains("internal")  { return pick("Altavoces internos", "Internal speakers"); }
-    if p.contains("hdmi")      || p.contains("displayport") || d.contains("hdmi") { return pick("Salida HDMI / DisplayPort", "HDMI / DisplayPort"); }
-    if p.contains("usb")       || d.contains("usb")       { return pick("Dispositivo USB", "USB device"); }
-    if p.contains("mic")       || d.contains("microphone") { return pick("Micrófono interno", "Internal microphone"); }
-    // Generic onboard codec names → "Audio interno"
-    if d.contains("hd audio") || d.contains("hda ") || d.contains("alc") || d.contains("sof") || d.contains("controller") {
-        return pick("Audio interno", "Built-in audio");
-    }
-    desc.to_string()
-}
 
-#[tauri::command] async fn get_sink_descriptions() -> String {
-    let out = run("pactl",&["list","sinks"]).await;
-    let lang_es = std::env::var("LANG").unwrap_or_default().starts_with("es");
-    let mut map: Vec<serde_json::Value> = Vec::new();
-    let mut cur_name = String::new();
-    let mut cur_desc = String::new();
-    let mut cur_port = String::new();
-    let flush = |map: &mut Vec<serde_json::Value>, name: &str, desc: &str, port: &str| {
-        if !name.is_empty() && !desc.is_empty() {
-            let friendly = friendly_audio_name(desc, port, lang_es);
-            map.push(serde_json::json!({"name":name,"desc":desc,"friendly":friendly}));
-        }
-    };
-    for line in out.lines() {
-        let t = line.trim();
-        if let Some(n) = t.strip_prefix("Name:") {
-            // New sink block starts — flush the previous one.
-            flush(&mut map, &cur_name, &cur_desc, &cur_port);
-            cur_name = n.trim().to_string();
-            cur_desc = String::new();
-            cur_port = String::new();
-        } else if let Some(d) = t.strip_prefix("Description:") {
-            cur_desc = d.trim().to_string();
-        } else if let Some(ap) = t.strip_prefix("Active Port:") {
-            cur_port = ap.trim().to_string();
-        }
-    }
-    flush(&mut map, &cur_name, &cur_desc, &cur_port);
-    serde_json::to_string(&map).unwrap_or_else(|_| "[]".into())
-}
+
+
 // ── Autostart apps ───────────────────────────────────────────────────────
 #[tauri::command] fn get_autostart_apps() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -5866,14 +4600,6 @@ fn check_navigation_request() -> String {
     if !perf.is_empty() && perf != "balanced" {
         let _ = run("powerprofilesctl", &["set", &perf]).await;
     }
-    // Sync Kvantum + Plasma Desktop Theme + GTK on startup
-    if let Some(is_dark) = cfg.get("ThemeIsDark").and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s == "true"))) {
-        let (kv, pt) = get_kv_pt(&cfg, is_dark);
-        let _ = run("kvantummanager",&["--set",&kv]).await;
-        let _ = run("plasma-apply-desktoptheme",&[&pt]).await;
-        apply_gtk_theme(&cfg, is_dark).await;
-        apply_lockscreen_theme(is_dark).await;
-    }
     r#"{"ok":true}"#.into()
 }
 fn load_bookos_settings() -> serde_json::Value {
@@ -6027,22 +4753,10 @@ fn bt_icon_is_audio(icon: &str) -> bool {
 
 // List currently-connected audio devices: Vec<(mac, name)>.
 async fn connected_audio_devices() -> Vec<(String, String)> {
-    let connected = run_timeout("bluetoothctl", &["devices", "Connected"], 3_000).await;
-    let mut out = Vec::new();
-    for line in connected.lines() {
-        let l = line.trim().trim_start_matches(|c: char| c=='[' || c==']' || c=='#' || c.is_whitespace());
-        let idx = match l.find("Device ") { Some(i) => i, None => continue };
-        let rest = &l[idx + "Device ".len()..];
-        let (mac, name) = match rest.split_once(' ') { Some(p) => p, None => continue };
-        if mac.len()!=17 || mac.matches(':').count()!=5 { continue; }
-        let info = run_timeout("bluetoothctl", &["info", mac], 2_000).await;
-        let icon = info.lines().find(|l| l.trim_start().starts_with("Icon:"))
-            .and_then(|l| l.split(':').nth(1)).map(|s| s.trim().to_string()).unwrap_or_default();
-        if bt_icon_is_audio(&icon) {
-            out.push((mac.to_string(), name.trim().to_string()));
-        }
-    }
-    out
+    let s=system_client::snapshot();
+    s["bluetooth"]["devices"].as_array().into_iter().flatten()
+        .filter(|d|d["connected"] == true && bt_icon_is_audio(d["icon"].as_str().unwrap_or_default()))
+        .filter_map(|d|Some((d["mac"].as_str()?.to_owned(),d["name"].as_str()?.to_owned()))).collect()
 }
 
 // Is this device a Samsung Galaxy Buds (by BT name)?
@@ -6072,8 +4786,7 @@ async fn earbud_watch_loop(app: tauri::AppHandle) {
     loop {
         // Cheap gate: when the adapter is powered off there's nothing to watch —
         // skip device enumeration entirely and back off (saves constant spawns).
-        let show = run_timeout("bluetoothctl", &["show"], 2_000).await;
-        if show.contains("Powered: no") || show.is_empty() {
+        if system_client::snapshot()["bluetooth"]["enabled"] != true {
             known.clear();   // forget state so a reconnect after power-on notifies again
             tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             continue;
@@ -6204,28 +4917,8 @@ async fn handle_buds_appeared(app: &tauri::AppHandle, mac: &str, name: &str) {
     format!("[{}]", devs.join(","))
 }
 
-// ── Location (geoclue) ───────────────────────────────────────────────────
-#[tauri::command] async fn get_location_status() -> String {
-    let out = run("systemctl", &["is-active", "geoclue"]).await;
-    let enabled = out.trim() == "active";
-    format!(r#"{{"enabled":{}}}"#, enabled)
-}
-#[tauri::command] async fn set_location_enabled(enable: bool) -> String {
-    let action = if enable { "start" } else { "stop" };
-    run("systemctl", &[action, "geoclue"]).await;
-    r#"{"ok":true}"#.into()
-}
-// ── Generic command runner (for kwriteconfig6, qdbus, etc.) ──────────────
-#[tauri::command] async fn run_command(cmd: String, args: Vec<String>) -> String {
-    // Allowlist: only safe KDE config tools
-    let allowed = ["kwriteconfig6","kreadconfig6","qdbus","kcmshell6","qdbus6","kquitapp6"];
-    if !allowed.contains(&cmd.as_str()) {
-        return r#"{"ok":false,"error":"command not allowed"}"#.into();
-    }
-    let ref_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let out = run(&cmd, &ref_args).await;
-    format!(r#"{{"ok":true,"output":"{}"}}"#, esc(&out))
-}
+// ── Launchers for optional BookOS companion applications ────────────────
+
 
 /// Launch an external app from a fixed allowlist. Returns {"ok":true} or {"ok":false,"error":"..."}.
 #[tauri::command] async fn launch_app(app: String) -> String {
@@ -6334,7 +5027,7 @@ fn acquire_instance_lock() -> bool {
     true
 }
 
-// KDE/Wayland fractional output scales (e.g. 1.75) make GTK negotiate the
+// Fractional output scales (e.g. 1.75) make GTK negotiate the
 // wp-fractional-scale protocol: the compositor asks for a non-integer buffer
 // size, so every repainted tile needs an extra scale/blend pass. On Intel
 // iGPUs (esp. new Mesa drivers like Lunar Lake's) that's slow enough to tank
@@ -6343,25 +5036,10 @@ fn acquire_instance_lock() -> bool {
 // that protocol entirely — the window renders at a clean integer buffer scale
 // (cheap, tile-aligned) and DPI scaling shrinks the logical layout back down
 // to match, without touching the desktop-wide scale setting.
-fn fractional_scale_workaround() -> Option<(u32, f64)> {
-    let out = StdCommand::new("kscreen-doctor").arg("-j").output().ok()?;
-    if !out.status.success() { return None; }
-    let json: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let scale = json.get("outputs")?.as_array()?.iter()
-        .find(|o| o.get("connected").and_then(|v| v.as_bool()).unwrap_or(false)
-                && o.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false))
-        .and_then(|o| o.get("scale"))
-        .and_then(|v| v.as_f64())?;
-    if scale <= 0.0 || scale.fract().abs() < 0.001 { return None; } // already integer
-    let gdk_scale = scale.ceil();
-    Some((gdk_scale as u32, scale / gdk_scale))
-}
+
 
 fn main() {
-    if let Some((gdk_scale, dpi_scale)) = fractional_scale_workaround() {
-        std::env::set_var("GDK_SCALE", gdk_scale.to_string());
-        std::env::set_var("GDK_DPI_SCALE", format!("{:.4}", dpi_scale));
-    }
+
 
     // webkit2gtk's DMABUF renderer has a known perf/glitch regression on
     // Wayland + Intel (Mesa) GPUs — scrolling anything with clipped rounded
@@ -6412,6 +5090,7 @@ fn main() {
             }
         })
         .setup(move |app| {
+            system_client::start(app.handle().clone());
             use tauri::Manager;
             // Routines/automation only work while this process is alive, so
             // ensure the hidden autostart entry exists — unless the user
@@ -6437,7 +5116,7 @@ fn main() {
             let buds_app = app.handle().clone();
             tauri::async_runtime::spawn(async move { earbud_watch_loop(buds_app).await; });
             // Caché del tiempo para el widget de la pantalla de bloqueo. Va aquí
-            // y no en el greeter porque kscreenlocker no tiene red propia ni
+                            // y no en el greeter porque no tiene red propia ni
             // sitio donde guardar nada: solo lee el fichero.
             tauri::async_runtime::spawn(async move { weather_refresh_loop().await; });
             tauri::async_runtime::spawn(async move { devices_refresh_loop().await; });
@@ -6461,7 +5140,7 @@ fn main() {
                             let _ = std::fs::remove_file(path);
                             let visible = win.is_visible().unwrap_or(false);
                             let minimized = win.is_minimized().unwrap_or(false);
-                            // Force raise + focus on Wayland/KDE (request_user_attention triggers KWin)
+                            // Ask the desktop to raise and focus the window.
                             let raise = || {
                                 let _ = win.unminimize();
                                 let _ = win.show();
@@ -6495,7 +5174,7 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
             }
-            // Removed dynamic creation of bookos-settings-dev.desktop to fix KDE Plasma pin icon issues.
+            // Removed dynamic creation of bookos-settings-dev.desktop.
             
             // ── Background battery check thread ───────────────────────
             std::thread::spawn(|| {
@@ -6547,24 +5226,8 @@ fn main() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 use tauri::Emitter;
-                // Helper: read WiFi state ("enabled" or other)
-                let wifi_enabled = || -> bool {
-                    let st = StdCommand::new("nmcli")
-                        .args(["-t", "-f", "WIFI", "radio"])
-                        .output()
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .unwrap_or_default();
-                    st == "enabled"
-                };
-                // Helper: read Bluetooth state
-                let bt_enabled = || -> bool {
-                    let s = StdCommand::new("bluetoothctl")
-                        .args(["show"])
-                        .output()
-                        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-                        .unwrap_or_default();
-                    s.lines().any(|l| l.contains("Powered:") && l.contains("yes"))
-                };
+                let wifi_enabled = || system_client::snapshot()["network"]["enabled"] == true;
+                let bt_enabled = || system_client::snapshot()["bluetooth"]["enabled"] == true;
                 // Check if AC adapter is physically online via sysfs (most reliable)
                 let ac_online = || -> bool {
                     for p in &[
@@ -6638,26 +5301,9 @@ fn main() {
             });
 
             // ── Automatic Update Daemon ──────────────────────────────
-            // Tray badge: hidden by default, shown by the update daemon when
-            // updates are pending. Click opens the updates page.
-            {
-                use tauri::tray::TrayIconBuilder;
-                let mut builder = TrayIconBuilder::with_id("updates")
-                    .tooltip("BookOS Settings")
-                    .on_tray_icon_event(|_tray, event| {
-                        if let tauri::tray::TrayIconEvent::Click { .. } = event {
-                            open_updates_page();
-                        }
-                    });
-                if let Some(icon) = app.default_window_icon() {
-                    builder = builder.icon(icon.clone());
-                }
-                if let Ok(tray) = builder.build(app.handle()) {
-                    let _ = tray.set_visible(false);
-                }
-            }
-
-            let upd_handle = app.handle().clone();
+            // Pending updates are reported through desktop notifications.
+            // A tray badge is intentionally not used: it pulled in the
+            // deprecated libayatana-appindicator backend on Linux.
             std::thread::spawn(move || {
                 // Wait 5 minutes after start to not saturate CPU
                 std::thread::sleep(std::time::Duration::from_secs(300));
@@ -6700,25 +5346,7 @@ fn main() {
                             _ => 0,
                         };
 
-                        // Tray badge: persistent reminder, unlike the notification
-                        if let Some(tray) = upd_handle.tray_by_id("updates") {
-                            if total > 0 {
-                                let lang_t = std::env::var("LANG").unwrap_or_default();
-                                let tip = if lang_t.starts_with("es") {
-                                    if total == 1 { "1 actualización disponible".to_string() }
-                                    else { format!("{} actualizaciones disponibles", total) }
-                                } else {
-                                    if total == 1 { "1 update available".to_string() }
-                                    else { format!("{} updates available", total) }
-                                };
-                                let _ = tray.set_tooltip(Some(&tip));
-                                let _ = tray.set_title(Some(&total.to_string()));
-                                let _ = tray.set_visible(true);
-                            } else {
-                                let _ = tray.set_visible(false);
-                            }
-                        }
-                        // UpdateNotifications=false silences the popup (tray badge stays).
+                        // UpdateNotifications=false silences the popup.
                         let notify_on = load_bookos_settings().get("UpdateNotifications")
                             .and_then(|v| v.as_str()).unwrap_or("true") != "false";
                         if total > 0 && notify_on {
@@ -6778,64 +5406,48 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            open_printers,system_client::system_answer_pairing, system_client::system_set_volume, system_client::system_set_mute, system_client::pair_bluetooth, system_client::forget_bluetooth, system_client::set_audio_profile,
             open_main_window,
-            system_extras::list_input_devices,system_extras::set_input_device_prop,
-            system_extras::kscreen_get,system_extras::kscreen_set,
-            bookos_desktop::bookos_desktop_available,bookos_desktop::bookos_get_capabilities,
+            bookos_desktop::bookos_get_config,bookos_desktop::bookos_apply_config,bookos_desktop::bookos_desktop_available,bookos_desktop::bookos_get_capabilities,
             bookos_desktop::bookos_get_outputs,bookos_desktop::bookos_apply_output_config,
             bookos_desktop::bookos_reload_config,
-            system_extras::list_cursor_themes,system_extras::list_icon_themes,
-            system_extras::apply_cursor_theme,system_extras::apply_icon_theme,
-            system_extras::restart_kglobalaccel,
-            system_extras::list_keymaps_pretty,system_extras::set_global_shortcut,
-            system_extras::list_custom_shortcuts,system_extras::create_custom_shortcut,system_extras::delete_custom_shortcut,
+            system_extras::list_keymaps_pretty,
             system_extras::set_avatar_data,
             get_user_info,set_display_name,set_hostname,get_system_info,get_default_hostname,get_bookos_release,refresh_bookos_release,get_update_channel,set_update_channel,apply_bookos_release,list_bookos_snapshots,rollback_bookos_snapshot,get_snapshot_support,enable_snapshot_access,create_snapshot,get_bookos_repo_status,set_bookos_repo,
             check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,
-            get_wifi_status,toggle_wifi,get_wifi_list,connect_wifi,wifi_rescan,
-            get_bluetooth_status,toggle_bluetooth,get_bluetooth_devices,connect_bluetooth,disconnect_bluetooth,bluetooth_scan,
-            get_airplane_mode,toggle_airplane_mode,
+            system_settings::get_wifi_status,system_settings::toggle_wifi,system_settings::get_wifi_list,system_settings::connect_wifi,system_settings::wifi_rescan,
+            system_settings::get_bluetooth_status,system_settings::toggle_bluetooth,system_settings::get_bluetooth_devices,system_settings::connect_bluetooth,system_settings::disconnect_bluetooth,system_settings::bluetooth_scan,
+            system_settings::get_airplane_mode,system_settings::toggle_airplane_mode,
             get_brightness,set_brightness,get_kbd_brightness,set_kbd_brightness,
-            get_nightlight,set_nightlight,set_nightlight_schedule,
-            get_volume,set_volume,toggle_mute,set_balance,get_balance,
+            system_settings::get_volume,system_settings::set_volume,system_settings::toggle_mute,system_settings::set_balance,system_settings::get_balance,
             get_battery_status,get_battery_sysfs,get_battery_history,get_battery_csv_data,get_adaptive_predictions,set_adaptive_charging,
-            get_display_info,set_resolution,set_vrr_policy,
             get_current_theme,get_available_themes,set_color_scheme,get_theme_schedule,set_theme_schedule,set_icon_style,
-            get_kde_light_dark_themes,apply_kde_theme,
             get_dnd_status,toggle_dnd,
-            get_desktop_lockscreen_config,set_desktop_lockscreen_config,
-            get_lock_timeout,set_lock_timeout,set_lock_grace,get_lock_grace,check_fingerprint,enroll_fingerprint,verify_password,verify_fingerprint,
+            get_lock_timeout,set_lock_timeout,check_fingerprint,enroll_fingerprint,verify_password,verify_fingerprint,
             get_locale_info,get_available_locales,set_locale,get_available_keymaps,set_keymap,
             get_datetime_info,list_timezones,set_timezone,set_ntp,
             check_system_updates,check_aur_updates,check_flatpak_updates,run_system_update,run_pacman_update_silent,get_update_progress,cancel_update,run_flatpak_update,run_aur_update,get_pkg_mgr,has_flatpak,logout_session,
             get_app_power_usage,get_sddm_themes,set_sddm_theme,get_sddm_config,set_sddm_config,
             sddm_accent_from_image,sddm_clock_adapt,sddm_clock_depth,list_login_users,preview_sddm,
-            is_lockscreen_theme_installed,install_lockscreen_theme,uninstall_lockscreen_theme,
             is_sddm_theme_installed,install_sddm_theme,uninstall_sddm_theme,
-            get_app_usage,
-            run_maintenance,get_kwin_effects,toggle_kwin_effect,fix_cursor_hz,get_cursor_fix_status,get_input_devices,set_input_setting,
+            run_maintenance,
             get_firewall_status,run_sudo_command,get_system_users,
-            get_autostart_bookos,toggle_autostart_bookos,get_autostart_apps,toggle_autostart_app,setup_polkit_rules,export_settings,import_settings,
-            get_accessibility_settings,set_font_scale,set_display_scale,toggle_invert_colors,set_cursor_size,
-            change_password,set_avatar,create_user,delete_user,get_autologin_status,set_autologin,get_labs_settings,set_lab_setting,
-            forget_wifi,get_wifi_details,get_ethernet_status,get_ethernet_details,get_wifi_password,log_app_usage,track_active_app,
+            get_autostart_bookos,toggle_autostart_bookos,get_autostart_apps,toggle_autostart_app,export_settings,import_settings,
+            change_password,set_avatar,create_user,delete_user,get_autologin_status,set_autologin,
+            system_settings::forget_wifi,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
             get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
             refresh_weather_cache,refresh_devices_cache,
             dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,
-            dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_plasma,dynamic_color_set_kvantum,dynamic_color_set_lockscreen,
-            get_default_apps,list_apps_for_role,set_default_app,open_mime_settings,
+            dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_kvantum,dynamic_color_set_lockscreen,
+            get_default_apps,list_apps_for_role,set_default_app,
             get_bookos_setting,set_bookos_setting,get_settings_batch,configure_auto_update,restore_startup_settings,get_startup_page,check_navigation_request,write_ipc_state,read_ipc_state,
-            get_available_kvantum_themes,get_available_plasma_themes,get_style_themes,set_style_themes,
+            get_available_kvantum_themes,
             get_bt_device_battery,get_kdeconnect_devices,
-            get_audio_devices,set_default_sink,set_default_source,get_app_audio,set_app_volume,get_sink_descriptions,
-            get_location_status,set_location_enabled,run_command,launch_app,which_app,open_external_url,
+            system_settings::get_audio_devices,system_settings::set_default_sink,system_settings::set_default_source,system_settings::get_app_audio,system_settings::set_app_volume,system_settings::get_sink_descriptions,
+            launch_app,which_app,open_external_url,
             hardware_control::aplicar_perfil_termico,
             hardware_control::set_fan_mode,
             hardware_control::check_book_hw,
-            hardware_control::activar_vision_booster,hardware_control::desactivar_vision_booster,
-            hardware_control::activar_hdr,hardware_control::desactivar_hdr,
-            hardware_control::activar_ahorro_pantalla,hardware_control::desactivar_ahorro_pantalla,
-            hardware_control::aplicar_perfil_color,
             hardware_control::set_brillo,
             hardware_control::obtener_estado_pantalla,
             buds::buds_connect,buds::buds_disconnect,buds::buds_get_status,
@@ -6851,14 +5463,33 @@ fn main() {
             quickshare::qs_set_download_path,
             p2p::p2p_start_discover,p2p::p2p_stop_discover,
             p2p::p2p_connect,p2p::p2p_disconnect,
-            search::search_status,search::search_install,search::search_install_log,
-            search::search_toggle,search::search_reindex,search::search_query,search::search_uninstall,
             get_thermal_csv_data,get_charging_info,
-            set_camera_enabled,get_camera_enabled,set_mic_muted,get_mic_muted
+            set_camera_enabled,get_camera_enabled,system_settings::set_mic_muted,system_settings::get_mic_muted
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
     // Clean up lock file when the app exits normally.
     let _ = std::fs::remove_file(lock_path());
+}
+
+fn native_backlight()->Result<(String,u32,u32),String> {
+    for item in fs::read_dir("/sys/class/backlight").map_err(|e|e.to_string())?.flatten() {
+        let path=item.path();
+        let read=|key:&str|fs::read_to_string(path.join(key)).ok().and_then(|s|s.trim().parse::<u32>().ok());
+        if let (Some(current),Some(max))=(read("brightness"),read("max_brightness")) {
+            return Ok((item.file_name().to_string_lossy().into_owned(),current,max));
+        }
+    }
+    Err("No hay control de brillo disponible".into())
+}
+#[tauri::command]
+async fn open_printers()->Result<(),String> {
+    Command::new("system-config-printer").spawn().map_err(|e|e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_available_themes()->String {
+    serde_json::json!([{"name":"claro","is_dark":false},{"name":"oscuro","is_dark":true}]).to_string()
 }

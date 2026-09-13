@@ -1,18 +1,4 @@
-# Vuelve a aplicar los QML de BookOS después de una actualización.
-#
-# Dos disparadores, por dos motivos distintos:
-#  · plasma-workspace  → sus actualizaciones sobrescriben la pantalla de
-#                        bloqueo parcheada con la de serie.
-#  · bookos-settings   → una versión nueva trae QML nuevos al stage, pero las
-#                        copias en uso (shell de Plasma y tema de SDDM) se
-#                        quedarían con las viejas hasta que el usuario volviera
-#                        a pulsar "instalar" a mano.
-[Trigger]
-Type = Package
-Operation = Install
-Operation = Upgrade
-Target = plasma-workspace
-
+# Refresh the selected BookOS SDDM theme after Settings updates.
 [Trigger]
 Type = Package
 Operation = Install
@@ -20,7 +6,7 @@ Operation = Upgrade
 Target = bookos-settings
 
 [Action]
-Description = Re-aplicando los QML de BookOS (bloqueo y SDDM)...
+Description = Actualizando el tema de inicio de sesión BookOS...
 When = PostTransaction
 Exec = /usr/lib/bookos/bookos-reapply-theme.sh
 NeedsTargets
