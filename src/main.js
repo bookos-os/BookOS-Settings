@@ -48,6 +48,7 @@ function renderHomeLanding(){
 applyCachedPalette();
 
 document.addEventListener('DOMContentLoaded',async()=>{
+    document.getElementById('wp-add-fab')?.remove();
     startSystemEvents().catch(console.error);
     const sb=document.getElementById('sb'),app=document.getElementById('app'),mc=document.getElementById('mc');
     // Apply translations to static index.html elements
@@ -133,6 +134,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // ── Navigation ──
     const _navHistory=[];
     function clearPageIntervals(){
+        // El botón vive en body, fuera de #app: limpiar la página no lo quita.
+        // También se ejecuta al reabrir la ventana mediante resetToHome().
+        document.getElementById('wp-add-fab')?.remove();
         (window._pageCleanups||[]).splice(0).forEach(fn=>fn());
         if(window._pageIntervals){window._pageIntervals.forEach(clearInterval);window._pageIntervals=[];}
     }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod palette;
+mod wallpaper_preview;
 
 use tokio::process::Command;
 use std::process::Command as StdCommand;
@@ -978,6 +979,22 @@ fn detect_book_model() -> Option<String> {
     r#"{"ok":false,"error":"límite de carga no compatible con este hardware"}"#.into()
 }
 
+#[tauri::command] fn get_firmware_power_controls() -> String {
+    let names=[("power_on_lid_open","Encender al abrir la tapa"),("wake_on_ac","Encender al conectar la corriente"),("usb_charging","Cargar dispositivos USB con el portátil apagado"),("usb_power_off","Alimentación USB con el portátil apagado")];
+    let mut out=Vec::new();
+    if let Ok(vendors)=fs::read_dir("/sys/class/firmware-attributes") { for v in vendors.flatten() { for (id,label) in names { let p=v.path().join("attributes").join(id).join("current_value"); if p.is_file(){ let value=read(&p.to_string_lossy()).trim()=="1"; out.push(serde_json::json!({"id":id,"label":label,"value":value,"path":p}).to_string()); } } } }
+    format!("[{}]",out.join(","))
+}
+
+#[tauri::command] async fn set_firmware_power_control(id:String, enabled:bool, password:Option<String>) -> String {
+    if !["power_on_lid_open","wake_on_ac","usb_charging","usb_power_off"].contains(&id.as_str()){return r#"{"ok":false,"error":"Atributo no permitido"}"#.into()}
+    let mut path=None; if let Ok(vendors)=fs::read_dir("/sys/class/firmware-attributes"){for v in vendors.flatten(){let p=v.path().join("attributes").join(&id).join("current_value");if p.is_file(){path=Some(p);break;}}}
+    let p=match path{Some(p)=>p,None=>return r#"{"ok":false,"error":"Función no soportada por el firmware"}"#.into()}; let val=if enabled{"1"}else{"0"};
+    if fs::write(&p,val).is_ok()&&read(&p.to_string_lossy()).trim()==val{return r#"{"ok":true}"#.into();}
+    let pw=match password.filter(|x|!x.is_empty()){Some(x)=>x,None=>return r#"{"ok":false,"needs_auth":true}"#.into()}; use tokio::io::AsyncWriteExt;
+    let mut c=match Command::new("sudo").args(["-k","-S","tee",p.to_str().unwrap_or("")]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).spawn(){Ok(c)=>c,Err(e)=>return serde_json::json!({"ok":false,"error":e.to_string()}).to_string()}; if let Some(mut i)=c.stdin.take(){let _=i.write_all(format!("{}\n{}\n",pw,val).as_bytes()).await;} let ok=matches!(c.wait().await,Ok(s)if s.success())&&read(&p.to_string_lossy()).trim()==val; serde_json::json!({"ok":ok}).to_string()
+}
+
 // ── WiFi ─────────────────────────────────────────────────────────────────
 
 
@@ -1501,12 +1518,6 @@ async fn sync_sddm_accent(hex: &str) {
 
 
 // ── Theme config helpers ─────────────────────────────────────────────────
-fn kvantum_theme(cfg:&serde_json::Value,is_dark:bool)->String {
-    let key=if is_dark {"KvantumDark"}else{"KvantumLight"};
-    cfg.get(key).and_then(|v|v.as_str()).unwrap_or(if is_dark {"bookos-dark-blue"}else{"bookos-light-blue"}).to_owned()
-}
-
-
 #[tauri::command] fn get_available_kvantum_themes() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let path = format!("{}/.config/Kvantum", home);
@@ -3350,7 +3361,10 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 
 // ── Wallpaper ─────────────────────────────────────────────────────────
-#[tauri::command] fn get_wallpapers() -> String {
+#[tauri::command] async fn get_wallpapers() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(list_wallpapers).await.map_err(|e| e.to_string())
+}
+fn list_wallpapers() -> String {
     let mut wallpapers: Vec<String> = Vec::new();
     let dirs = ["/usr/share/wallpapers", &format!("{}/.local/share/wallpapers", std::env::var("HOME").unwrap_or_default())];
     for dir in &dirs {
@@ -3811,9 +3825,8 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     save_bookos_settings(&cfg);
 
     // Kvantum: solo hay plantilla para bookos-dark-blue/bookos-light-blue,
-    // así que se escriben esos dos siempre que el flag esté activo, y solo
-    // se reaplica si es el tema Kvantum que el usuario tiene puesto ahora
-    // (si usa otra variante de color, la plantilla no le pisa nada).
+    // así que se actualizan sus archivos cuando el flag está activo.
+    // No se abre Kvantum Manager al cambiar el fondo.
     if cfg.get("DynamicColorKvantum").and_then(|v| v.as_bool()).unwrap_or(false) {
         let home = std::env::var("HOME").unwrap_or_default();
         // Instalado por el paquete; en dev (cargo run / tauri dev) cae a la
@@ -3833,11 +3846,9 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
         write_kv("bookos-dark-blue", "bookos-dark-blue.kvconfig.tmpl", true);
         write_kv("bookos-light-blue", "bookos-light-blue.kvconfig.tmpl", false);
 
-        let is_dark = cfg.get("ThemeIsDark").and_then(|v| v.as_bool()).unwrap_or(true);
-        let kv = kvantum_theme(&cfg, is_dark);
-        if kv == "bookos-dark-blue" || kv == "bookos-light-blue" {
-            run("kvantummanager", &["--set", &kv]).await;
-        }
+        // Updating the existing theme files must not launch the graphical
+        // manager or change the user's active Kvantum theme.
+
     }
 
     // Lockscreen/SDDM: un único acento (no hay par claro/oscuro aquí, igual
@@ -5038,6 +5049,34 @@ fn acquire_instance_lock() -> bool {
 // to match, without touching the desktop-wide scale setting.
 
 
+/// Quita el zoom de página que WebKitGTK hace con el pellizco del touchpad.
+///
+/// No hay ajuste para eso ni en WebKit ni en Tauri, y la página no se entera:
+/// el pellizco lo consume un `GtkGestureZoom` de la propia vista y llega como
+/// `setMagnification`, no como `wheel` ni `touch*`, así que ningún
+/// `preventDefault` lo frena. Se apaga ese gesto y ningún otro: con fase `None`
+/// GTK deja de pasarle eventos (gtkeventcontroller.c, 3.24). Va en
+/// `on_page_load` para cubrir también la ventana emergente de los auriculares.
+fn desactivar_zoom_por_pellizco<R: tauri::Runtime>(
+    webview: &tauri::Webview<R>,
+    _: &tauri::webview::PageLoadPayload<'_>,
+) {
+    #[cfg(target_os = "linux")]
+    let _ = webview.with_webview(|webview| {
+        use gtk::glib::translate::from_glib_none;
+        use gtk::prelude::*;
+
+        // WebKitGTK guarda ahí el gesto (WebKitWebViewBase.cpp, 2.52.5). No es
+        // API pública: si la clave cambia, no se encuentra y el zoom vuelve.
+        // Lo guardado es un puntero C a un GObject, no un tipo de Rust.
+        let Some(gesto) = (unsafe { webview.inner().data::<gtk::ffi::GtkGesture>("wk-view-zoom-gesture") }) else {
+            return;
+        };
+        let gesto: gtk::Gesture = unsafe { from_glib_none(gesto.as_ptr()) };
+        gesto.set_propagation_phase(gtk::PropagationPhase::None);
+    });
+}
+
 fn main() {
 
 
@@ -5072,6 +5111,7 @@ fn main() {
     let toggle_only = args.iter().any(|a| a == "--toggle");
 
     tauri::Builder::default()
+        .on_page_load(desactivar_zoom_por_pellizco)
         .plugin(tauri_plugin_dialog::init())
         .manage(UpdateState::default())
         .manage(buds::BudsState::default())
@@ -5414,7 +5454,7 @@ fn main() {
             system_extras::list_keymaps_pretty,
             system_extras::set_avatar_data,
             get_user_info,set_display_name,set_hostname,get_system_info,get_default_hostname,get_bookos_release,refresh_bookos_release,get_update_channel,set_update_channel,apply_bookos_release,list_bookos_snapshots,rollback_bookos_snapshot,get_snapshot_support,enable_snapshot_access,create_snapshot,get_bookos_repo_status,set_bookos_repo,
-            check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,
+            check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,get_firmware_power_controls,set_firmware_power_control,
             system_settings::get_wifi_status,system_settings::toggle_wifi,system_settings::get_wifi_list,system_settings::connect_wifi,system_settings::wifi_rescan,
             system_settings::get_bluetooth_status,system_settings::toggle_bluetooth,system_settings::get_bluetooth_devices,system_settings::connect_bluetooth,system_settings::disconnect_bluetooth,system_settings::bluetooth_scan,
             system_settings::get_airplane_mode,system_settings::toggle_airplane_mode,
@@ -5435,7 +5475,7 @@ fn main() {
             get_autostart_bookos,toggle_autostart_bookos,get_autostart_apps,toggle_autostart_app,export_settings,import_settings,
             change_password,set_avatar,create_user,delete_user,get_autologin_status,set_autologin,
             system_settings::forget_wifi,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
-            get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
+            wallpaper_preview::wallpaper_preview,get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
             refresh_weather_cache,refresh_devices_cache,
             dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,
             dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_kvantum,dynamic_color_set_lockscreen,

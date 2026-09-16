@@ -56,7 +56,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 @media(max-width:900px){.home-landing{margin-top:24px}.home-quick-grid{grid-template-columns:1fr}}
 
 /* Sidebar */
-.sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;scroll-behavior:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none;transform:translateZ(0);will-change:transform}
+/* Sin translateZ/will-change ni content-visibility en las filas: entraron en
+   d0bba5a como optimización y en WebKitGTK hacían lo contrario. La capa forzada
+   obliga a repintar sus teselas en cada paso de scroll (de ahí restos de iconos
+   pintados sobre el título) y content-visibility recalcula cada fila al entrar
+   en pantalla, cuando son ~20 filas de 58px que no cuesta nada tener pintadas.
+   La vista de detalle nunca los tuvo y es la que va fluida. */
+.sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;scroll-behavior:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none}
 .sidebar::-webkit-scrollbar{display:none}
 .sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:0 2px}
 .header-title{font-size:28px;font-weight:700;letter-spacing:-.4px}
@@ -74,7 +80,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 /* Sidebar Cards */
 .card{background:var(--card);width:336px;max-width:336px;min-width:336px;padding:0;overflow:hidden;flex-shrink:0;border-radius:22px;display:flex;flex-direction:column}
 .card-profile{border-radius:20px}
-.item{display:flex;align-items:center;padding:0 16px;cursor:pointer;position:relative;transition:transform .1s;gap:12px;height:58px;flex-shrink:0;content-visibility:auto;contain-intrinsic-size:auto 58px}
+.item{display:flex;align-items:center;padding:0 16px;cursor:pointer;position:relative;transition:transform .1s;gap:12px;height:58px;flex-shrink:0}
 .item:active{transform:scale(0.98) translateZ(0)}
 .card-profile .item{height:70px}
 .item:first-child{border-radius:inherit;border-bottom-left-radius:0;border-bottom-right-radius:0}
@@ -505,6 +511,25 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 
 /* Select dropdown */
 .sel{background:var(--sbg);border:1.5px solid var(--div);border-radius:12px;padding:10px 36px 10px 14px;font-size:14px;color:var(--tx);font-family:inherit;cursor:pointer;outline:0;width:100%;-webkit-appearance:none;appearance:none;transition:.15s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+.bk-select{display:flex;align-items:center;width:min(52%,520px);min-width:180px;min-height:40px;box-sizing:border-box;border:1px solid var(--div);border-radius:12px;background-color:var(--sbg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;color:var(--tx);font:inherit;font-size:13.5px;font-weight:500;padding:8px 36px 8px 14px;text-align:left;cursor:pointer;transition:border-color .15s,background-color .15s}
+.bk-select span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bk-select:hover{border-color:color-mix(in srgb,var(--blue) 55%,var(--div))}
+.bk-select:focus-visible{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}
+/* Pista propia: la global de 4px con pulgar blanco plano apenas se distingue
+   sobre la tarjeta oscura. --from/--to los pone desktop.js al pintar y al mover. */
+input[type="range"].bk-range{height:6px;border-radius:3px;margin:8px 0 4px;background:linear-gradient(to right,var(--toff) var(--from,0%),var(--blue) var(--from,0%),var(--blue) var(--to,0%),var(--toff) var(--to,0%))}
+input[type="range"].bk-range::-webkit-slider-thumb{width:22px;height:22px;border:3px solid var(--blue);background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35);transition:transform .12s}
+input[type="range"].bk-range:hover::-webkit-slider-thumb{transform:scale(1.08)}
+input[type="range"].bk-range:active::-webkit-slider-thumb{transform:scale(1.18)}
+input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 5px color-mix(in srgb,var(--blue) 25%,transparent)}
+@media(max-width:720px){.bk-select{width:100%;min-width:0}}
+/* El deslizador va debajo del título: en la misma fila, con width:100%, el
+   input se comía el ancho y los títulos se partían palabra por palabra. */
+.bk-slider-row{align-items:stretch;gap:8px}
+.bk-slider-row .detail-texts{flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px}
+.bk-slider-row .ds{margin-top:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.audio-page .detail-item-row,.detail-item-row:has(>.bk-select){gap:16px}
+.detail-item-row:has(>.bk-select) .detail-texts{min-width:120px}
 .sel:hover{border-color:var(--blue)}
 .sel:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent)}
 .sel option{background:var(--card);color:var(--tx);padding:8px}
@@ -944,7 +969,7 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 }
 @keyframes bkPopIn{from{opacity:0;transform:translateY(-8px) scale(.96)}to{opacity:1;transform:none}}
 .bk-pop-title{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--tx2);padding:8px 12px 6px}
-.bk-pop-list{display:flex;flex-direction:column;gap:2px}
+.bk-pop-list{display:flex;flex-direction:column;gap:2px;max-height:min(60vh,420px);overflow-y:auto}
 .bk-pop-item{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:13px;cursor:pointer;transition:background .13s}
 .bk-pop-item:hover{background:var(--hov)}
 .bk-pop-item:active{background:var(--act);transform:scale(.99)}
@@ -1022,11 +1047,11 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .wp-desktop-taskbar{display:none}
 .wp-tb-icon{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.3);flex-shrink:0}
 /* Top bar */
-.wp-top-bar{position:absolute;top:0;left:0;right:0;height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.wp-top-bar{position:absolute;top:0;left:0;right:0;height:22px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;}
 .wp-top-bar-title{font-size:9px;font-weight:700;letter-spacing:.5px}
 .wp-top-bar-tray{display:flex;align-items:center;gap:5px}
 /* Bottom floating dock */
-.wp-float-dock{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:5px;padding:6px 10px;border-radius:14px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+.wp-float-dock{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:5px;padding:6px 10px;border-radius:14px;}
 .wp-dock-icon{width:20px;height:20px;border-radius:6px;flex-shrink:0}
 /* Style quick-pick row */
 .wp-style-row{display:flex;gap:10px;margin-bottom:16px}
@@ -1036,10 +1061,10 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .ws-icon{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center}
 .ws-label{font-size:11px;font-weight:500;color:var(--tx2);text-align:center}
 /* Wallpaper card uses img tag */
-.wallpaper-card{position:relative;border-radius:16px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:.15s;aspect-ratio:16/10;background:#1c1c1e}
+.wallpaper-card{position:relative;border-radius:16px;overflow:hidden;cursor:pointer;border:3px solid transparent;padding:0;appearance:none;font:inherit;text-align:left;transition:border-color .15s;aspect-ratio:16/10;background:#1c1c1e;contain:layout paint}
 .wp-card-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .wp-card-placeholder{position:absolute;inset:0;width:100%;height:100%;align-items:center;justify-content:center}
-.wallpaper-card:hover{transform:scale(1.02)}
+.wallpaper-card:hover{border-color:var(--tx2)}
 .wallpaper-card.active{border-color:var(--blue)}
 .wallpaper-card .wp-name{position:absolute;bottom:0;left:0;right:0;padding:6px 10px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff;font-size:11px;font-weight:500;z-index:1}
 
@@ -1915,3 +1940,5 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
     font-size:.55em;opacity:.9}
 .ed-wx-d i{font-style:normal}
 .ed-wx-d svg{width:1.4em;height:1.4em}
+
+.wp-grid-panel [data-wp-more][hidden]{display:none}

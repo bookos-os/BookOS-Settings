@@ -812,6 +812,7 @@ const _UI_TR_EN = {
     'BookOS registra tus archivos y apps recientes':'BookOS tracks your recent files and apps',
     'Borrar historial de actividades':'Clear activity history',
     // Wallpaper / theme picker
+    'Mostrar más':'Show more',
     'Oscuro':'Dark',
     'Claro':'Light',
     'Fondo':'Background',

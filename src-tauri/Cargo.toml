@@ -20,6 +20,11 @@ rqs_lib = { path = "rqs_lib" }
 zbus = { version = "4", default-features = false, features = ["tokio"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Para apagar el zoom por pellizco de WebKitGTK (ver main.rs). Es la misma
+# versión que ya arrastra tauri: no añade nada al árbol, solo la hace visible.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

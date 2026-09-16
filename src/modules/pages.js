@@ -1,4 +1,5 @@
 import * as desktop from './pages/desktop.js';
+import{setupWallpaperPreviews}from'./pages/wallpaper-previews.js';
 import{
     tauriInvoke,getAssetUrl,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,invalidateHwCache,
@@ -556,8 +557,6 @@ function bkAvisoFluidez(escala,hz){
 // ════════════════════════════════════════════════════════════════════════
 export async function renderPantalla(c){
 await renderPantallasBookOS(c);
-    const card=document.createElement('div');card.innerHTML=renderCard([renderRowItem('Brillo','',renderSlider('native-brightness',0))]);c.prepend(card);
-    try{const d=JSON.parse(await tauriInvoke('get_brightness'));const slider=c.querySelector('#native-brightness');if(slider)slider.value=d.brightness;setupSlider('native-brightness',async value=>{try{await tauriInvoke('set_brightness',{value:Number(value)});}catch(e){toast(String(e),'❌');}});}catch{card.remove();}
 }
 
 // ── Pantalla sub-pages ──────────────────────────────────────────────────
@@ -2938,15 +2937,8 @@ export async function renderMantenimiento(c){
 // ── Fondo de Pantalla (NEW) ────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderFondos(c){
+    const pageEpoch=window._navEpoch;
     c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderSkeleton(2);
-    let wallpapers=[],wpFailed=false;
-    // Si el backend falla, hay que distinguirlo de "no tienes fondos": antes
-    // los dos casos mostraban el mismo mensaje y no había forma de reintentar.
-    try{wallpapers=JSON.parse(await tauriInvoke('get_wallpapers'));}catch(e){wpFailed=true;}
-    if(wpFailed){
-        c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderError('No se pudieron cargar los fondos de pantalla',{onRetry:()=>renderFondos(c)});
-        return;
-    }
     let current='';
     try{current=JSON.parse(await tauriInvoke('get_current_wallpaper')).path||'';}catch(e){}
 
@@ -2956,26 +2948,9 @@ export async function renderFondos(c){
         tauriInvoke('get_current_theme').then(r=>JSON.parse(r).is_dark).catch(()=>isDark)
     ]);}catch(e){}
 
-    if(!wallpapers.length){
-        c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderEmptyState(
-            '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="var(--tx2)" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 16l-5-5-5 5-2-2-6 6"/></svg>',
-            'No se encontraron fondos de pantalla',
-            'Añade imágenes a ~/Imágenes o /usr/share/wallpapers',
-            {label:'Buscar de nuevo',onClick:()=>renderFondos(c)}
-        );
-        return;
-    }
+    let wallpapers=[];
+    const currentWp={path:current,name:current.split('/').pop()?.replace(/\.[^.]+$/,'')||_tr('Fondo de pantalla')};
 
-    // The active wallpaper may live outside the scanned folders (e.g. ~/Descargas).
-    // If so, synthesize an entry for it so it shows up as the current one and in the grid.
-    let currentWp = wallpapers.find(w=>w.path===current);
-    if(!currentWp && current){
-        const name=current.split('/').pop().replace(/\.[^.]+$/,'')||'Actual';
-        currentWp={name,path:current,thumbnail:current};
-        wallpapers.unshift(currentWp);
-    }
-    if(!currentWp) currentWp=wallpapers[0];
-    const currentImg = getAssetUrl(currentWp.thumbnail||currentWp.path);
     const today = new Date();
     const time = today.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
     const date = today.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'});
@@ -2996,13 +2971,8 @@ export async function renderFondos(c){
     const netSvg=`<svg viewBox="0 0 24 24" width="10" height="10"><path d="M5 12.55a11 11 0 0 1 14.08 0" fill="none" stroke="${panelTx2}" stroke-width="2.2" stroke-linecap="round"/><path d="M1.42 9a16 16 0 0 1 21.16 0" fill="none" stroke="${panelTx2}" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.5" fill="${panelTx2}"/></svg>`;
     const battSvg=`<svg viewBox="0 0 24 24" width="12" height="10"><rect x="2" y="7" width="16" height="10" rx="2" fill="none" stroke="${panelTx2}" stroke-width="1.8"/><path d="M22 11v2" stroke="${panelTx2}" stroke-width="2" stroke-linecap="round"/><rect x="4" y="9" width="9" height="6" rx="1" fill="${panelTx2}"/></svg>`;
 
-    let h=renderHeader(t('hdr_wallpaper_style'));
-    // ── Wallpaper hero card (redesign): big live preview, name top-left,
-    //    "Change wallpaper" button, and the Color Palette toggle below it. ──
-    h += `<div class="wp-hero-card">
-        <div class="wp-hero-name">${esc(currentWp.name)}</div>
-        <div class="wp-desktop-screen" id="wp-screen">
-            <img src="${currentImg}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
+    const desktopPreview=()=>`        <div class="wp-desktop-screen" id="wp-screen">
+            <img data-preview-path="${esc(currentWp.path)}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
             <div class="wp-top-bar" style="background:${panelBg};border-bottom:1px solid ${panelBorder}">
                 <span class="wp-top-bar-title" style="color:${panelTx2}">BookOS</span>
                 <div class="wp-top-bar-tray">
@@ -3014,6 +2984,13 @@ export async function renderFondos(c){
                 ${dockIcons.map(i=>`<div class="wp-dock-icon" style="background:${i.bg}"></div>`).join('')}
             </div>
         </div>
+`;
+
+    let h=renderHeader(t('hdr_wallpaper_style'));
+    // The current name and controls are cheap; previews are created on demand.
+    h += `<div class="wp-hero-card">
+        <div class="wp-hero-name">${esc(currentWp.name)}</div>
+        <div id="wp-preview-host"></div>
         <button class="wp-change-btn" id="btn-change-wp">${_tr("Cambiar fondo de pantalla")}</button>
         <div class="wp-palette-row" id="wps-palette">
             <div class="wp-palette-texts">
@@ -3048,22 +3025,15 @@ export async function renderFondos(c){
         </div>
     </div>`;
 
-    // Full wallpaper grid — hidden until "Change wallpaper" is pressed.
-    h += `<div id="wp-grid" class="wp-grid-panel" style="display:none">
-        <div class="wp-grid-head">${_tr("Cambiar fondo de pantalla")}</div>
-        <div class="wallpaper-grid">
-            ${wallpapers.map(w=>{
-                const isActive=w.path===currentWp.path;
-                const imgUrl=getAssetUrl(w.thumbnail||w.path);
-                const colorHash=w.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-        const hue=colorHash%360;
-        const fallback=`this.style.display='none';this.nextElementSibling.style.display='flex'`;
-        return `<div class="wallpaper-card ${isActive?'active':''}" data-path="${esc(w.path)}" tabindex="0" role="button" aria-pressed="${isActive}" aria-label="${esc(w.name)}"><img src="${imgUrl}" class="wp-card-img" loading="lazy" decoding="async" alt="" onerror="${fallback}"><div class="wp-card-placeholder" style="display:none;background:linear-gradient(135deg,hsl(${hue},50%,35%),hsl(${(hue+40)%360},60%,25%))"></div><span class="wp-name">${esc(w.name)}</span></div>`;
-            }).join('')}
-        </div>
-    </div>`;
+    // No cards or images exist until the user opens the picker.
+    h += '<div id="wp-grid" class="wp-grid-panel" style="display:none"></div>';
 
+    if(window._navEpoch!==pageEpoch)return;
     c.innerHTML=h;
+
+    let updatePreview=null;
+
+    const pageGrid=c.querySelector('#wp-grid');
 
     // Drop any leftover FAB from a previous render of this page.
     document.getElementById('wp-add-fab')?.remove();
@@ -3079,6 +3049,7 @@ export async function renderFondos(c){
             const res=JSON.parse(await tauriInvoke('add_wallpapers',{paths}));
             if(res.ok){
                 toast(res.added>1?`${res.added} fondos añadidos`:'Fondo añadido','🖼️');
+                if(!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
                 await renderFondos(c); // re-render so new wallpapers appear
                 document.getElementById('btn-change-wp')?.click(); // keep grid open
             }else{toast('Error al añadir fondo','❌');}
@@ -3090,6 +3061,7 @@ export async function renderFondos(c){
     // with content). So we mount the FAB on document.body and auto-remove it when
     // the wallpaper grid leaves the DOM (page navigation).
     const _mountFab=()=>{
+        if(!pageGrid.isConnected||window._navEpoch!==pageEpoch||pageGrid.style.display==='none')return;
         if(document.getElementById('wp-add-fab'))return;
         const fab=document.createElement('button');
         fab.id='wp-add-fab';fab.className='wp-add-fab';
@@ -3098,23 +3070,57 @@ export async function renderFondos(c){
         fab.innerHTML=SVGI.plus;
         fab.addEventListener('click',_addWallpapers);
         document.body.appendChild(fab);
-        const grid=document.getElementById('wp-grid');
-        // wp-grid es hijo directo de .detail-view: basta con childList sobre
-        // ese contenedor, sin subtree — igual que el observer de dyn-block.
-        // Con subtree:true sobre #app esto se disparaba en cada repintado del
-        // selector de paleta si la rejilla de fondos estaba abierta a la vez.
-        const detailView=document.querySelector('.detail-view');
+        // El router reemplaza los hijos de #app, que está dentro de
+        // .detail-view. Observar solo .detail-view no detectaba la salida.
+        const cleanup=()=>{fab.remove();obs.disconnect();};
         const obs=new MutationObserver(()=>{
-            if(!grid||!document.body.contains(grid)){fab.remove();obs.disconnect();}
+            if(!pageGrid.isConnected)cleanup();
         });
-        if(detailView)obs.observe(detailView,{childList:true});
+        obs.observe(pageGrid.parentElement,{childList:true});
+        (window._pageCleanups ||= []).push(cleanup);
     };
 
-    document.getElementById('btn-change-wp')?.addEventListener('click',()=>{
-        const g=document.getElementById('wp-grid');
-        g.style.display='block';
-        g.scrollIntoView({behavior:'smooth'});
+    let loading=false,loaded=false,shown=0;
+    const appendCards=()=>{
+        const grid=pageGrid.querySelector('.wallpaper-grid');
+        const batch=wallpapers.slice(shown,shown+24);
+        grid.insertAdjacentHTML('beforeend',batch.map(w=>{
+            const active=w.path===currentWp.path;
+            return `<button type="button" class="wallpaper-card ${active?'active':''}" data-path="${esc(w.path)}" aria-pressed="${active}" aria-label="${esc(w.name)}"><img data-preview-path="${esc(w.thumbnail||w.path)}" class="wp-card-img" decoding="async" alt="" onerror="this.style.opacity='0'"><span class="wp-name">${esc(w.name)}</span></button>`;
+        }).join(''));
+        shown+=batch.length;
+        pageGrid.querySelector('[data-wp-more]').hidden=shown>=wallpapers.length;
+        updatePreview?.observe(grid);
+    };
+    const openPicker=async()=>{
+        if(loading||!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
+        if(loaded){pageGrid.scrollIntoView({behavior:'instant',block:'start'});return;}
+        loading=true;
+        const button=c.querySelector('#btn-change-wp');
+        button.disabled=true;
+        pageGrid.style.display='block';
+        pageGrid.innerHTML=renderLoading();
         _mountFab();
+        try{
+            wallpapers=JSON.parse(await tauriInvoke('get_wallpapers'));
+            if(!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
+            if(currentWp.path&&!wallpapers.some(w=>w.path===currentWp.path))wallpapers.unshift(currentWp);
+            pageGrid.innerHTML=`<div class="wp-grid-head">${_tr('Cambiar fondo de pantalla')}</div><div class="wallpaper-grid"></div><button type="button" class="wp-change-btn" data-wp-more>${_tr('Mostrar más')}</button>`;
+            if(!wallpapers.length)pageGrid.querySelector('.wallpaper-grid').textContent=_tr('No se encontraron fondos de pantalla');
+            c.querySelector('#wp-preview-host').innerHTML=desktopPreview();
+            updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
+            appendCards();
+            c.querySelector('#dyn-mockups')?.dispatchEvent(new Event('wp-preview-opened'));
+            loaded=true;
+            // One immediate scroll after layout, without animating through palette controls.
+            pageGrid.scrollIntoView({behavior:'instant',block:'start'});
+        }catch(e){
+            pageGrid.innerHTML=renderError('No se pudieron cargar los fondos de pantalla',{onRetry:openPicker});
+        }finally{loading=false;button.disabled=false;}
+    };
+    c.querySelector('#btn-change-wp').addEventListener('click',openPicker);
+    pageGrid.addEventListener('click',e=>{
+        if(e.target.closest('[data-wp-more]'))appendCards();
     });
     // Apply the BookOS accent so it takes effect live.
     const _applyPalette=async(on)=>{
@@ -3132,20 +3138,27 @@ export async function renderFondos(c){
         await _applyPalette(next);
     });
 
-    document.querySelectorAll('.wallpaper-card').forEach(card=>{
-        const apply=async()=>{
-            try{await tauriInvoke('set_wallpaper',{path:card.dataset.path});}catch(e){toast('Error al aplicar fondo','❌');return;}
-            _dynSeedsCache={wallpaper:'',seeds:[]}; // el fondo cambió: la caché de semillas ya no vale
-            document.querySelectorAll('.wallpaper-card').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-pressed','false');});
-            card.classList.add('active');
-            card.setAttribute('aria-pressed','true');
-            // Update preview immediately
-            const previewImg=document.getElementById('wp-screen-img');
-            if(previewImg)previewImg.src=card.querySelector('img')?.src||'';
-            toast('Fondo de pantalla aplicado','🖼️');
-        };
-        card.addEventListener('click',apply);
-        card.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();apply();}});
+    let applyingWallpaper=false;
+    pageGrid.addEventListener('click',async e=>{
+        const card=e.target.closest('.wallpaper-card');
+        if(!card)return;
+        if(applyingWallpaper||card.classList.contains('active'))return;
+        applyingWallpaper=true;
+        try{parseServiceResult(await tauriInvoke('set_wallpaper',{path:card.dataset.path}));}
+        catch(e){toast('Error al aplicar fondo','❌');return;}
+        finally{applyingWallpaper=false;}
+        if(!card.isConnected)return;
+        _dynSeedsCache={wallpaper:'',seeds:[]}; // el fondo cambió: la caché de semillas ya no vale
+        pageGrid.querySelectorAll('.wallpaper-card').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-pressed','false');});
+        card.classList.add('active');
+        card.setAttribute('aria-pressed','true');
+        // Update preview immediately
+        const previewImg=document.getElementById('wp-screen-img');
+        currentWp.path=card.dataset.path;
+        updatePreview(previewImg,card.dataset.path);
+        const name=c.querySelector('.wp-hero-name');
+        if(name)name.textContent=card.querySelector('.wp-name').textContent;
+        toast('Fondo de pantalla aplicado','🖼️');
     });
 
     setupDynamicColor(currentWp.path);
@@ -3251,6 +3264,13 @@ async function setupDynamicColor(current){
     const applyBtn=document.getElementById('dyn-apply');
     if(!body||!stripsEl||!stylesEl||!mockEl||!applyBtn)return;
 
+    // Keep the decorative palette mockups out of the DOM until the picker opens.
+    let mockPalette=null,showMockups=false;
+    const drawMockups=()=>{
+        if(showMockups&&mockEl.isConnected)mockEl.innerHTML=_dynMockups(mockPalette?(isDark()?mockPalette.dark:mockPalette.light):null);
+    };
+    mockEl.addEventListener('wp-preview-opened',()=>{showMockups=true;drawMockups();});
+
     let seeds=[];                       // colores sacados del fondo
     let tab='wall';
     let sel={seed:'',style:'vibrant'};  // elección en curso (aún sin aplicar)
@@ -3283,7 +3303,8 @@ async function setupDynamicColor(current){
         }));
 
         const cur=await preview(sel.seed,sel.style);
-        mockEl.innerHTML=_dynMockups(cur?(isDark()?cur.dark:cur.light):null);
+        mockPalette=cur;
+        drawMockups();
         // Previsualización de verdad: tiñe Ajustes entero mientras se elige,
         // no solo las maquetas de arriba. Nada se escribe a disco aquí, así
         // que otras apps de BookOS no se enteran hasta que se pulse "Aplicar".
@@ -3420,23 +3441,17 @@ async function setupDynamicColor(current){
         }
     });
 
-    // #dyn-block es hijo DIRECTO de .detail-view (el contenedor `c` que usa el
-    // router para pintar cada página con `c.innerHTML=...`). Observar solo sus
-    // hijos directos —sin `subtree`— detecta esa navegación con un único
-    // mutation record, sin dispararse en cada repintado interno de la propia
-    // previsualización (que solo toca nietos: #dyn-strips, #dyn-styles…).
-    // Con `subtree:true` sobre #app, cada clic de semilla/estilo mientras se
-    // previsualiza disparaba el observer de todas formas: eso era el
-    // "rendimiento raro" de esta página.
-    const detailView=document.querySelector('.detail-view');
-    if(detailView){
+    // #app owns this page; .detail-view only contains #app and does not
+    // change when the router replaces a page.
+    const block=body.closest('#dyn-block');
+    if(block?.parentElement){
         const leaveObs=new MutationObserver(()=>{
-            if(!document.body.contains(body)){
+            if(!body.isConnected){
                 if(sel.seed!==applied.seed||sel.style!==applied.style)revertPreview();
                 leaveObs.disconnect();
             }
         });
-        leaveObs.observe(detailView,{childList:true});
+        leaveObs.observe(block.parentElement,{childList:true});
     }
     // Solo recuerda la preferencia: teñir 8k iconos al pulsar un interruptor,
     // sin haber elegido paleta todavía, sería trabajo tirado.
@@ -5534,7 +5549,12 @@ export async function renderPantallasBookOS(c){
     const title=_tr('Pantallas');
     c.innerHTML=renderHeader(title)+renderSkeleton(2);
 
-    const [outs,caps]=await Promise.all([bkGetOutputs(),bkCapabilities()]);
+    // El brillo va dentro de este render y no añadido después desde
+    // renderPantalla: aquello lo anteponía al título (prepend sobre `c`), lo
+    // pintaba a 0% con la pista vacía hasta leer el valor, y desaparecía en
+    // cuanto aplicar() repintaba la página.
+    const [outs,caps,brillo]=await Promise.all([bkGetOutputs(),bkCapabilities(),
+        tauriInvoke('get_brightness').then(r=>{const d=JSON.parse(r);return d.ok===false?null:d.brightness;}).catch(()=>null)]);
     const rerender=()=>renderPantallasBookOS(c);
     // Toda acción reescribe la configuración entera y vuelve a dibujar con lo
     // que diga el censo nuevo: así lo que se ve es el estado real y no lo que
@@ -5549,9 +5569,15 @@ export async function renderPantallasBookOS(c){
     };
 
     let h=renderHeader(title);
+    if(brillo!=null)h+=renderCard([renderRowItem(_tr('Brillo'),'',renderSlider('native-brightness',brillo))]);
+    const setupBrillo=()=>{if(brillo!=null)setupSlider('native-brightness',async value=>{
+        try{const r=JSON.parse(await tauriInvoke('set_brightness',{value:Number(value)}));if(r.ok===false)throw new Error(r.error);}
+        catch(e){toast(String(e),'❌');}
+    });};
     if(!outs.length){
         h+=renderCard([`<div class="detail-item"><span class="dt">${_tr('No se detectó ninguna pantalla')}</span></div>`]);
         c.innerHTML=h;
+        setupBrillo();
         return;
     }
 
@@ -5601,6 +5627,7 @@ export async function renderPantallasBookOS(c){
         h+=renderCard([`<div class="detail-item"><span class="ds">${_tr('Esta versión del escritorio dibuja en una sola pantalla a la vez. Las demás se detectan y se pueden consultar, pero todavía no encenderse.')}</span></div>`]);
     }
     c.innerHTML=h;
+    setupBrillo();
 
     outs.forEach((o,idx)=>{
         const p=`bk${idx}`;

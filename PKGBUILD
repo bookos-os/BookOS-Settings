@@ -9,7 +9,7 @@ license=('GPL3')
 install=bookos-settings.install
 # upower: lo consulta refresh_devices_cache() para la tarjeta de bateria
 # (portatil, auriculares). El movil y la tablet entran por BookOS Link.
-depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'python' 'upower')
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'python' 'upower' 'imagemagick')
 optdepends=(
     'colord: ICC profile support'
 )
