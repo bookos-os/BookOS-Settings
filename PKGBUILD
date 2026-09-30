@@ -42,8 +42,8 @@ package() {
     install -dm755 "$pkgdir/usr/share/applications"
     cat > "$pkgdir/usr/share/applications/bookos-settings.desktop" << EOF
 [Desktop Entry]
-Name=BookOS Settings
-Name[es]=Ajustes de BookOS
+Name=Settings
+Name[es]=Ajustes
 Comment=Settings for the BookOS desktop
 Exec=bookos-settings
 Icon=bookos-settings
@@ -107,13 +107,6 @@ EOF
     # propia copia en su repo; esta es la referencia con la que compararlas.
     install -Dm644 "$_extra/dynamic-color/bookos-palette.js" \
         "$pkgdir/usr/share/bookos-settings/dynamic-color/bookos-palette.js"
-
-    # Plantillas Kvantum del color dinamico: mismo .kvconfig con los ~10
-    # valores de color que cambian sustituidos por placeholders.
-    install -Dm644 "$_extra/kvantum/bookos-dark-blue.kvconfig.tmpl" \
-        "$pkgdir/usr/share/bookos-settings/kvantum/bookos-dark-blue.kvconfig.tmpl"
-    install -Dm644 "$_extra/kvantum/bookos-light-blue.kvconfig.tmpl" \
-        "$pkgdir/usr/share/bookos-settings/kvantum/bookos-light-blue.kvconfig.tmpl"
 
     # El tema SDDM se instala desde el bloque siguiente. Este paquete no
     # contiene una segunda copia del greeter.

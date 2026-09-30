@@ -7,7 +7,8 @@ import{
     renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,
     renderError,renderEmptyState,renderNavRow,
     _tr,renderRowItem,renderToggle,renderSlider,renderHeader,renderSection,
-    popoverSelect,themeColor,setupToggle,setupSlider,wifiIcon,btIcon,chevron,lockIcon
+    popoverSelect,themeColor,setupToggle,setupSlider,wifiIcon,btIcon,chevron,lockIcon,
+    appIconUrl,
 }from'./pages/_common.js';
 // Routines engine lives in its own light module (loaded by main.js at startup);
 // the page renderers below consume it for the Modos/automation UI.
@@ -189,9 +190,14 @@ async function renderEthernetDetailPage(c){
 // ── Wi-Fi subpage ──
 export async function renderWifiPage(c,subscribe=true){
     if(subscribe)addSystemListener(()=>document.getElementById('wl')?loadWifi():renderWifiPage(c,false));
-    c.innerHTML=renderHeader(t('hdr_wifi'))+renderSkeleton(2);
-    let w={enabled:false,ssid:''};
-    try{w=parseServiceResult(await tauriInvoke('get_wifi_status'));}catch(e){c.innerHTML=renderHeader('Wi-Fi')+renderServiceError(e,'Wi-Fi');return;}
+    // Con caché se pinta la página entera de una vez y se refresca por detrás:
+    // esqueleto → página → «Buscando…» → lista eran cuatro repintados por visita
+    // y con ellos las animaciones de tarjeta se reiniciaban (el parpadeo).
+    let w=_wifiCache;
+    if(!w){
+        c.innerHTML=renderHeader(t('hdr_wifi'))+renderSkeleton(2);
+        try{w=parseServiceResult(await tauriInvoke('get_wifi_status'));}catch(e){c.innerHTML=renderHeader('Wi-Fi')+renderServiceError(e,'Wi-Fi');return;}
+    }
 
     let h=renderHeader(t('hdr_wifi'));
     // Toggle card
@@ -206,6 +212,7 @@ export async function renderWifiPage(c,subscribe=true){
     h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Redes disponibles</p><button class="refresh-btn" id="btn-wifi-refresh" title="Buscar redes"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Buscar</button></div>`;
     h+=`<div class="detail-card" id="wl">${renderLoading('Buscando...')}</div>`;
     c.innerHTML=h;
+    if(_wifiCache)paintWifi(_wifiCache);
 
     const rescanAndLoad=async()=>{
         const btn=document.getElementById('btn-wifi-refresh');
@@ -235,9 +242,8 @@ export async function renderWifiPage(c,subscribe=true){
 // ── Bluetooth subpage ──
 export async function renderBTPage(c,subscribe=true){
     if(subscribe)addSystemListener(()=>document.getElementById('bl')?loadBT():renderBTPage(c,false));
-    c.innerHTML=renderHeader(t('hdr_bluetooth'))+renderSkeleton(2);
-    let bt={enabled:false};
-    try{bt=parseServiceResult(await tauriInvoke('get_bluetooth_status'));}catch(e){c.innerHTML=renderHeader('Bluetooth')+renderServiceError(e,'Bluetooth');return;}
+    let bt=_btCache;
+    if(!bt)try{c.innerHTML=renderHeader(t('hdr_bluetooth'))+renderSkeleton(2);bt=parseServiceResult(await tauriInvoke('get_bluetooth_status'));}catch(e){c.innerHTML=renderHeader('Bluetooth')+renderServiceError(e,'Bluetooth');return;}
 
     let h=renderHeader(t('hdr_bluetooth'));
     h+=`<div class="detail-card">
@@ -250,7 +256,7 @@ export async function renderBTPage(c,subscribe=true){
     h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Dispositivos vinculados</p>${`<button class="refresh-btn" id="btn-bt-scan" title="Buscar dispositivos"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Escanear</button>`}</div>`;
     h+=`<div class="detail-card" id="bl">${renderLoading('Cargando...')}</div>`;
     c.innerHTML=h;
-
+    if(_btCache)paintBT(_btCache);
     loadBT();
     document.getElementById('btn-bt-scan')?.addEventListener('click',async()=>{
         const btn=document.getElementById('btn-bt-scan');
@@ -269,11 +275,22 @@ export async function renderBTPage(c,subscribe=true){
 
 }
 
+let _wifiCache=null,_wifiSig='';
 async function loadWifi(){
+    if(!document.getElementById('wl'))return;
+    try{paintWifi(parseServiceResult(await tauriInvoke('get_wifi_status')));}
+    catch(e){const el=document.getElementById('wl');if(el)el.innerHTML=renderServiceError(e,'redes Wi-Fi');}
+}
+function paintWifi(status){
     const cur=document.getElementById('wifi-current'),el=document.getElementById('wl');
     if(!el)return;
+    // Los listeners del sistema llaman cada pocos segundos; repintar sin cambios
+    // reiniciaba la animación de las filas.
+    const sig=JSON.stringify(status);
+    _wifiCache=status;
+    if(sig===_wifiSig&&!el.querySelector('.loading'))return;
+    _wifiSig=sig;
     try{
-        const status=parseServiceResult(await tauriInvoke('get_wifi_status'));
         const toggle=document.querySelector('[data-toggle="wifi-page"]');
         if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label)label.textContent=status.enabled?t('enabled'):t('disabled');}
         if(!status.enabled){if(cur)cur.innerHTML=renderInfoItem('Dispositivo Wi-Fi apagado','Activa Wi-Fi para buscar redes');el.innerHTML='';return;}
@@ -323,7 +340,7 @@ async function loadWifi(){
                 document.getElementById('wp').addEventListener('keydown',e=>{if(e.key==='Enter'){cWifi(ssid,document.getElementById('wp').value);d.remove();}});
             });
         });
-    }catch(e){if(el)el.innerHTML=renderServiceError(e,'redes Wi-Fi');}
+    }catch(e){el.innerHTML=renderServiceError(e,'redes Wi-Fi');}
 }
 async function cWifi(s,p){
     toast('Conectando...','📶');
@@ -331,10 +348,23 @@ async function cWifi(s,p){
     catch(e){toast('Error al conectar','❌');}
 }
 
+let _btCache=null,_btSig='';
 async function loadBT(){
+    if(!document.getElementById('bl'))return;
+    try{paintBT(parseServiceResult(await tauriInvoke('get_bluetooth_status')));}
+    catch(e){
+        console.error('[BT] loadBT parse error',e);
+        const el=document.getElementById('bl');if(el)el.innerHTML=renderServiceError(e,'dispositivos Bluetooth');
+    }
+}
+// Igual que paintWifi: sin cambios no se repinta, o las filas pierden hover y foco.
+function paintBT(status){
     const el=document.getElementById('bl');if(!el)return;
-    try{
-        const status=parseServiceResult(await tauriInvoke('get_bluetooth_status'));
+    const sig=JSON.stringify(status);
+    _btCache=status;
+    if(sig===_btSig&&!el.querySelector('.loading'))return;
+    _btSig=sig;
+    {
         const toggle=document.querySelector('[data-toggle="bt-page"]');
         if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label){label.textContent=status.enabled?t('enabled'):t('disabled');label.style.color=status.enabled?'var(--blue)':'var(--tx2)';}}
         const scan=document.getElementById('btn-bt-scan');if(scan)scan.disabled=!status.enabled;
@@ -354,6 +384,33 @@ async function loadBT(){
             </div>`).join('');
         el.querySelectorAll('.conn-bt-action').forEach(b=>{
             b.addEventListener('click',async()=>{
+                // En los dispositivos de audio, el engranaje abre sus
+                // controles propios; no debe intentar conectar/desconectar.
+                const device=devs.find(d=>d.mac===b.dataset.mac);
+                const name=(device?.name||'').toLowerCase();
+                const icon=(device?.icon||'').toLowerCase();
+                const isAudio=icon.includes('headset')||icon.includes('headphone')||
+                    icon.includes('audio')||name.includes('buds')||name.includes('airpods')||
+                    name.includes('headset')||name.includes('earphone')||name.includes('beats');
+                if(isAudio&&device){
+                    const mac=esc(device.mac||'—');
+                    showDialog(esc(device.name||'Dispositivo Bluetooth'),
+                        `<div style="display:flex;flex-direction:column;gap:10px">
+                            <div style="font-size:12px;color:var(--tx2)">MAC: <span style="color:var(--tx)">${mac}</span></div>
+                            <button class="bk-dbtn" id="bt-dialog-disconnect">${device.connected?'Desconectar':'Conectar'}</button>
+                            <button class="bk-dbtn danger" id="bt-dialog-forget">Olvidar dispositivo</button>
+                        </div>`,{confirmText:'Cerrar',onConfirm:()=>{}});
+                    const ov=document.querySelector('.bk-overlay:last-of-type');
+                    ov?.querySelector('#bt-dialog-disconnect')?.addEventListener('click',async()=>{
+                        try{
+                            if(device.connected)await tauriInvoke('disconnect_bluetooth',{mac:device.mac});
+                            else {if(device.paired!==true&&device.paired!=='true')await tauriInvoke('pair_bluetooth',{mac:device.mac});await tauriInvoke('connect_bluetooth',{mac:device.mac});}
+                            ov.remove();toast(device.connected?'Desconectado':'Conectando…','🔵');setTimeout(loadBT,1200);
+                        }catch(e){toast('No se pudo modificar el dispositivo','❌');}
+                    });
+                    ov?.querySelector('#bt-dialog-forget')?.addEventListener('click',()=>showDialog('Olvidar dispositivo',`¿Quieres olvidar ${esc(device.name||'este dispositivo')}?`,{confirmText:'Olvidar',confirmClass:'danger',onConfirm:async()=>{try{await tauriInvoke('forget_bluetooth',{mac:device.mac});toast('Dispositivo olvidado');loadBT();}catch(e){toast('No se pudo olvidar','❌');}}}));
+                    return;
+                }
                 try{
                     if(b.dataset.c==='true')await tauriInvoke('disconnect_bluetooth',{mac:b.dataset.mac});
                     else {if(b.dataset.paired!=='true')await tauriInvoke('pair_bluetooth',{mac:b.dataset.mac});await tauriInvoke('connect_bluetooth',{mac:b.dataset.mac});}
@@ -361,9 +418,25 @@ async function loadBT(){
                 }catch(e){toast('Error','❌');}
             });
         });
-    }catch(e){
-        console.error('[BT] loadBT parse error',e);
-        el.innerHTML=renderServiceError(e,'dispositivos Bluetooth');
+        // La fila completa es la acción rápida: al pulsar un dispositivo
+        // desvinculado/desconectado se intenta conectar sin obligar al usuario
+        // a acertar con un botón pequeño.
+        // Por posición y no por nombre: dos auriculares del mismo modelo se
+        // llaman igual y find() conectaba siempre el primero.
+        el.querySelectorAll('.conn-bt-item').forEach((row,i)=>{
+            row.addEventListener('click',async e=>{
+                if(e.target.closest('.conn-bt-action'))return;
+                const device=devs[i];
+                if(!device||device.connected)return;
+                row.style.opacity='.6';
+                try{
+                    if(device.paired!==true&&device.paired!=='true')await tauriInvoke('pair_bluetooth',{mac:device.mac});
+                    await tauriInvoke('connect_bluetooth',{mac:device.mac});
+                    toast('Conectando…','🔵');
+                    setTimeout(loadBT,1200);
+                }catch(e){row.style.opacity='';toast('No se pudo conectar','❌');}
+            });
+        });
     }
 }
 
@@ -580,7 +653,7 @@ function _ckmark(){
 // ── Sonido ──────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderSonido(c){
-await desktop.sound(c); addSystemListener(()=>{if(c.querySelector('input:active'))return;return desktop.sound(c);});
+await desktop.sound(c); addSystemListener(()=>{if(c.querySelector('.audio-page :focus'))return;return desktop.sound(c);});
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -811,8 +884,11 @@ async function _renderBateriaContent(c, heavy=null){
     // Effective charge limit: prefer saved slider value (user's intent) over raw hardware value
     const chargeLimit=bprot?savedChargeLimit:100;
 
-    // Re-apply hardware limit on every load — sysfs resets on boot
-    if(bprot && gb.charge_limit_supported && savedChargeLimit<100){
+    // Re-apply hardware limit when sysfs lost it (it resets on boot). Solo si
+    // no coincide: escribirlo en cada visita es una orden de escritura, y
+    // cada escritura vacía la caché de lecturas de toda la app, así que la
+    // página siguiente volvía a pedirlo todo al backend.
+    if(bprot && gb.charge_limit_supported && savedChargeLimit<100 && parseInt(gb.charge_limit)!==savedChargeLimit){
         tauriInvoke('set_charge_limit',{limit:savedChargeLimit}).catch(()=>{});
     }
 
@@ -829,7 +905,7 @@ async function _renderBateriaContent(c, heavy=null){
     const capacityVal=parseFloat((bat.capacity||'').replace('%','').replace(',','.'))||(efd>0?Math.min(100,Math.round(ef/efd*100)):100);
     const health=Math.min(100,Math.round(capacityVal));
     // Kebab (3-dot) menu in the header opens a stats popup instead of inline chips.
-    const _statsBtn=`<button class="icon-btn" id="bat-stats-btn" title="${_tr('Estadísticas de batería')}" aria-label="${_tr('Estadísticas de batería')}">
+    const _statsBtn=`<button class="icon-btn" id="bat-stats-btn" title="${_tr('Más opciones')}" aria-label="${_tr('Más opciones')}">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>`;
     let h=renderHeader(t('hdr_battery'), _statsBtn);
@@ -881,8 +957,6 @@ async function _renderBateriaContent(c, heavy=null){
             renderRowItem('Carga adaptativa',`<span style="color:var(--${adaptiveEnabled?'blue':'tx2'})">${adaptiveEnabled?(chargeLimit<100?`Activa — límite ${chargeLimit}%`:'Activa — carga completa'):'Inactiva'}</span>`,renderToggle('adaptive-charging',adaptiveEnabled)),
             renderRowItem('Protección de la batería',bprotDisabled?`<span style="color:var(--tx2);opacity:0.45">No disponible con carga adaptativa</span>`:(bprotLabel?`<span style="color:var(--blue)">${bprotLabel}</span>`:'Limita carga para alargar vida útil'),`<span style="opacity:${bprotDisabled?0.35:1};pointer-events:${bprotDisabled?'none':'auto'}">${renderToggle('bprot',bprot&&!bprotDisabled)}</span>`),
             `<div id="bprot-limit-section"${(bprot&&!bprotDisabled)?'':' style="display:none"'} style="padding:2px 20px 12px">${renderSlider('cl',savedChargeLimit,50,100)}</div>`,
-            renderRowItem('Atenuar pantalla automáticamente','Atenúa cuando la batería es baja',renderToggle('dim-low',dimlow)),
-            renderRowItem('Mostrar porcentaje batería','En el widget de batería',renderToggle('show-pct',showpct)),
         ]);
     }
 
@@ -1072,7 +1146,9 @@ async function _renderBateriaContent(c, heavy=null){
                 const d=new Date(b.t*1000);
                 const hh=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
                 const outline=isCurrent?`outline:2px solid ${color};outline-offset:2px;`:'';
-                barDivs+=`<div style="flex:1" title="${hh} — ${Math.round(avg)}%">
+                // La envoltura necesita altura propia: con align-items:flex-end
+                // del padre quedaba a altura automática y el height:% de la barra daba 0.
+                barDivs+=`<div style="flex:1;height:100%;display:flex;align-items:flex-end" title="${hh} — ${Math.round(avg)}%">
                     <div style="height:${normH(avg)}%;background:${color};border-radius:5px 5px 2px 2px;${outline}transition:height .4s ease;width:100%"></div>
                 </div>`;
             });
@@ -1114,8 +1190,9 @@ async function _renderBateriaContent(c, heavy=null){
             const mkAppRow=(a)=>{
                 const cpu=parseFloat(a.cpu)||0;
                 const sharePct=Math.min(100,cpu/totalCpuAll*100);
-                const iconHtml=a.icon?`<img src="${getAssetUrl(a.icon)}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
-                const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${a.icon?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
+                const _ic=appIconUrl(a.id,a.icon);
+                const iconHtml=_ic?`<img src="${_ic}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
+                const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${_ic?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
                 const rightLabel=`${sharePct.toFixed(1).replace('.',',')}%`;
                 return`<div class="bat-app-item" style="padding:12px 20px">
                     <div class="bat-app-icon-wrap" style="width:32px;height:32px;flex-shrink:0">${iconHtml}${fallbackHtml}</div>
@@ -1214,8 +1291,9 @@ async function _renderBateriaContent(c, heavy=null){
         const mkAppRow2=(a)=>{
             const cpu=parseFloat(a.cpu)||0;
             const sharePct2=Math.min(100,cpu/totalCpuAll2*100);
-            const iconHtml=a.icon?`<img src="${getAssetUrl(a.icon)}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
-            const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${a.icon?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
+            const _ic=appIconUrl(a.id,a.icon);
+                const iconHtml=_ic?`<img src="${_ic}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
+            const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${_ic?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
             const rightLabel=`${sharePct2.toFixed(1).replace('.',',')}%`;
             return`<div class="bat-app-item" style="padding:12px 20px">
                 <div class="bat-app-icon-wrap" style="width:32px;height:32px;flex-shrink:0">${iconHtml}${fallbackHtml}</div>
@@ -1287,8 +1365,11 @@ async function _renderBateriaContent(c, heavy=null){
             }catch(e){toast('No se pudo quitar el límite de carga','❌');}
         }
     });
-    setupToggle('dim-low',async a=>{setSetting('DimLowBattery',a?'true':'false');toast(a?'Atenuación automática activada':'Atenuación automática desactivada');});
+    // Se registran al abrir el diálogo ⋮ (ver abajo): los interruptores viven allí.
+    const _setupPopToggles=()=>{
+    setupToggle('dim-low',async a=>{dimlow=a;setSetting('DimLowBattery',a?'true':'false');toast(a?'Atenuación automática activada':'Atenuación automática desactivada');});
     setupToggle('show-pct',async a=>{
+        showpct=a;
         setSetting('ShowBatteryPercent',a?'true':'false');
         // Notify applet via IPC state so it reacts immediately
         const curProfile=document.querySelector('.perf-mode-card.active')?.dataset?.mode||'balanced';
@@ -1297,6 +1378,7 @@ async function _renderBateriaContent(c, heavy=null){
         tauriInvoke('write_ipc_state',{state}).catch(()=>{});
         toast(a?'Porcentaje visible en el widget':'Porcentaje oculto en el widget');
     });
+    };
 
     document.querySelectorAll('.perf-mode-card').forEach(b=>{b.addEventListener('click',async()=>{
         const mode=b.dataset.mode;
@@ -1414,12 +1496,16 @@ async function _renderBateriaContent(c, heavy=null){
         const statsRows=rows.map(r=>
             `<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${r.label}</span><span class="bat-stat-pop-val"${r.color?` style="color:${r.color}"`:''}>${r.val}</span></div>`
         ).join('')||`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr('Sin datos disponibles')}</span></div>`;
+        const optRow=(label,id,on)=>`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr(label)}</span>${renderToggle(id,on)}</div>`;
+        const optsSection=`<div class="bat-pop-section-title">${_tr('Opciones')}</div><div class="bat-stat-pop">${
+            optRow('Atenuar pantalla automáticamente','dim-low',dimlow)}${optRow('Mostrar porcentaje batería','show-pct',showpct)}</div>`;
         const statsSection=`<div class="bat-pop-section-title">${_tr('Estado')}</div><div class="bat-stat-pop">${statsRows}</div>`;
         const usbc=c.dataset.batUsbc||'';
         const pred=c.dataset.batPred||'';
-        const body=`<div class="bat-pop">${statsSection}${usbc}${pred}</div>`;
-        showDialog(_tr('Estadísticas de batería'), body,
+        const body=`<div class="bat-pop">${optsSection}${statsSection}${usbc}${pred}</div>`;
+        showDialog(_tr('Más opciones'), body,
             {confirmText:null,cancelText:_tr('Cerrar'),onCancel:()=>{}});
+        _setupPopToggles();
     });
 } // end _renderBateriaContent
 
@@ -1620,7 +1706,11 @@ export async function renderSnapshots(c){
         opt('never','Nunca','No crear capturas automáticamente'),
     ]);
     if(!support.supported){
-        h+=`<div class="detail-card" style="padding:16px 20px;margin-top:4px"><span class="ds">${_tr('Las instantáneas requieren un sistema de archivos Btrfs.')}${support.fs?` (${esc(support.fs)})`:''}</span></div>`;
+        // En Btrfs lo que falta es snapper; decir «requiere Btrfs» a quien ya lo tiene confundía.
+        const why=support.fs==='btrfs'
+            ?_tr('Snapper no está instalado. Instálalo y crea la configuración «root» para usar las capturas.')
+            :_tr('Las instantáneas requieren un sistema de archivos Btrfs.')+(support.fs?` (${esc(support.fs)})`:'');
+        h+=`<div class="detail-card" style="padding:16px 20px;margin-top:4px"><span class="ds">${why}</span></div>`;
     }
     // Sistema soportado pero snapper no deja leer al usuario todavía
     if(support.supported && needsAccess){
@@ -1989,11 +2079,10 @@ async function promptUpdatePassword(distro){
 
 // ── Channel picker dialog (3-dot menu on Updates page) ──────────────────
 function _openChannelDialog(c, currentChannel){
-    const _isDark=document.documentElement.classList.contains('dark-mode');
     const channels=[
-        {id:'stable', label:_tr('Estable'),   desc:_tr('Versiones probadas y recomendadas'), badge:'STABLE', banner:_isDark?'./assets/update-stable-dark.svg':'./assets/update-stable-light.svg'},
-        {id:'beta',   label:_tr('Beta'),      desc:_tr('Nuevas funciones en pruebas'),       badge:'BETA',   banner:'./assets/update-beta.svg'},
-        {id:'dev',    label:_tr('Developer'), desc:_tr('Actualizaciones más recientes, inestables'), badge:'DEV', banner:'./assets/update-dev.svg'},
+        {id:'stable', label:_tr('Estable'),   desc:_tr('Versiones probadas y recomendadas'), badge:'STABLE', banner:'./assets/channel-stable.png'},
+        {id:'beta',   label:_tr('Beta'),      desc:_tr('Nuevas funciones en pruebas'),       badge:'BETA',   banner:'./assets/channel-beta.png'},
+        {id:'dev',    label:_tr('Developer'), desc:_tr('Actualizaciones más recientes, inestables'), badge:'DEV', banner:'./assets/channel-dev.png'},
     ];
     let selected = currentChannel;
     const overlay=document.createElement('div');
@@ -2398,123 +2487,127 @@ export async function renderGeneral(c){
         us:`<svg class="lang-flag" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" rx="2" fill="#fff"/><g fill="#b22234"><rect width="20" height="2"/><rect y="4" width="20" height="2"/><rect y="8" width="20" height="2"/><rect y="12" width="20" height="2"/></g><rect width="9" height="8" fill="#3c3b6e"/></svg>`,
         fr:`<svg class="lang-flag" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" rx="2" fill="#fff"/><rect width="6.67" height="14" fill="#0055a4"/><rect x="13.33" width="6.67" height="14" fill="#ef4135"/></svg>`
     };
-    const langMap = {'en_US.UTF-8':['us','English (US)'], 'es_ES.UTF-8':['es','Español (España)'], 'fr_FR.UTF-8':['fr','Français']};
-    // Returns safe HTML (flag SVG + escaped name); falls back to the raw locale.
+    // «es_MX.UTF-8» → «Español (México)», cada idioma escrito en su propio
+    // idioma, que es como lo busca quien no entiende el actual. Antes solo
+    // había nombre para tres y el resto salía como el código crudo.
+    const flagOf={es_ES:'es',en_US:'us',fr_FR:'fr'};
+    const prettyLocale=l=>{
+        const tag=String(l).split('.')[0].replace('_','-');
+        try{
+            const n=new Intl.DisplayNames([tag],{type:'language'}).of(tag);
+            return n&&n!==tag?n.charAt(0).toLocaleUpperCase(tag)+n.slice(1):l;
+        }catch{return l;}
+    };
+    // HTML seguro: bandera (si la hay) + nombre escapado.
     const getLangName = l => {
-        const m=langMap[l];
-        if(!m) return esc(l);
-        return `<span class="lang-label">${_FLAGS[m[0]]||''}<span>${esc(m[1])}</span></span>`;
+        if(!l) return '';
+        const f=_FLAGS[flagOf[String(l).split('.')[0]]];
+        return `<span class="lang-label">${f||''}<span>${esc(prettyLocale(l))}</span></span>`;
     };
 
     const _curAppLang=(localStorage.getItem('bookos_lang')||'auto');
-    const _appLangOpts=[['auto','Auto / Auto-detect'],['es','Español'],['en','English']];
-    c.innerHTML=renderHeader(t('hdr_general')) + renderSection(t('sec_lang_app')) + renderCard([
-        `<div class="detail-item detail-item-row" id="btn-applang" style="cursor:pointer">
-            <div class="detail-texts"><span class="dt">${t('label_app_lang')}</span><span class="ds">${_appLangOpts.find(o=>o[0]===_curAppLang)?.[1]||'Auto'}</span></div>
-            <div style="color:var(--tx2);font-size:18px">›</div>
-        </div>`,
-        `<div id="applang-list" style="display:none;padding:0 20px 16px"><div class="res-list" style="margin-bottom:0">
-            ${_appLangOpts.map(o=>`<div class="res-item ${o[0]===_curAppLang?'active':''}" data-applang="${o[0]}"><span>${esc(o[1])}</span></div>`).join('')}
-        </div></div>`
-    ]) + renderSection(t('sec_lang_input')) + renderCard([
-        `<div class="detail-item detail-item-row" id="btn-lang" style="cursor:pointer">
-            <div class="detail-texts"><span class="dt">${t('label_system_lang')}</span><span class="ds">${getLangName(loc.locale)}</span></div>
-            <div style="color:var(--tx2);font-size:18px">›</div>
-        </div>`,
-        `<div id="lang-list" style="display:none;padding:0 20px 16px"><div class="res-list" style="margin-bottom:0">
-            ${locales.map(l=>`<div class="res-item ${l===loc.locale?'active':''}" data-lang="${esc(l)}">${getLangName(l)}</div>`).join('')}
-        </div></div>`,
-    ]) + renderSection(_tr('Fecha y hora')) + renderCard([
-        renderRowItem('Hora automática (NTP)','Sincroniza el reloj por internet',renderToggle('ntp',dt.ntp)),
-        `<div class="detail-item detail-item-row" id="btn-tz" style="cursor:pointer">
+    const _appLangOpts=[['auto','Automático'],['es','Español'],['en','English']];
+    // Mismos controles que el resto de páginas: un botón con menú emergente
+    // en vez de listas que se desplegaban dentro de la tarjeta.
+    const pick=(id,label)=>`<button type="button" class="bk-select" id="${id}" aria-haspopup="listbox"><span>${label}</span></button>`;
+    const link=(id,title,sub)=>`<div class="detail-item detail-item-row gen-link" id="${id}" role="button" tabindex="0"><div class="detail-texts"><span class="dt">${_tr(title)}</span>${sub?`<span class="ds">${_tr(sub)}</span>`:''}</div>${chevron()}</div>`;
+    c.innerHTML=renderHeader(t('hdr_general'))
+    + renderSection(_tr('Idioma y región')) + renderCard([
+        renderRowItem(t('label_app_lang'),'',pick('pick-applang',esc(_appLangOpts.find(o=>o[0]===_curAppLang)?.[1]||'Automático'))),
+        renderRowItem(t('label_system_lang'),'Se aplica al volver a iniciar sesión',pick('pick-lang',getLangName(loc.locale)||'—')),
+        link('go-keyboard','Teclado','Distribución del teclado'),
+    ])
+    + renderSection(_tr('Fecha y hora')) + renderCard([
+        renderRowItem('Hora automática','Sincroniza el reloj por internet',renderToggle('ntp',dt.ntp)),
+        `<div class="detail-item detail-item-row gen-link" id="btn-tz" role="button" tabindex="0" aria-expanded="false">
             <div class="detail-texts"><span class="dt">${_tr('Zona horaria')}</span><span class="ds" id="tz-cur">${esc(dt.timezone||_tr('No configurada'))}</span></div>
-            <div style="color:var(--tx2);font-size:18px">›</div>
+            ${chevron()}
         </div>`,
-        `<div id="tz-list" style="display:none;padding:0 20px 16px">
-            <input type="text" id="tz-filter" placeholder="${_tr('Buscar zona…')}" style="width:100%;padding:9px 12px;border-radius:10px;border:none;background:var(--sbg);color:var(--tx);font-size:13px;outline:none;margin-bottom:8px">
-            <div class="res-list" id="tz-res" style="margin-bottom:0;max-height:240px;overflow-y:auto">
-                ${timezones.map(z=>`<div class="res-item ${z===dt.timezone?'active':''}" data-tz="${esc(z)}"><span>${esc(z)}</span></div>`).join('')}
-            </div>
+        `<div id="tz-list" class="tz-panel" hidden>
+            <input type="search" id="tz-filter" class="tz-filter" placeholder="${_tr('Buscar zona…')}" aria-label="${_tr('Buscar zona…')}">
+            <div class="tz-res" id="tz-res"></div>
         </div>`
-    ]) + renderSection(_tr('Impresoras')) + renderCard([
-        `<div class="detail-item detail-item-row" style="cursor:pointer" id="open-printers">
-            <div class="detail-texts"><span class="dt">${_tr('Impresoras y escáneres')}</span><span class="ds">${_tr('Añadir y configurar impresoras')}</span></div>
-            <div style="color:var(--tx2);font-size:18px">›</div>
-        </div>`
-    ]) + renderSection(t('sec_app_behavior')) + renderCard([
-        renderRowItem(t('label_launch_at_login'),t('label_launch_at_login_sub'),renderToggle('autostart',auto.enabled))
-    ]) + renderSection(t('sec_autostart')) +
-    (autostartApps.length===0
-        ? renderCard([renderInfoItem(t('label_no_autostart'),t('label_no_autostart_sub'))])
-        : `<div class="detail-card">${autostartApps.map(a=>
-            `<div class="detail-item detail-item-row autostart-row">
-                <div class="detail-texts"><span class="dt">${esc(a.name)}</span><span class="ds" style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.exec)}</span></div>
+    ])
+    + renderSection(_tr('Inicio')) + renderCard([
+        renderRowItem(t('label_launch_at_login'),t('label_launch_at_login_sub'),renderToggle('autostart',auto.enabled)),
+        ...(autostartApps.length===0
+            ?[renderInfoItem(t('label_no_autostart'),t('label_no_autostart_sub'))]
+            :autostartApps.map(a=>`<div class="detail-item detail-item-row">
+                <div class="detail-texts"><span class="dt">${esc(a.name)}</span><span class="ds gen-exec">${esc(a.exec)}</span></div>
                 ${renderToggle('ast-'+esc(a.filename),a.enabled)}
-            </div>`).join('')}</div>`
-    );
+            </div>`)),
+    ])
+    + renderSection(_tr('Dispositivos')) + renderCard([
+        link('open-printers','Impresoras y escáneres','Añadir y configurar impresoras'),
+    ]);
 
-    document.getElementById('btn-applang')?.addEventListener('click', ()=>{ const el=document.getElementById('applang-list'); if(el)el.style.display=el.style.display==='none'?'block':'none'; });
-    document.querySelectorAll('[data-applang]').forEach(b=>b.addEventListener('click',()=>{
-        const v=b.dataset.applang;
-        if(v==='auto')localStorage.removeItem('bookos_lang');
-        else localStorage.setItem('bookos_lang',v);
-        document.querySelectorAll('[data-applang]').forEach(x=>x.classList.remove('active'));
-        b.classList.add('active');
-        document.querySelector('#btn-applang .ds').textContent=b.querySelector('span').textContent;
+    const menu=(btnId,title,options,current,onSelect)=>{
+        const btn=document.getElementById(btnId);
+        btn?.addEventListener('click',()=>popoverSelect(btn.closest('.detail-item'),{title,options,current,onSelect}));
+    };
+    menu('pick-applang',t('label_app_lang'),_appLangOpts.map(([val,label])=>({val,label:esc(label)})),_curAppLang,v=>{
+        if(v==='auto')localStorage.removeItem('bookos_lang');else localStorage.setItem('bookos_lang',v);
         toast(t('tst_app_lang_changed'),'🌐');
-        // Reload so every page re-renders with the new language.
+        // Recargar para que todas las páginas salgan en el idioma nuevo.
         setTimeout(()=>location.reload(),400);
-    }));
-    document.getElementById('btn-lang')?.addEventListener('click', ()=>{ const el=document.getElementById('lang-list'); el.style.display=el.style.display==='none'?'block':'none'; });
-
-    // ── Date & time ──
-    setupToggle('ntp',async on=>{
+    });
+    let curLocale=loc.locale;
+    menu('pick-lang',t('label_system_lang'),[...locales].sort((x,y)=>prettyLocale(x).localeCompare(prettyLocale(y))).map(l=>({val:l,label:getLangName(l)})),curLocale,async v=>{
+        if(v===curLocale)return;
         try{
-            const r=JSON.parse(await tauriInvoke('set_ntp',{enable:on}));
-            toast(r.ok?(on?_tr('Hora automática activada'):_tr('Hora automática desactivada')):_tr('No se pudo cambiar'),'🕐');
-        }catch(e){toast(_tr('No se pudo cambiar'),'❌');}
+            if(!await promptSudo('cambiar el idioma del sistema','localectl',['set-locale',`LANG=${v}`]))return;
+            curLocale=v;
+            document.querySelector('#pick-lang span').innerHTML=getLangName(v);
+            toast(t('tst_lang_changed'));
+        }catch(e){toast(String(e),'❌');}
     });
-    document.getElementById('btn-tz')?.addEventListener('click',()=>{ const el=document.getElementById('tz-list'); if(el){el.style.display=el.style.display==='none'?'block':'none';document.getElementById('tz-filter')?.focus();} });
+    const onActivate=(id,fn)=>{const el=document.getElementById(id);el?.addEventListener('click',fn);el?.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fn();}});};
+    onActivate('go-keyboard',()=>window.openPage?.('teclado'));
+
+    // ── Fecha y hora ──
+    setupToggle('ntp',async on=>{
+        const r=JSON.parse(await tauriInvoke('set_ntp',{enable:on}));
+        if(!r.ok)throw new Error(_tr('No se pudo cambiar'));
+        toast(on?_tr('Hora automática activada'):_tr('Hora automática desactivada'),'🕐');
+    });
+    // Las ~600 zonas se pintan al abrir la lista, no con la página: eran la
+    // mitad de sus 1344 nodos —medido— y casi nadie cambia de zona horaria.
+    const tzRes=document.getElementById('tz-res'),tzList=document.getElementById('tz-list'),tzBtn=document.getElementById('btn-tz');
+    onActivate('btn-tz',()=>{
+        if(!tzRes.childElementCount)tzRes.innerHTML=timezones.map(z=>`<div class="tz-item ${z===dt.timezone?'active':''}" data-tz="${esc(z)}">${esc(z.replace(/_/g,' '))}</div>`).join('');
+        tzList.hidden=!tzList.hidden;
+        tzBtn.setAttribute('aria-expanded',String(!tzList.hidden));
+        if(!tzList.hidden)document.getElementById('tz-filter')?.focus();
+    });
     document.getElementById('tz-filter')?.addEventListener('input',e=>{
-        const q=e.target.value.toLowerCase();
-        document.querySelectorAll('#tz-res .res-item').forEach(it=>{
-            it.style.display=it.textContent.toLowerCase().includes(q)?'':'none';
-        });
+        const q=e.target.value.toLowerCase().replace(/ /g,'_');
+        tzRes.querySelectorAll('.tz-item').forEach(it=>{it.hidden=!it.dataset.tz.toLowerCase().includes(q);});
     });
-    document.querySelectorAll('[data-tz]').forEach(b=>b.addEventListener('click',async()=>{
+    // Un solo escuchador para toda la lista en vez de uno por zona.
+    tzRes?.addEventListener('click',async e=>{
+        const b=e.target.closest('[data-tz]');
+        if(!b)return;
         const tz=b.dataset.tz;
         try{
             const r=JSON.parse(await tauriInvoke('set_timezone',{timezone:tz}));
-            if(r.ok){
-                document.querySelectorAll('[data-tz]').forEach(x=>x.classList.remove('active'));
-                b.classList.add('active');
-                const cur=document.getElementById('tz-cur');if(cur)cur.textContent=tz;
-                document.getElementById('tz-list').style.display='none';
-                toast(_tr('Zona horaria actualizada'),'🌍');
-            } else toast(_tr('No se pudo cambiar'),'❌');
+            if(!r.ok){toast(_tr('No se pudo cambiar'),'❌');return;}
+            tzRes.querySelector('.active')?.classList.remove('active');
+            b.classList.add('active');
+            document.getElementById('tz-cur').textContent=tz;
+            tzList.hidden=true;tzBtn.setAttribute('aria-expanded','false');
+            toast(_tr('Zona horaria actualizada'),'🌍');
         }catch(e){toast(_tr('No se pudo cambiar'),'❌');}
-    }));
-    document.getElementById('open-printers')?.addEventListener('click',async()=>{
+    });
+    onActivate('open-printers',async()=>{
         try{await tauriInvoke('open_printers');}catch(e){toast(String(e),'❌');}
     });
 
-    document.querySelectorAll('[data-lang]').forEach(b => b.addEventListener('click', async()=>{
-        try {
-            const ok = await promptSudo('cambiar el idioma del sistema', 'localectl', ['set-locale', `LANG=${b.dataset.lang}`]);
-            if(ok){
-                document.querySelectorAll('[data-lang]').forEach(x=>x.classList.remove('active'));
-                b.classList.add('active');
-                document.querySelector('#btn-lang .ds').textContent = getLangName(b.dataset.lang);
-                toast(t('tst_lang_changed'));
-            }
-        } catch(e){}
-    }));
     setupToggle('autostart', async a => {
-        try { await tauriInvoke('toggle_autostart_bookos',{enable:a}); toast(a?t('tst_autostart_on'):t('tst_autostart_off')); } catch(e){}
+        await tauriInvoke('toggle_autostart_bookos',{enable:a}); toast(a?t('tst_autostart_on'):t('tst_autostart_off'));
     });
     autostartApps.forEach(a=>{
         setupToggle('ast-'+a.filename, async enabled=>{
-            try { await tauriInvoke('toggle_autostart_app',{filename:a.filename,enabled}); toast((enabled?t('enabled'):t('disabled'))+': '+a.name); } catch(e){}
+            await tauriInvoke('toggle_autostart_app',{filename:a.filename,enabled}); toast((enabled?t('enabled'):t('disabled'))+': '+a.name);
         });
     });
 }
@@ -2936,84 +3029,43 @@ export async function renderMantenimiento(c){
 // ════════════════════════════════════════════════════════════════════════
 // ── Fondo de Pantalla (NEW) ────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
+// «Dark/purple_dark.png» → «Purple». La pareja clara/oscura es un solo fondo
+// para quien lo mira; el sufijo y la extensión son cosa del disco.
+function nombreFondo(path){
+    const base=String(path).split('/').pop().replace(/\.[^.]+$/,'').replace(/[_-](dark|light|oscuro|claro)$/i,'').replace(/[_-]+/g,' ').trim();
+    return base?base.charAt(0).toLocaleUpperCase()+base.slice(1):_tr('Fondo de pantalla');
+}
 export async function renderFondos(c){
     const pageEpoch=window._navEpoch;
     c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderSkeleton(2);
     let current='';
     try{current=JSON.parse(await tauriInvoke('get_current_wallpaper')).path||'';}catch(e){}
 
-    let colorPalette=false,isDark=document.documentElement.classList.contains('dark-mode');
-    try{[colorPalette,isDark]=await Promise.all([
-        getSetting('ColorPalette','false').then(v=>v==='true'),
-        tauriInvoke('get_current_theme').then(r=>JSON.parse(r).is_dark).catch(()=>isDark)
-    ]);}catch(e){}
-
     let wallpapers=[];
-    const currentWp={path:current,name:current.split('/').pop()?.replace(/\.[^.]+$/,'')||_tr('Fondo de pantalla')};
-
-    const today = new Date();
-    const time = today.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-    const date = today.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'});
-
-    // Panel colors matching BookOS-Dark/Light theme
-    const panelBg=isDark?'rgba(20,20,22,0.92)':'rgba(248,248,252,0.92)';
-    const panelBorder=isDark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.08)';
-    const panelTx=isDark?'#ffffff':'#1c1c1e';
-    const panelTx2=isDark?'rgba(255,255,255,0.55)':'rgba(0,0,0,0.45)';
-    const taskIconBg=isDark?'rgba(255,255,255,0.10)':'rgba(0,0,0,0.07)';
-
-    // Dock icons matching the real desktop (same colors as actual BookOS dock)
-    const dockIcons=[
-        {bg:'#1565c0'}, {bg:'#e53935'}, {bg:'#2e7d32'}, {bg:'#6a1b9a'},
-        {bg:'#263238'}, {bg:'#f57c00'}, {bg:'#00838f'}, {bg:'#4527a0'},
-    ];
-    const volSvg=`<svg viewBox="0 0 24 24" width="10" height="10"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="${panelTx2}"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="${panelTx2}" stroke-width="2" stroke-linecap="round"/></svg>`;
-    const netSvg=`<svg viewBox="0 0 24 24" width="10" height="10"><path d="M5 12.55a11 11 0 0 1 14.08 0" fill="none" stroke="${panelTx2}" stroke-width="2.2" stroke-linecap="round"/><path d="M1.42 9a16 16 0 0 1 21.16 0" fill="none" stroke="${panelTx2}" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="19" r="1.5" fill="${panelTx2}"/></svg>`;
-    const battSvg=`<svg viewBox="0 0 24 24" width="12" height="10"><rect x="2" y="7" width="16" height="10" rx="2" fill="none" stroke="${panelTx2}" stroke-width="1.8"/><path d="M22 11v2" stroke="${panelTx2}" stroke-width="2" stroke-linecap="round"/><rect x="4" y="9" width="9" height="6" rx="1" fill="${panelTx2}"/></svg>`;
+    const currentWp={path:current,name:nombreFondo(current)};
 
     const desktopPreview=()=>`        <div class="wp-desktop-screen" id="wp-screen">
             <img data-preview-path="${esc(currentWp.path)}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
-            <div class="wp-top-bar" style="background:${panelBg};border-bottom:1px solid ${panelBorder}">
-                <span class="wp-top-bar-title" style="color:${panelTx2}">BookOS</span>
-                <div class="wp-top-bar-tray">
-                    ${netSvg}${volSvg}${battSvg}
-                    <span style="font-size:8px;font-weight:600;color:${panelTx2};white-space:nowrap">${time}</span>
-                </div>
-            </div>
-            <div class="wp-float-dock" style="background:${isDark?'rgba(28,28,30,0.85)':'rgba(255,255,255,0.85)'};box-shadow:0 4px 20px rgba(0,0,0,${isDark?'.5':'.2'})">
-                ${dockIcons.map(i=>`<div class="wp-dock-icon" style="background:${i.bg}"></div>`).join('')}
-            </div>
         </div>
 `;
 
     let h=renderHeader(t('hdr_wallpaper_style'));
     // The current name and controls are cheap; previews are created on demand.
     h += `<div class="wp-hero-card">
-        <div class="wp-hero-name">${esc(currentWp.name)}</div>
         <div id="wp-preview-host"></div>
         <button class="wp-change-btn" id="btn-change-wp">${_tr("Cambiar fondo de pantalla")}</button>
-        <div class="wp-palette-row" id="wps-palette">
-            <div class="wp-palette-texts">
-            <span class="wp-palette-title">${_tr("Acento automático de BookOS")}</span>
-            <span class="wp-palette-sub">${_tr("Color de acento del escritorio según el fondo")}</span>
-            </div>
-            ${renderToggle('palette',colorPalette)}
-        </div>
+        <div id="wp-grid" class="wp-grid-panel" style="display:none"></div>
     </div>`;
 
     // ── Paleta de colores dinámica de BookOS (Material-You-like) ──
     // Antes vivía en Temas; tiene más sentido aquí porque la paleta sale
     // del fondo de pantalla, no del tema claro/oscuro. Elegir NO aplica:
     // solo repinta las maquetas de arriba. Solo se guarda con "Aplicar".
-    h += `<div class="theme-block" id="dyn-block">
+    h += `<div class="theme-block dyn-off" id="dyn-block">
         <div class="dyn-mockups" id="dyn-mockups"></div>
-        ${renderRowItem('Paleta dinámica de BookOS','Tiñe las apps de BookOS con los colores de tu fondo',renderToggle('dyncolor',false))}
-        <div class="theme-block-divider" id="dyn-div" style="display:none"></div>
+        ${renderRowItem('Paleta dinámica de BookOS','Tiñe las apps y el acento del escritorio con los colores de tu fondo',renderToggle('dyncolor',false))}
         <div id="dyn-body" style="display:none">
             ${renderRowItem('Aplicar paleta a los iconos','Recolorea los iconos de las apps con el tono elegido',renderToggle('dyniconos',false))}
-            ${renderRowItem('Aplicar paleta a Kvantum','Tiñe apps Qt como Dolphin o Kate con el estilo Kvantum de BookOS',renderToggle('dynkvantum',false))}
-            ${renderRowItem('Aplicar paleta a la pantalla de bloqueo','Tiñe el acento de la pantalla de bloqueo y, si es posible, del saludo de inicio de sesión',renderToggle('dynlockscreen',false))}
-            <div class="theme-block-divider"></div>
             <div class="dyn-tabs">
                 <button class="dyn-tab on" data-tab="wall">${_tr('Colores del fondo')}</button>
                 <button class="dyn-tab" data-tab="basic">${_tr('Colores básicos')}</button>
@@ -3025,13 +3077,14 @@ export async function renderFondos(c){
         </div>
     </div>`;
 
-    // No cards or images exist until the user opens the picker.
-    h += '<div id="wp-grid" class="wp-grid-panel" style="display:none"></div>';
 
     if(window._navEpoch!==pageEpoch)return;
     c.innerHTML=h;
 
-    let updatePreview=null;
+    // La vista previa con el fondo va desde el principio: antes solo salía al
+    // abrir la galería y la tarjeta enseñaba nada más que el nombre del archivo.
+    c.querySelector('#wp-preview-host').innerHTML=desktopPreview();
+    let updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
 
     const pageGrid=c.querySelector('#wp-grid');
 
@@ -3076,17 +3129,26 @@ export async function renderFondos(c){
         const obs=new MutationObserver(()=>{
             if(!pageGrid.isConnected)cleanup();
         });
-        obs.observe(pageGrid.parentElement,{childList:true});
+        // La galería ahora vive dentro de la tarjeta, que no cambia al
+        // navegar: se observa el contenedor de la página. #app y no `c`: `c`
+        // es el Proxy de guardedContainer, observe() lo rechaza por no ser un
+        // Node, y la excepción dejaba la galería en «Cargando…» para siempre.
+        obs.observe(document.getElementById('app'),{childList:true});
         (window._pageCleanups ||= []).push(cleanup);
     };
 
+    // Las dos mitades de una pareja de BookOS son el mismo fondo: en tema
+    // oscuro el actual es `Dark/purple_dark.png` y la galería enseña
+    // `Light/purple.png`. Comparando rutas salía dos veces y ninguna marcada.
+    const _clave=p=>String(p).replace('/Dark/','/Light/').replace(/_dark(\.\w+)$/,'$1');
+    const _mismoFondo=(a,b)=>!!a&&!!b&&_clave(a)===_clave(b);
     let loading=false,loaded=false,shown=0;
     const appendCards=()=>{
         const grid=pageGrid.querySelector('.wallpaper-grid');
         const batch=wallpapers.slice(shown,shown+24);
         grid.insertAdjacentHTML('beforeend',batch.map(w=>{
-            const active=w.path===currentWp.path;
-            return `<button type="button" class="wallpaper-card ${active?'active':''}" data-path="${esc(w.path)}" aria-pressed="${active}" aria-label="${esc(w.name)}"><img data-preview-path="${esc(w.thumbnail||w.path)}" class="wp-card-img" decoding="async" alt="" onerror="this.style.opacity='0'"><span class="wp-name">${esc(w.name)}</span></button>`;
+            const active=_mismoFondo(w.path,currentWp.path);
+            return `<button type="button" class="wallpaper-card ${active?'active':''}" data-path="${esc(w.path)}" aria-pressed="${active}" aria-label="${esc(w.name)}"><img data-preview-path="${esc(w.thumbnail||w.path)}" class="wp-card-img" decoding="async" alt="" onerror="this.style.opacity='0'"><span class="wp-name">${esc(nombreFondo(w.path))}</span></button>`;
         }).join(''));
         shown+=batch.length;
         pageGrid.querySelector('[data-wp-more]').hidden=shown>=wallpapers.length;
@@ -3094,7 +3156,13 @@ export async function renderFondos(c){
     };
     const openPicker=async()=>{
         if(loading||!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
-        if(loaded){pageGrid.scrollIntoView({behavior:'instant',block:'start'});return;}
+        if(loaded){
+            const hidden=pageGrid.style.display==='none';
+            pageGrid.style.display=hidden?'block':'none';
+            if(hidden){_mountFab();pageGrid.scrollIntoView({behavior:'instant',block:'nearest'});}
+            else document.getElementById('wp-add-fab')?.remove();
+            return;
+        }
         loading=true;
         const button=c.querySelector('#btn-change-wp');
         button.disabled=true;
@@ -3104,16 +3172,14 @@ export async function renderFondos(c){
         try{
             wallpapers=JSON.parse(await tauriInvoke('get_wallpapers'));
             if(!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
-            if(currentWp.path&&!wallpapers.some(w=>w.path===currentWp.path))wallpapers.unshift(currentWp);
-            pageGrid.innerHTML=`<div class="wp-grid-head">${_tr('Cambiar fondo de pantalla')}</div><div class="wallpaper-grid"></div><button type="button" class="wp-change-btn" data-wp-more>${_tr('Mostrar más')}</button>`;
+            if(currentWp.path&&!wallpapers.some(w=>_mismoFondo(w.path,currentWp.path)))wallpapers.unshift(currentWp);
+            pageGrid.innerHTML=`<div class="wallpaper-grid"></div><button type="button" class="wp-change-btn" data-wp-more>${_tr('Mostrar más')}</button>`;
             if(!wallpapers.length)pageGrid.querySelector('.wallpaper-grid').textContent=_tr('No se encontraron fondos de pantalla');
-            c.querySelector('#wp-preview-host').innerHTML=desktopPreview();
-            updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
+            updatePreview?.observe(pageGrid);
             appendCards();
             c.querySelector('#dyn-mockups')?.dispatchEvent(new Event('wp-preview-opened'));
             loaded=true;
-            // One immediate scroll after layout, without animating through palette controls.
-            pageGrid.scrollIntoView({behavior:'instant',block:'start'});
+            pageGrid.scrollIntoView({behavior:'instant',block:'nearest'});
         }catch(e){
             pageGrid.innerHTML=renderError('No se pudieron cargar los fondos de pantalla',{onRetry:openPicker});
         }finally{loading=false;button.disabled=false;}
@@ -3123,21 +3189,6 @@ export async function renderFondos(c){
         if(e.target.closest('[data-wp-more]'))appendCards();
     });
     // Apply the BookOS accent so it takes effect live.
-    const _applyPalette=async(on)=>{
-        setSetting('ColorPalette',on?'true':'false');
-        try{
-        }catch(e){}
-        toast(on?'Paleta de colores activada':'Paleta desactivada');
-    };
-    // The whole palette row toggles; the inner switch is purely visual here
-    // so we don't double-fire via setupToggle.
-    document.getElementById('wps-palette')?.addEventListener('click',async()=>{
-        const tog=document.querySelector('[data-toggle="palette"]');
-        const next=!tog?.classList.contains('active');
-        tog?.classList.toggle('active',next);
-        await _applyPalette(next);
-    });
-
     let applyingWallpaper=false;
     pageGrid.addEventListener('click',async e=>{
         const card=e.target.closest('.wallpaper-card');
@@ -3156,8 +3207,6 @@ export async function renderFondos(c){
         const previewImg=document.getElementById('wp-screen-img');
         currentWp.path=card.dataset.path;
         updatePreview(previewImg,card.dataset.path);
-        const name=c.querySelector('.wp-hero-name');
-        if(name)name.textContent=card.querySelector('.wp-name').textContent;
         toast('Fondo de pantalla aplicado','🖼️');
     });
 
@@ -3257,7 +3306,6 @@ function _dynMockups(r){
 
 async function setupDynamicColor(current){
     const body=document.getElementById('dyn-body');
-    const div=document.getElementById('dyn-div');
     const stripsEl=document.getElementById('dyn-strips');
     const stylesEl=document.getElementById('dyn-styles');
     const mockEl=document.getElementById('dyn-mockups');
@@ -3277,7 +3325,8 @@ async function setupDynamicColor(current){
     let applied={seed:'',style:''};     // lo que está puesto de verdad
     let previewCache={};                // "seed|style" → paleta, para no repetir IPC
 
-    const show=on=>{body.style.display=on?'block':'none';div.style.display=on?'block':'none';};
+    const block=body.closest('#dyn-block');
+    const show=on=>{body.style.display=on?'block':'none';block?.classList.toggle('dyn-off',!on);};
     const isDark=()=>document.documentElement.classList.contains('dark-mode');
     const colors=()=>tab==='wall'?seeds:_DYN_BASIC;
 
@@ -3408,10 +3457,6 @@ async function setupDynamicColor(current){
         if(tg&&st.enabled){tg.classList.add('active');tg.setAttribute('aria-checked','true');}
         const ti=document.querySelector('[data-toggle="dyniconos"]');
         if(ti&&localStorage.getItem('bookos_dyn_icons')==='1'){ti.classList.add('active');ti.setAttribute('aria-checked','true');}
-        const tk=document.querySelector('[data-toggle="dynkvantum"]');
-        if(tk&&st.kvantum){tk.classList.add('active');tk.setAttribute('aria-checked','true');}
-        const tl=document.querySelector('[data-toggle="dynlockscreen"]');
-        if(tl&&st.lockscreen){tl.classList.add('active');tl.setAttribute('aria-checked','true');}
         show(!!st.enabled);
         if(st.enabled){ if(await loadSeeds()) await repaint(); }
     }
@@ -3430,9 +3475,14 @@ async function setupDynamicColor(current){
 
     setupToggle('dyncolor',async on=>{
         show(on);
+        // Era un interruptor aparte, «Acento automático»: hacía lo mismo desde
+        // el mismo fondo, solo que para el escritorio. Ahora va con la paleta.
+        await setSetting('ColorPalette',on?'true':'false');
         if(on){
             if(await loadSeeds())await repaint();
             try{await tauriInvoke('dynamic_color_set_enabled',{enabled:true});}catch(e){}
+            try{parseServiceResult(await tauriInvoke('sync_desktop_accent'));}
+            catch(e){toast('No se pudo cambiar el acento del escritorio','❌');}
         }else{
             try{await tauriInvoke('dynamic_color_set_enabled',{enabled:false});}catch(e){}
             installPaletteCss('');
@@ -3443,7 +3493,6 @@ async function setupDynamicColor(current){
 
     // #app owns this page; .detail-view only contains #app and does not
     // change when the router replaces a page.
-    const block=body.closest('#dyn-block');
     if(block?.parentElement){
         const leaveObs=new MutationObserver(()=>{
             if(!body.isConnected){
@@ -3458,17 +3507,6 @@ async function setupDynamicColor(current){
     setupToggle('dyniconos',async on=>{
         localStorage.setItem('bookos_dyn_icons',on?'1':'0');
         if(on&&applied.seed)applyIcons(applied.seed);
-    });
-    // Esquema de color del escritorio: aparte de los iconos, independiente
-    // (se puede querer uno sin el otro). Al encenderlo con una paleta ya
-    // aplicada, la reescribe para generar+aplicar el .colors de una vez.
-    setupToggle('dynkvantum',async on=>{
-        try{await tauriInvoke('dynamic_color_set_kvantum',{enabled:on});}catch(e){}
-        toast(on?_tr('Paleta aplicada a Kvantum'):_tr('Paleta de Kvantum desactivada'));
-    });
-    setupToggle('dynlockscreen',async on=>{
-        try{await tauriInvoke('dynamic_color_set_lockscreen',{enabled:on});}catch(e){}
-        toast(on?_tr('Paleta aplicada a la pantalla de bloqueo'):_tr('Paleta de la pantalla de bloqueo desactivada'));
     });
 }
 
@@ -3936,9 +3974,9 @@ export async function renderAplicaciones(c){
     // Render an app icon: real .desktop Icon if it's an absolute path, else
     // a tinted glyph tile as fallback.
     const appIconHtml=(cur,glyph)=>{
-        const ic=cur&&cur.icon||'';
-        if(ic&&ic.startsWith('/')){
-            return `<img src="${getAssetUrl(ic)}" class="app-def-img" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'app-def-glyph',textContent:'${glyph}'}))">`;
+        const ic=appIconUrl(cur&&cur.id,cur&&cur.icon);
+        if(ic){
+            return `<img src="${ic}" class="app-def-img" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'app-def-glyph',textContent:'${glyph}'}))">`;
         }
         return `<div class="app-def-glyph">${glyph}</div>`;
     };
@@ -3977,8 +4015,9 @@ export async function renderAplicaciones(c){
         }
         const list=apps.map(a=>{
             const active=a.id===curId;
-            const icon=a.icon&&a.icon.startsWith('/')
-                ? `<img src="${getAssetUrl(a.icon)}" class="app-pick-img" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'app-pick-glyph',textContent:'${m.glyph}'}))">`
+            const _ic=appIconUrl(a.id,a.icon);
+            const icon=_ic
+                ? `<img src="${_ic}" class="app-pick-img" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'app-pick-glyph',textContent:'${m.glyph}'}))">`
                 : `<div class="app-pick-glyph">${m.glyph}</div>`;
             return `<button class="app-pick-row${active?' active':''}" data-id="${esc(a.id)}">
                 ${icon}
@@ -5532,8 +5571,75 @@ export async function renderDispositivos(c){
 }
 
 // ── Opciones avanzadas de energía ──────────────────────────────────────
+// Antes esto devolvía desktop.lockscreen(c): «Opciones avanzadas» de Batería
+// abría la pantalla de bloqueo. La tapa la gestiona logind y la batería
+// crítica UPower; el compositor no toca ninguna de las dos.
 export async function renderEnergyAdvanced(c){
-return desktop.lockscreen(c);
+    c.innerHTML=renderHeader('Opciones avanzadas de energía')+renderSkeleton(3);
+    let acc,cfg=null,fw=[];
+    try{
+        [acc,cfg,fw]=await Promise.all([
+            tauriInvoke('get_power_actions').then(JSON.parse),
+            tauriInvoke('bookos_get_config').then(JSON.parse).catch(()=>null),
+            tauriInvoke('get_firmware_power_controls').then(JSON.parse).catch(()=>[]),
+        ]);
+    }catch(e){c.innerHTML=renderHeader('Opciones avanzadas de energía')+renderServiceError(e,'energía');return;}
+    // Solo acciones de logind que tienen sentido en un portátil.
+    const TAPA=[['suspend','Suspender'],['hibernate','Hibernar'],['lock','Bloquear la pantalla'],['poweroff','Apagar'],['ignore','No hacer nada']];
+    // Suspend/Ignore exigen AllowRiskyCriticalPowerAction en UPower: con la
+    // batería a cero, suspender puede perder lo que hay en memoria.
+    const CRITICA=[['Auto','Automático'],['HybridSleep','Suspensión híbrida'],['Hibernate','Hibernar'],['PowerOff','Apagar']];
+    const nombre=(list,v)=>(list.find(([k])=>k===v)||[v,v])[1];
+    const SUSP=[0,60,300,600,1800,3600];
+    const tiempo=v=>v===0?'Nunca':v<60?`${v} s`:v%3600===0?`${v/3600} h`:`${Math.round(v/60)} min`;
+    const pick=(id,label)=>`<button type="button" class="bk-select" id="${id}" aria-haspopup="listbox"><span>${esc(_tr(label))}</span></button>`;
+    let h=renderHeader('Opciones avanzadas de energía')
+        +renderSection('Tapa')+renderCard([
+            renderRowItem('Al cerrar la tapa con batería','',pick('pa-tapa',nombre(TAPA,acc.tapa))),
+            renderRowItem('Al cerrar la tapa conectado','',pick('pa-tapa-ac',nombre(TAPA,acc.tapa_ac))),
+            ...fw.filter(x=>x.id==='power_on_lid_open').map(x=>renderRowItem(x.label,'Firmware',renderToggle('fw-'+x.id,x.value))),
+        ]);
+    if(cfg)h+=renderSection('Inactividad')+renderCard([
+        renderRowItem('Suspender tras el bloqueo','Cuenta desde que se bloquea la pantalla',pick('pa-susp',tiempo(cfg.suspension_inactividad??0))),
+    ]);
+    h+=renderSection('Batería')+renderCard([
+        renderRowItem('Con la batería crítica','Lo decide UPower al llegar al nivel crítico',pick('pa-critica',nombre(CRITICA,acc.critica))),
+    ]);
+    const resto=fw.filter(x=>x.id!=='power_on_lid_open');
+    if(resto.length)h+=renderSection('Firmware')+renderCard(resto.map(x=>renderRowItem(x.label,'',renderToggle('fw-'+x.id,x.value))));
+    c.innerHTML=h;
+
+    const menu=(id,title,list,current,apply)=>{
+        const btn=document.getElementById(id);if(!btn)return;
+        let actual=current;
+        btn.addEventListener('click',()=>popoverSelect(btn.closest('.detail-item'),{title:_tr(title),current:actual,
+            options:list.map(([val,label])=>({val:String(val),label:esc(_tr(label))})),
+            onSelect:async v=>{
+                const par=list.find(([k])=>String(k)===v);
+                if(!par||String(actual)===v)return;
+                btn.disabled=true;
+                try{if(await apply(par[0])){actual=par[0];btn.querySelector('span').textContent=_tr(par[1]);toast(_tr('Guardado'));}}
+                catch(e){toast(String(e),'❌');}
+                finally{btn.disabled=false;}
+            }}));
+    };
+    // Los valores salen de las listas de arriba, nunca del usuario: el guion
+    // de shell no lleva nada que haya que escapar.
+    const escribirTapa=(bat,ac)=>promptSudo('cambiar qué hace la tapa','sh',['-c',
+        `mkdir -p /etc/systemd/logind.conf.d && printf '[Login]\\nHandleLidSwitch=${bat}\\nHandleLidSwitchExternalPower=${ac}\\n' > /etc/systemd/logind.conf.d/50-bookos.conf && systemctl kill -s HUP systemd-logind`]);
+    menu('pa-tapa','Al cerrar la tapa con batería',TAPA,acc.tapa,async v=>{if(!await escribirTapa(v,acc.tapa_ac))return false;acc.tapa=v;return true;});
+    menu('pa-tapa-ac','Al cerrar la tapa conectado',TAPA,acc.tapa_ac,async v=>{if(!await escribirTapa(acc.tapa,v))return false;acc.tapa_ac=v;return true;});
+    menu('pa-critica','Con la batería crítica',CRITICA,acc.critica,v=>promptSudo('cambiar la acción con batería crítica','sh',['-c',
+        `sed -i 's/^#\\?CriticalPowerAction=.*/CriticalPowerAction=${v}/' /etc/UPower/UPower.conf && systemctl restart upower`]));
+    if(cfg){
+        const v0=cfg.suspension_inactividad??0;
+        const lista=(SUSP.includes(v0)?SUSP:[...SUSP,v0].sort((a,b)=>a-b)).map(v=>[v,tiempo(v)]);
+        menu('pa-susp','Suspender tras el bloqueo',lista,v0,async v=>{await tauriInvoke('bookos_apply_config',{config:{suspension_inactividad:v}});return true;});
+    }
+    fw.forEach(x=>setupToggle('fw-'+x.id,async active=>{
+        const r=await invokeWithAuth('set_firmware_power_control',{id:x.id,enabled:active},{description:'Este ajuste modifica el firmware y requiere permisos de administrador.'});
+        if(!r?.ok)throw new Error(r?.error||'No se pudo aplicar el ajuste');
+    }));
 }
 
 // ── Pantallas externas ─────────────────────────────────────────────────

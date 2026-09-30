@@ -24,11 +24,9 @@ const _IC_TTL={
     check_hw_features:30000,   // powerprofilesctl, sysfs reads
     get_system_info:120000,    // uname, lscpu — never changes
     get_available_themes:120000,
-    get_style_themes:30000,
     get_battery_history:20000, // upower history
     get_battery_sysfs:3000,    // fast, but no need to re-read more than 3s
     get_current_theme:5000,    // color scheme — changes only on user action
-    get_style_themes:30000,    // kvantum theme list
     get_app_power_usage:15000, // ps aux
 };
 async function ci(cmd,args){
@@ -648,6 +646,7 @@ const _UI_TR_EN = {
     'Nunca':'Never',
     'No crear capturas automáticamente':'Never create snapshots automatically',
     'Las instantáneas requieren un sistema de archivos Btrfs.':'Snapshots require a Btrfs filesystem.',
+    'Snapper no está instalado. Instálalo y crea la configuración «root» para usar las capturas.':'Snapper is not installed. Install it and create the «root» config to use snapshots.',
     'Puntos de restauración':'Restore points',
     'No hay capturas todavía.':'No snapshots yet.',
     'Captura':'Snapshot',
@@ -930,6 +929,7 @@ const _UI_TR_EN = {
     'Energía · Carga':'Power · Charging',
     'Bloqueo · Biometría · AOD':'Lock · Biometrics · AOD',
     'Diseño · Apps':'Layout · Apps',
+    'Dock · Escritorios virtuales':'Dock · Virtual desktops',
     'Fondos · Paleta':'Wallpapers · Palette',
     'Temas · Modo oscuro':'Themes · Dark mode',
     'Asistente de escritura · notas':'Writing assistant · notes',
@@ -1889,6 +1889,15 @@ const _UI_TR_EN = {
     'Fuerte':'Strong',
     'Paleta dinámica de BookOS':'BookOS dynamic palette',
     'Acento automático de BookOS':'Automatic BookOS accent',
+    'Altavoces del portátil':'Laptop speakers',
+    'Auriculares':'Headphones',
+    'Micrófono estéreo':'Stereo microphone',
+    'Micrófono del portátil':'Laptop microphone',
+    'Micrófono de los auriculares':'Headset microphone',
+    'Audio del portátil':'Laptop audio',
+    'El acento sigue al fondo de pantalla':'The accent follows the wallpaper',
+    'Acento automático desactivado':'Automatic accent off',
+    'No se pudo cambiar el acento del escritorio':'Could not change the desktop accent',
     'Color de acento del escritorio según el fondo':'Desktop accent color based on wallpaper',
 };
 
@@ -1963,7 +1972,7 @@ function renderSlider(id, value=50, min=0, max=100){
     return `<div class="slider-container"><input type="range" class="filled" id="${id}" min="${min}" max="${max}" value="${value}" style="--fill:${fill}%"><span class="slider-label" id="${id}-l">${value}%</span></div>`;
 }
 function renderHeader(title, rightActions=''){
-    return `<div class="detail-header"><button class="back-btn" onclick="window.goBack()">←</button><h2 class="detail-title">${_tr(title)}</h2>${rightActions?`<div class="detail-header-actions">${rightActions}</div>`:''}</div>`;
+    return `<div class="detail-header"><button type="button" class="back-btn" aria-label="Volver" title="Volver">←</button><h2 class="detail-title">${_tr(title)}</h2>${rightActions?`<div class="detail-header-actions">${rightActions}</div>`:''}</div>`;
 }
 function renderSection(title){
     return `<p class="section-header">${_tr(title)}</p>`;
@@ -2037,7 +2046,7 @@ function popoverSelect(anchor,{options,current,onSelect,footer=null,title=''}){
     pop.id='bk-popover';
     pop.className='bk-popover';
     pop._anchor=anchor;
-    const radio=on=>`<span class="bk-pop-radio${on?' on':''}"></span>`;
+    const radio=on=>`<span class="bk-pop-check">${on?'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>':''}</span>`;
     pop.innerHTML=(title?`<div class="bk-pop-title">${title}</div>`:'')
         +`<div class="bk-pop-list">`+options.map(o=>{
         const on=String(o.val)===String(current);
@@ -2051,10 +2060,22 @@ function popoverSelect(anchor,{options,current,onSelect,footer=null,title=''}){
             ${o.right?`<span class="bk-pop-right">${o.right}</span>`:''}
         </div>`;}).join('')+`</div>`
         +(footer?`<div class="bk-pop-footer" id="bk-pop-footer"><span>${footer.label}</span><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></div>`:'');
-    // Inline expansion: inserted right after the anchor row so it occupies
-    // space (pushes content down) and scrolls with the page instead of floating.
-    anchor.insertAdjacentElement('afterend',pop);
-    const close=()=>{pop.remove();document.removeEventListener('mousedown',out,true);document.removeEventListener('keydown',key,true);};
+    // Menú flotante pegado al botón, como un menú emergente de macOS. Antes se
+    // insertaba en la página y empujaba el resto hacia abajo: una lista de ocho
+    // tiempos ocupaba media pantalla para elegir uno.
+    document.body.appendChild(pop);
+    const btn=anchor.querySelector('.bk-select')||anchor;
+    const r=btn.getBoundingClientRect(),vh=window.innerHeight,vw=window.innerWidth;
+    pop.style.minWidth=`${Math.max(r.width,160)}px`;
+    const h=pop.offsetHeight,w=pop.offsetWidth;
+    const top=r.bottom+6+h<=vh-8?r.bottom+6:Math.max(8,r.top-6-h);
+    pop.style.top=`${top}px`;
+    pop.style.left=`${Math.min(Math.max(8,r.right-w),vw-w-8)}px`;
+    pop.style.transformOrigin=top<r.top?'bottom right':'top right';
+    const scroller=anchor.closest('.detail-view');
+    const close=()=>{pop.remove();document.removeEventListener('mousedown',out,true);document.removeEventListener('keydown',key,true);scroller?.removeEventListener('scroll',close);};
+    // Fijo en pantalla: si la página se mueve, el menú quedaría flotando suelto.
+    scroller?.addEventListener('scroll',close,{passive:true});
     const out=e=>{if(!pop.contains(e.target)&&!anchor.contains(e.target))close();};
     const key=e=>{if(e.key==='Escape'){e.stopPropagation();close();}};
     setTimeout(()=>{document.addEventListener('mousedown',out,true);document.addEventListener('keydown',key,true);},0);
@@ -2153,8 +2174,27 @@ function lockIcon(){return`<svg viewBox="0 0 24 24" width="14" height="14" fill=
 
 
 // ── Shared exports (consumed by pages.js barrel + per-section modules) ──
+// Iconos propios de las apps BookOS, por id (.desktop sin extensión = binario).
+// Los instalados viven en hicolor/512x512, que los buscadores de iconos del
+// backend no miran, y además estos son los diseños vigentes.
+const BOOKOS_APP_ICONS=new Set(['bookos-explorer','bookos-notepad','bookos-player','bookos-viewer',
+    'bookos-voicerecorder','bookos-settings','bookos-system-monitor','bookos-clock','bookos-calendar',
+    'bookos-calc','bookos-store','bookos-shell','bookos-teclas','bookos-connect','bookos-new']);
+// Tauri nombra el .desktop con el productName, no con el binario.
+const BOOKOS_DESKTOP_ALIAS={'Bookos Shell':'bookos-shell','Book Connect':'bookos-connect'};
+/** URL del icono de una app: el propio de BookOS si lo hay, si no el del sistema. */
+function appIconUrl(id,iconPath){
+    const raw=String(id||'').replace(/\.desktop$/,'');
+    const key=BOOKOS_DESKTOP_ALIAS[raw]||raw;
+    // En la lista de batería el id es el nombre del proceso, que el kernel
+    // corta a 15 caracteres («bookos-voicerec»).
+    const hit=BOOKOS_APP_ICONS.has(key)?key
+        :key.length===15?[...BOOKOS_APP_ICONS].find(k=>k.startsWith(key)):'';
+    if(hit)return `./assets/apps/${hit}.svg`;
+    return iconPath&&iconPath.startsWith('/')?getAssetUrl(iconPath):'';
+}
 export{
-    tauriInvoke,getAssetUrl,t,
+    tauriInvoke,getAssetUrl,appIconUrl,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,
     esc,addInterval,addSystemListener,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
     renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,

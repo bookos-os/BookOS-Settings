@@ -106,8 +106,8 @@ export function paletteToCss(p){
 // 3) SDDM (ya recibe `bookos-reapply-theme.sh`):
 //    El hook `bookos-theme-reapply.hook` podría, al detectar un cambio en
 //    palette.css, regenerar también el `theme.conf` del greeter con los
-//    mismos tonos — hoy ese hook solo reacciona a temas Kvantum, no
-//    a la paleta dinámica.
+//    mismos tonos — hoy ese hook solo corre al instalar o actualizar el
+//    paquete, no al cambiar la paleta dinámica.
 //
 // Nada de esto se activa aquí: es la lista de qué tocaría para que "tintar
 // otras apps de BookOS e incluso widgets" (pedido del usuario) deje de ser

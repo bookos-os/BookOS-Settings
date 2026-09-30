@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(xxd)",
-      "Bash(convert --version)"
+      "Bash(convert --version)",
+      "Read(//usr/bin/**)",
+      "Read(//home/eve/Descargas/BookOS/BookOS-Wallpapers/Wallpapers-0.6/Light/**)",
+      "Bash(python3 ev.py \"location.href+' | '+document.body.innerHTML.length+' | '+Object.keys\\(window\\).filter\\(k=>/nav|open|page/i.test\\(k\\)\\).join\\(','\\)\")",
+      "Bash(cd *)"
     ]
   }
 }

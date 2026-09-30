@@ -10,6 +10,41 @@ const _loadPages=()=>(_pagesPromise||(_pagesPromise=import('./modules/pages.js')
 import{tauriInvoke,isTauri}from'./tauri-api.js';
 import{applyCachedPalette,syncPalette}from'./modules/dynamic-color.js';
 
+const _esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let equipo={};
+try{equipo=JSON.parse(localStorage.getItem('__equipo__')||'{}');}catch{}
+
+/// Rellena el inicio con lo que pasa ahora: qué equipo es, a qué red está
+/// conectado, cuánta batería queda, por dónde suena y a qué brillo. Antes el
+/// inicio era un cartel de bienvenida y cuatro atajos con subtítulos fijos
+/// («WiFi · Bluetooth · Modo Avión») que repetían la barra lateral.
+async function rellenarInicio(app){
+    const poner=(sel,texto)=>{const el=app.querySelector(sel);if(el&&texto)el.textContent=texto;};
+    const json=async(cmd)=>{try{const v=JSON.parse(await tauriInvoke(cmd));return v?.ok===false?null:v;}catch{return null;}};
+    const [info,wifi,bat,audio,brillo]=await Promise.all([
+        json('get_system_info'),json('get_wifi_status'),json('get_battery_status'),json('get_audio_devices'),json('get_brightness'),
+    ]);
+    if(info){
+        // Sin la edición entre paréntesis: «Fedora Linux 44 (KDE Plasma
+        // Desktop Edition)» dice que el escritorio es Plasma, y no lo es.
+        equipo={model:info.model!=='—'?info.model:'',distro:String(info.distro||'').replace(/\s*\([^)]*\)\s*$/,'')};
+        try{localStorage.setItem('__equipo__',JSON.stringify(equipo));}catch{}
+        poner('[data-equipo="modelo"]',equipo.model);
+        poner('[data-equipo="sistema"]',equipo.distro);
+    }
+    if(wifi)poner('[data-estado="conexiones"]',!wifi.enabled?t('home_wifi_off'):wifi.ssid||t('home_wifi_none'));
+    if(bat){
+        const estado={charging:t('home_bat_charging'),'fully-charged':t('home_bat_full')}[bat.state];
+        poner('[data-estado="bateria"]',`${parseInt(bat.percentage)||0} %${estado?' · '+estado:''}`);
+    }
+    if(audio?.output){
+        const salida=(audio.sinks||[]).find(x=>x.name===audio.defaultSink);
+        const nombre=salida?.description?.match(/Speaker$/)?t('home_speakers'):(salida?.description||'');
+        poner('[data-estado="sonido"]',`${nombre?nombre+' · ':''}${audio.output.muted?t('home_muted'):audio.output.volume+' %'}`);
+    }
+    if(brillo&&brillo.brightness!=null)poner('[data-estado="pantalla"]',`${t('home_brightness')} ${brillo.brightness} %`);
+}
+
 function renderHomeLanding(){
     const quick=[
         ['conexiones','wifi.svg','connections','connections_sub'],
@@ -22,8 +57,8 @@ function renderHomeLanding(){
             <span class="home-landing-accent" aria-hidden="true"></span>
             <div class="home-landing-copy">
                 <div class="home-landing-eyebrow">${t('settings')} · BOOKOS</div>
-                <h2>${t('home_welcome_title')}</h2>
-                <p>${t('home_welcome_sub')}</p>
+                <h2 data-equipo="modelo">${_esc(equipo.model||t('home_welcome_title'))}</h2>
+                <p data-equipo="sistema">${_esc(equipo.distro||t('home_welcome_sub'))}</p>
             </div>
         </div>
         <div class="home-landing-section">
@@ -34,7 +69,7 @@ function renderHomeLanding(){
             <div class="home-quick-grid">
                 ${quick.map(([page,icon,title,sub])=>`<button class="home-quick-card" type="button" data-page="${page}">
                     <img src="assets/${icon}" alt="" class="home-quick-icon">
-                    <span class="home-quick-copy"><strong>${t(title)}</strong><small>${t(sub)}</small></span>
+                    <span class="home-quick-copy"><strong>${t(title)}</strong><small data-estado="${page}">${t(sub)}</small></span>
                     <span class="home-quick-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>
                 </button>`).join('')}
             </div>
@@ -68,10 +103,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
     let userInfo=null;
     try{userInfo=JSON.parse(localStorage.getItem('__user_info__')||'null');}catch{}
     if(sb)sb.innerHTML=renderHome(userInfo);
-    if(app)app.innerHTML=renderHomeLanding();
+    // Todo "volver al inicio" pasa por aquí: vaciar #app dejaba el panel en blanco.
+    const pintarInicio=()=>{app.innerHTML=renderHomeLanding();rellenarInicio(app);};
+    if(app)pintarInicio();
 
     // ── Backend corrections (non-blocking) ──
-    tauriInvoke('get_current_theme').then(j=>{try{const th=JSON.parse(j);_applyTheme(!!th.is_dark);localStorage.setItem('__theme_dark__',th.is_dark?'1':'0');}catch(e){}}).catch(()=>{});
+    tauriInvoke('get_current_theme').then(j=>{try{const th=JSON.parse(j);if(typeof th.is_dark!=='boolean')return;_applyTheme(th.is_dark);localStorage.setItem('__theme_dark__',th.is_dark?'1':'0');}catch(e){}}).catch(()=>{});
     tauriInvoke('get_user_info').then(j=>{try{const ui=JSON.parse(j);if(JSON.stringify(ui)!==JSON.stringify(userInfo)){userInfo=ui;if(sb)sb.innerHTML=renderHome(ui);window.updateHomeBudsRow?.();}localStorage.setItem('__user_info__',j);}catch(e){}}).catch(()=>{});
     // Re-apply hardware settings saved from previous session (battery limit, perf mode)
     tauriInvoke('restore_startup_settings').catch(()=>{});
@@ -137,16 +174,30 @@ document.addEventListener('DOMContentLoaded',async()=>{
         // El botón vive en body, fuera de #app: limpiar la página no lo quita.
         // También se ejecuta al reabrir la ventana mediante resetToHome().
         document.getElementById('wp-add-fab')?.remove();
+        document.getElementById('bk-popover')?.remove();   // el menú emergente también vive en body
         (window._pageCleanups||[]).splice(0).forEach(fn=>fn());
         if(window._pageIntervals){window._pageIntervals.forEach(clearInterval);window._pageIntervals=[];}
     }
     // Wrap the page container so async renders can't overwrite a newer page.
     // Each render gets a container bound to the nav epoch at call time; once the
     // user navigates (epoch bumps), writes from the stale render are ignored.
+    // Al ir atrás o adelante se repone al instante la foto HTML de la página y
+    // el render real llega encima. Mientras tanto se descarta su esqueleto:
+    // pintarlo sobre la foto era el «cargando» de cada vuelta.
+    let _desdeFoto=false;
+    function mostrarFoto(html,scroll){
+        if(!html)return;
+        app.innerHTML=html;_desdeFoto=true;
+        if(detailView)detailView.scrollTop=scroll||0;
+    }
     function guardedContainer(epoch){
         return new Proxy(app,{
             set(target,prop,value){
                 if(prop==='innerHTML' && (window._navEpoch||0)!==epoch) return true; // stale: drop write
+                if(prop==='innerHTML'){
+                    if(_desdeFoto&&String(value).includes('class="skeleton'))return true;
+                    _desdeFoto=false;
+                }
                 target[prop]=value; return true;
             },
             get(target,prop){
@@ -177,16 +228,19 @@ document.addEventListener('DOMContentLoaded',async()=>{
         })();
     }
     function _playTransition(back){
-        app.classList.remove('page-enter','page-enter-back');
+        app.classList.remove('page-enter','page-enter-back','no-anim');
         void app.offsetWidth;
         app.classList.add(back?'page-enter-back':'page-enter');
     }
+    const _PADRES={wifi:'conexiones',bluetooth:'conexiones',sddmeditor:'bloqueo'};
     function openPage(id){
         if(!app)return;
+        _navegando=true;
         // Bump the navigation token so any in-flight async render from the
         // previous page knows it's stale and must not overwrite the new page.
         const epoch=(window._navEpoch=(window._navEpoch||0)+1);
         clearPageIntervals();
+        _desdeFoto=false;   // un salto nuevo sí enseña su esqueleto
         const curId=sb.querySelector('.item.active-item')?.dataset?.page;
         _rememberScroll(curId);
         // Skip push if navigating to same page; cap depth at 15
@@ -194,8 +248,19 @@ document.addEventListener('DOMContentLoaded',async()=>{
             _navHistory.push(curId||null);
             if(_navHistory.length>15)_navHistory.shift();
         }
+        // Subpáginas con id propio (las abre el widget del panel, o una fila de
+        // otra página): sin esto no tenían miga ni volvían a su sección.
+        const padre=_PADRES[id];
+        if(padre){
+            const titulo=(window._tr||(x=>x))(searchIndex.find(x=>x.id===padre)?.title||'');
+            _navHistory.push({_subNav:true,title:titulo,snapshot:'',scroll:0,fn:()=>{
+                window._navEpoch=(window._navEpoch||0)+1;
+                sb.querySelector(`[data-page="${padre}"]`)?.classList.add('active-item');
+                renderPage(padre,guardedContainer(window._navEpoch));
+            }});
+        }
         sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));
-        sb.querySelector(`[data-page="${id}"]`)?.classList.add('active-item');
+        sb.querySelector(`[data-page="${padre||id}"]`)?.classList.add('active-item');
         _fwdHistory.length=0;   // a fresh jump invalidates the forward stack
         _playTransition(false);
         if(detailView)detailView.scrollTop=0;
@@ -204,6 +269,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // Forward navigation (only reachable after going back)
     function goForward(){
         if(!_fwdHistory.length)return;
+        _navegando=true;
         const epoch=(window._navEpoch=(window._navEpoch||0)+1);
         clearPageIntervals();
         const next=_fwdHistory.pop();
@@ -214,38 +280,45 @@ document.addEventListener('DOMContentLoaded',async()=>{
         sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));
         sb.querySelector(`[data-page="${next}"]`)?.classList.add('active-item');
         _playTransition(false);
+        mostrarFoto(_pageSnaps[next],_scrollMem[next]);
         renderPage(next,guardedContainer(epoch));
         _restoreScroll(next);
     }
     function goBack(){
         const epoch=(window._navEpoch=(window._navEpoch||0)+1);
         clearPageIntervals();
-        if(!_navHistory.length){app.innerHTML='';sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));return;}
+        if(!_navHistory.length){pintarInicio();sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));return;}
         const prev=_navHistory.pop();
         sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));
         if(prev){
             sb.querySelector(`[data-page="${prev}"]`)?.classList.add('active-item');
             renderPage(prev,guardedContainer(epoch));
         } else {
-            app.innerHTML='';
+            pintarInicio();
         }
     }
     // Push a callback-based back entry (for sub-pages that render into app directly)
+    // Cabecera que se espera tras una navegación explícita. Si aparece otra
+    // cabecera sin que nadie haya navegado, la página abrió una subpágina por
+    // su cuenta, sin pushSubNav (ver el observador de migas).
+    let _navegando=true;
     function pushSubNav(fn){
-        _navHistory.push({_subNav:true,fn});
+        _navegando=true;
+        _navHistory.push({_subNav:true,fn,title:app?.querySelector('.detail-title')?.textContent||'',snapshot:app?.innerHTML||'',scroll:detailView?.scrollTop||0});
         if(_navHistory.length>15)_navHistory.shift();
     }
     // Extends goBack: handles callback-based sub-page entries pushed via pushSubNav
     function goBackExt(){
+        _navegando=true;
         clearPageIntervals();
-        if(!_navHistory.length){app.innerHTML='';sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));return;}
+        if(!_navHistory.length){pintarInicio();sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));return;}
         const prev=_navHistory.pop();
         // Sub-page pop: do NOT bump the epoch here — the callback re-renders the
         // parent through the guarded container it closed over, which was created
         // with the epoch still current. Bumping first made that container stale,
         // so the parent render was silently dropped and the next back-press
         // jumped to the wrong page.
-        if(prev&&typeof prev==='object'&&prev._subNav){_playTransition(true);prev.fn();return;}
+        if(prev&&typeof prev==='object'&&prev._subNav){_playTransition(true);mostrarFoto(prev.snapshot,prev.scroll);prev.fn();return;}
         const epoch=(window._navEpoch=(window._navEpoch||0)+1);
         const curId=sb.querySelector('.item.active-item')?.dataset?.page;
         if(curId){_rememberScroll(curId);_fwdHistory.push(curId);if(_fwdHistory.length>15)_fwdHistory.shift();}
@@ -253,10 +326,11 @@ document.addEventListener('DOMContentLoaded',async()=>{
         if(prev){
             sb.querySelector(`[data-page="${prev}"]`)?.classList.add('active-item');
             _playTransition(true);
+            mostrarFoto(_pageSnaps[prev],_scrollMem[prev]);
             renderPage(prev,guardedContainer(epoch));
             _restoreScroll(prev);
         } else {
-            app.innerHTML='';
+            pintarInicio();
         }
     }
     // Vuelve al estado limpio: sin sección abierta, como recién arrancada.
@@ -264,11 +338,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // ventana y estaba oculta — cerrar con la X no mata el proceso, así que sin
     // esto la app reaparecía en la misma página que se dejó abierta.
     async function resetToHome(){
+        _navegando=true;
         window._navEpoch=(window._navEpoch||0)+1;   // invalida renders en vuelo
         clearPageIntervals();
         _navHistory.length=0;
         _fwdHistory.length=0;
-        app.innerHTML='';
+        pintarInicio();
         sb.querySelectorAll('.item').forEach(i=>i.classList.remove('active-item'));
         if(sb)sb.scrollTop=0;
         // Deja el buscador vacío: reabrir con una búsqueda a medias del rato
@@ -290,7 +365,51 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // Alias: el editor de inicio de sesión lo llama por su nombre interno.
     window.goBackExt=goBackExt;
     window.goForward=goForward;
-    document.addEventListener('click',e=>{if(e.target.closest('.back-btn'))window.goBack?.();});
+    document.addEventListener('click',e=>{
+        if(e.target.closest('.back-btn'))window.goBack?.();
+        // Saltar varias migas de golpe: se descartan las entradas intermedias
+        // sin renderizarlas. Llamar a goBack n veces lanzaba n renders
+        // asíncronos que podían terminar desordenados.
+        const crumb=e.target.closest('.crumb');
+        if(crumb){_navHistory.splice(_navHistory.length-Number(crumb.dataset.up)+1);goBackExt();}
+    });
+    // Migas de pan como en Windows para cualquier subpágina, sin que cada una
+    // tenga que saber quién es su padre: salen de las entradas de pushSubNav
+    // que haya al final del historial.
+    // Muchas páginas abren sus subpáginas pintando otra cabecera en el mismo
+    // contenedor sin pasar por pushSubNav: sin migas y con «atrás» saltando a
+    // la página anterior del sidebar. Aquí se detecta ese cambio de título y se
+    // apunta la entrada que falta; volver repinta la página del sidebar.
+    let _tituloActual='';
+    const tituloDe=h=>h?.querySelector('.detail-title')?.textContent||'';
+    new MutationObserver(()=>{
+        const header=app.querySelector('.detail-header');
+        const titulo=tituloDe(header);
+        if(!header){if(!app.childElementCount)_tituloActual='';return;}
+        if(_navegando)_navegando=false;
+        else if(_tituloActual&&titulo&&titulo!==_tituloActual&&!header.querySelector('.crumb')){
+            const id=sb.querySelector('.item.active-item')?.dataset?.page;
+            if(id){
+                _navHistory.push({_subNav:true,title:_tituloActual,snapshot:'',scroll:0,fn:()=>renderPage(id,guardedContainer(window._navEpoch||0))});
+                if(_navHistory.length>15)_navHistory.shift();
+            }
+        }
+        _tituloActual=titulo;
+        if(header.querySelector('.crumb'))return;
+        const trail=[];
+        for(let i=_navHistory.length-1;i>=0;i--){
+            const h=_navHistory[i];
+            if(!h||typeof h!=='object'||!h._subNav)break;
+            if(h.title)trail.unshift({title:h.title,up:_navHistory.length-i});
+        }
+        if(!trail.length)return;
+        const title=header.querySelector('.detail-title');if(!title)return;
+        for(const c of trail){
+            const b=document.createElement('button');b.type='button';b.className='crumb';b.dataset.up=c.up;b.textContent=c.title;
+            const sep=document.createElement('span');sep.className='crumb-sep';sep.ariaHidden='true';sep.textContent='›';
+            title.before(b,sep);
+        }
+    }).observe(app,{childList:true});
     window.pushSubNav=pushSubNav;
     window.clearPageIntervals=clearPageIntervals;
     window._navHistory=_navHistory;
@@ -301,17 +420,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // Navigate to --page startup arg if provided (e.g. launched from battery applet)
     try{const sp=await tauriInvoke('get_startup_page');if(sp&&pages[sp])openPage(sp);}catch(e){}
 
-    // Single-instance: poll for navigation requests from other instances.
-    // Every 2s while focused, 5s when minimized/blurred (saves CPU when idle).
-    {
-        let nextDelay=2000;
-        const tick=async()=>{
-            try{const p=await tauriInvoke('check_navigation_request');if(p&&pages[p])openPage(p);}catch(e){}
-            nextDelay=document.hidden?5000:2000;
-            setTimeout(tick,nextDelay);
-        };
-        setTimeout(tick,nextDelay);
-    }
 
     // Open the Buds page from the Home shortcut; ensure pages.js (which owns
     // openConnectedBuds) is loaded first.
@@ -380,7 +488,18 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // auriculares y rutinas de más abajo, que sí deben seguir con la app en la
     // bandeja. Se refresca además al volver a la ventana, para que la fila esté
     // al día en cuanto se mira.
-    setInterval(()=>{ if(!document.hidden) updateHomeBudsRow(); },5000);
+    // Por aviso del servicio del sistema (BlueZ cambia → `bookos-system-changed`)
+    // y no cada 5 s: eran 24 llamadas por minuto con la ventana quieta —medido—
+    // para una fila que cambia al conectar o desconectar unos auriculares.
+    // El aviso trae el estado entero —red, Bluetooth y audio—: solo cuenta si
+    // cambió la parte de Bluetooth, o la señal del Wi-Fi también la repintaba.
+    let _btAnterior='';
+    window.addEventListener('bookos-system-changed',e=>{
+        const bt=JSON.stringify(e.detail?.bluetooth??null);
+        if(bt===_btAnterior)return;
+        _btAnterior=bt;
+        if(!document.hidden)updateHomeBudsRow();
+    });
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden) updateHomeBudsRow(); });
 
     // ── Search ──
@@ -469,6 +588,10 @@ document.addEventListener('DOMContentLoaded',async()=>{
         });
     }
 
+    // Sin manejador de `wheel` propio: uno no pasivo que hacía preventDefault y
+    // movía scrollTop por rAF (con getComputedStyle por evento) sacaba el scroll
+    // del compositor y lo pasaba al hilo principal; a escala 2× iba a saltos.
+
     // ── Window controls ──
     if(isTauri()){
         let w=window.__TAURI__?.window?.getCurrentWindow?.()||window.__TAURI__?.window?.appWindow;
@@ -476,9 +599,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
             document.getElementById('minimize')?.addEventListener('click',()=>w.minimize());
             document.getElementById('close')?.addEventListener('click',()=>w.close());
             const mx=document.getElementById('maximize');
+            // Iconos y no caracteres: ☐ y ❐ salían distintos con cada fuente.
+            const ICONO_MAX='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2.5"/></svg>';
+            const ICONO_RESTAURAR='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="12" height="12" rx="2.5"/><path d="M8 8V6.5A2.5 2.5 0 0 1 10.5 4h7A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H16"/></svg>';
             const toggleMax=async()=>{
-                if(await w.isMaximized()){await w.unmaximize();mx.textContent='☐';mc?.classList.add('windowed');}
-                else{await w.maximize();mx.textContent='❐';mc?.classList.remove('windowed');}
+                if(await w.isMaximized()){await w.unmaximize();mx.innerHTML=ICONO_MAX;mc?.classList.add('windowed');}
+                else{await w.maximize();mx.innerHTML=ICONO_RESTAURAR;mc?.classList.remove('windowed');}
             };
             mx?.addEventListener('click',toggleMax);
             // NOTE: double-clicking a data-tauri-drag-region already toggles
@@ -487,7 +613,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
             // Instead we just keep the button icon / windowed class in sync.
             const syncMaxState=async()=>{
                 const m=await w.isMaximized().catch(()=>false);
-                if(mx)mx.textContent=m?'❐':'☐';
+                if(mx)mx.innerHTML=m?ICONO_RESTAURAR:ICONO_MAX;
                 mc?.classList.toggle('windowed',!m);
             };
             w.onResized?.(syncMaxState);
@@ -535,20 +661,23 @@ document.addEventListener('DOMContentLoaded',async()=>{
         clip.appendChild(card);
         document.body.appendChild(clip);
         function targetPage(){
-            if(dir<0){const t=_navHistory[_navHistory.length-1];return (typeof t==='string')?t:null;}
-            return _fwdHistory[_fwdHistory.length-1]||null;
+            if(dir<0){
+                const prev=_navHistory[_navHistory.length-1];
+                return typeof prev==='string'?{snapshot:_pageSnaps[prev],scroll:_scrollMem[prev]||0}:prev?{snapshot:prev.snapshot,scroll:prev.scroll}:null;
+            }
+            const next=_fwdHistory[_fwdHistory.length-1];
+            return next?{snapshot:_pageSnaps[next],scroll:_scrollMem[next]||0}:null;
         }
         let areaRect=null;   // detail-view rect captured at gesture start (sidebar-aware)
         function beginPreview(){
             areaRect=detailView?detailView.getBoundingClientRect():null;
-            const tp=targetPage();
-            const snap=tp&&_pageSnaps[tp];
-            if(!snap||!areaRect){clip.style.display='none';return;}
+            const target=targetPage();
+            if(!target?.snapshot||!areaRect){clip.style.display='none';return;}
             const r=areaRect;
             clip.style.cssText=`display:block;top:${r.top}px;left:${r.left}px;width:${r.width}px;height:${r.height}px`;
             card.style.transform=`translateX(${dir<0?-104:104}%)`;
-            card.innerHTML=`<div>${snap}</div>`;
-            card.scrollTop=_scrollMem[tp]||0;
+            card.innerHTML=`<div>${target.snapshot}</div>`;
+            card.scrollTop=target.scroll;
         }
         function paint(p){
             const side=dir<0?1:-1;   // back: things come from the left
@@ -579,7 +708,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
                 // render happens underneath it before it fades away.
                 card.style.transform='translateX(0)';
                 bub.style.opacity='0';
-                if(dir<0)window.goBack?.();else window.goForward?.();
+                if(dir<0)window.goBackExt?.();else window.goForward?.();
                 setTimeout(()=>{card.style.opacity='0';},180);
                 setTimeout(()=>{clip.style.display='none';card.style.opacity='';card.innerHTML='';},420);
             }else{
@@ -617,6 +746,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
             clearTimeout(endT);
             endT=setTimeout(()=>reset(true),140);
         },{passive:true});
+        clip.addEventListener('click',()=>{
+            if(!active)return;
+            clearTimeout(endT);
+            acc=dir*THRESHOLD;
+            reset(true);
+        });
     }
 
     // ── Keyboard shortcuts ──
@@ -713,6 +848,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
             // El backend lo emite justo antes de mostrar una ventana que estaba
             // oculta, para que reabrir desde el menú empiece en blanco.
             listenFn('reset-to-home',()=>{ try{ resetToHome(); }catch(e){} });
+            // Otra instancia pide una página: llega como evento, no preguntando
+            // cada 2 s como antes (medido: 30 llamadas por minuto en reposo).
+            listenFn('navigate',e=>{ const p=e?.payload; if(p&&pages[p])openPage(p); });
         }
     }
 

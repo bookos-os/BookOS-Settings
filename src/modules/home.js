@@ -10,7 +10,7 @@ export const searchIndex=[
 {id:'pantalla',title:'Pantalla',subtitle:'Brillo · Resolución · Escala',keywords:['pantalla','brillo','resolucion','display','blur','efectos','screen','brightness','resolution','escala']},
 {id:'bateria',title:'Batería',subtitle:'Energía · Carga · Samsung Book',keywords:['bateria','energia','carga','samsung','book','ventilador','rendimiento','battery','power','charge','performance','fan']},
 {id:'bloqueo',title:'Pantalla de bloqueo',subtitle:'Bloqueo · Reloj · SDDM',keywords:['bloqueo','lock','aod','huella','lockscreen','biometrics','fingerprint','sddm']},
-{id:'inicio',title:'Pantalla Inicio',subtitle:'Diseño · Apps',keywords:['inicio','home','escritorio','homescreen','layout','desktop']},
+{id:'inicio',title:'Escritorio',subtitle:'Dock · Escritorios virtuales',keywords:['inicio','home','escritorio','homescreen','layout','desktop','dock','escritorios']},
 {id:'fondos',title:'Fondo de pantalla',subtitle:'Fondos · Paleta',keywords:['fondo','wallpaper','paleta','background','palette','accent','color']},
 {id:'temas',title:'Temas',subtitle:'Temas · Modo oscuro',keywords:['tema','oscuro','claro','dark','light','themes','theme','mode']},
 {id:'seguridad',title:'Seguridad y privacidad',subtitle:'Firewall · Permisos',keywords:['seguridad','privacidad','permiso','firewall','ufw','security','privacy','permissions','camera','microphone']},
@@ -68,7 +68,7 @@ export const subSearchIndex=[
 {parent:'fondos',title:'Fondo de pantalla',keywords:['fondo','wallpaper','imagen']},
 {parent:'fondos',title:'Paleta de colores',keywords:['paleta','colores','acento','tono']},
 // Temas
-{parent:'temas',title:'Esquema de color',keywords:['esquema','color','breeze','dark','light']},
+{parent:'temas',title:'Esquema de color',keywords:['esquema','color','oscuro','claro','dark','light']},
 {parent:'temas',title:'Modo oscuro automático',keywords:['automatico','horario','schedule','noche','dia']},
 // Seguridad
 {parent:'seguridad',title:'Firewall (UFW)',keywords:['firewall','ufw','puertos']},

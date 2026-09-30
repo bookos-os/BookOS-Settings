@@ -22,16 +22,17 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 |---|---|
 | Battery | Performance mode, fan control, adaptive charging, battery protection limit, USB-C charging |
 | Display | Brightness, resolution, refresh rate, scale and external displays |
-| Sound | Per-app volume, output and input selection, mute, balance and audio profiles |
+| Sound | Per-app volume, output and input selection, mute, balance and audio profiles, with readable device names («Laptop speakers», «HDMI / DisplayPort 1») instead of the chip's, and without monitor sources or idle system streams |
 | Lock screen | Native clock, avatar, media controls, inactivity lock and SDDM editor |
-| Themes | BookOS accent, dark and light modes, scheduled switching and optional Kvantum palette |
-| Wallpaper | Wallpaper picker with color palette extraction |
+| Themes | BookOS accent, dark and light modes and scheduled switching. With *Automatic BookOS accent* on, the desktop accent follows the wallpaper |
+| Wallpaper | Gallery with the BookOS wallpapers first, light/dark pairs applied together, and color palette extraction |
 | Connections | Wi-Fi, Bluetooth, VPN, airplane mode |
 | Devices | Quick Share (rquickshare), Galaxy Buds |
 | Security | UFW firewall control, application permissions |
 | Accounts | Username, hostname, avatar |
 | General | Language (Spanish and English with auto-detection), keyboard layout, date and time |
 | Maintenance | Disk usage, cache cleanup, system logs |
+| Desktop | Dock icon size, number of virtual desktops and accent |
 | Advanced | BookOS effects, activities and autostart manager |
 | Updates | System packages (paru), Flatpak updates |
 | Accessibility | Vision aids, magnifier, high contrast |
@@ -39,6 +40,8 @@ BookOS Settings is a unified control panel that consolidates hardware-specific c
 
 ### Additional capabilities
 
+- A home page with the live state of the device: its commercial model, the connected network, brightness, sound output and battery.
+- The window opens sized to the screen, centred and clear of the panel and the dock.
 - Localization in Spanish and English with automatic locale detection. Manual override stored in `localStorage` under `bookos_lang`.
 - Granular search that finds both top-level pages and nested settings.
 - Animated fingerprint enrollment dialog with stroke draw-in, scan laser sweep, success glow, and error feedback.
@@ -146,6 +149,7 @@ BookOS-Settings/
 │   ├── assets/              SVG icons
 │   └── modules/
 │       ├── pages.js         Settings page renderers
+│       ├── pages/desktop.js Sound, displays and desktop pages
 │       ├── home.js          Sidebar items and search index
 │       └── i18n.js          Translations and locale detection
 ├── src-tauri/
@@ -155,12 +159,63 @@ BookOS-Settings/
 │   │   ├── quickshare.rs    rquickshare integration
 │   │   ├── buds.rs          Galaxy Buds via BlueZ
 │   │   ├── p2p.rs
+│   │   ├── palette.rs       Dynamic palette from the wallpaper
+│   │   ├── wallpaper_preview.rs  Cached gallery thumbnails
+│   │   ├── bookos_desktop.rs     org.bookos.Desktop client
 │   ├── extra/               systemd units, udev rules, shell scripts
 │   └── tauri.conf.json
 ├── scripts/
 │   └── publish-apt.sh       APT repository update automation
 └── PKGBUILD
 ```
+
+---
+
+## Wallpaper and accent
+
+The wallpaper and the accent belong to the desktop, and Settings changes them
+through `org.bookos.Desktop`:
+
+- **Light/dark pairs.** BookOS wallpapers ship as `Light/purple.png` and
+  `Dark/purple_dark.png`, and the desktop gives `fondo_claro` / `fondo_oscuro`
+  priority over `fondo`. Choosing one half of a pair writes both, so switching
+  theme takes the wallpaper along; a wallpaper without a pair clears them so it
+  can show. Reading the current wallpaper uses the one of the theme on screen.
+- **Gallery.** It lists the BookOS wallpapers first, from the same folders the
+  desktop uses (`/usr/share/wallpapers/BookOS`, or the development checkout),
+  one card per pair, then the ones added with «+» and the pictures folders.
+  Plasma wallpaper packages are not listed: BookOS does not use Plasma.
+- **Automatic accent.** When on, the desktop accent becomes the entry of its
+  closed table (blue, indigo, purple, pink, red, orange, yellow, green, teal,
+  graphite) closest in hue to the wallpaper, and changes with it. The dynamic
+  palette tints BookOS apps; this keeps the desktop in the same colour.
+
+Thumbnails are generated in `~/.cache/bookos-settings` and served through the
+asset protocol. Tauri's `**` scope does not match dot-directories, so that
+folder is listed explicitly in `tauri.conf.json`.
+
+---
+
+## Testing
+
+```bash
+cd src-tauri && cargo test --release     # Rust: palette, accent, wallpaper pairs, previews
+node tests/wallpaper-picker.mjs          # gallery logic
+node tests/wallpaper-previews.mjs
+```
+
+To look at it inside a nested BookOS session without disturbing a running
+instance (the app is single-instance through a lock in `$XDG_RUNTIME_DIR`), run
+it under the desktop's compositor with its own short runtime directory:
+
+```bash
+mkdir -p -m700 /tmp/bks-rt
+WAYLAND_DISPLAY=$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY XDG_RUNTIME_DIR=/tmp/bks-rt \
+  ../bookos-desktop/target/debug/bookos-comp src-tauri/target/release/bookos-settings
+```
+
+Applying a wallpaper or an accent there writes the real
+`~/.config/bookos/panel.conf`; back it up first.
 
 ---
 

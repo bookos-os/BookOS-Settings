@@ -16,13 +16,18 @@
 html,body{height:100%;overflow:hidden;background:transparent}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,sans-serif;color:var(--tx);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 .main-container{width:100%;height:100%;background:var(--bg);display:flex;flex-direction:column;overflow:hidden}
-.main-container.windowed{border-radius:20px;border:1px solid var(--brd);overflow:hidden;clip-path:inset(0 round 20px)}
+.main-container.windowed{border-radius:20px;border:1px solid var(--brd);overflow:hidden}
 .titlebar{height:36px;display:flex;justify-content:space-between;align-items:center;padding:0 12px;user-select:none;flex-shrink:0}
 .sb-toggle{background:0;border:0;color:var(--tx);cursor:pointer;opacity:.55;width:32px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:.12s;-webkit-app-region:no-drag}
 .sb-toggle:hover{opacity:1;background:var(--hov)}
 .controls{display:flex;gap:2px}
 .controls button{background:0;border:0;color:var(--tx);font-size:13px;cursor:pointer;opacity:.6;width:32px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:.12s}
 .controls button:hover{opacity:1;background:var(--hov)}
+/* Los mismos que dibuja el escritorio en la barra de título: trazo en vez de
+   caracteres ─ ☐ ✕, que cada fuente pintaba a su manera (el ✕ salía como una
+   «x» de texto), y cerrar en rojo solo bajo el puntero. */
+.controls button svg{display:block}
+.controls button#close:hover{background:#ff3b30;color:#fff}
 /* Sidebar collapse state */
 .sidebar{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
 .main-container.sidebar-collapsed .sidebar{width:0;padding-left:0;padding-right:0;opacity:0;pointer-events:none;overflow:hidden}
@@ -62,7 +67,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
    pintados sobre el título) y content-visibility recalcula cada fila al entrar
    en pantalla, cuando son ~20 filas de 58px que no cuesta nada tener pintadas.
    La vista de detalle nunca los tuvo y es la que va fluida. */
-.sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;scroll-behavior:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none}
+.sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none}
 .sidebar::-webkit-scrollbar{display:none}
 .sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:0 2px}
 .header-title{font-size:28px;font-weight:700;letter-spacing:-.4px}
@@ -124,6 +129,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 .detail-header{display:flex;align-items:center;gap:10px;margin-bottom:20px;padding-top:18px}
 .back-btn{background:0;border:0;color:var(--blue);font-size:20px;cursor:pointer;padding:4px;border-radius:8px;display:flex;align-items:center;line-height:1;transition:.12s}
 .back-btn:hover{background:var(--hov)}
+/* Miga como en Windows: mismo cuerpo que el título, el padre atenuado. */
+.crumb{border:0;font:inherit;font-size:22px;font-weight:700;letter-spacing:-.3px;padding:0 2px;border-radius:6px;background:0;color:var(--tx2);cursor:pointer;white-space:nowrap;transition:color .12s}
+.crumb:hover{color:var(--tx)}
+.crumb:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.crumb-sep{color:var(--tx2);font-size:22px;line-height:1;margin:0 -2px}
+
 .detail-title{font-size:22px;font-weight:700;letter-spacing:-.3px}
 .detail-header-actions{margin-left:auto;display:flex;gap:6px;align-items:center}
 .detail-header-actions .icon-btn{
@@ -264,8 +275,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 /* Slider */
 .slider-container{padding:6px 0 2px;display:flex;align-items:center;gap:12px}
 .slider-label{font-size:12px;color:var(--tx2);min-width:36px;text-align:right;font-variant-numeric:tabular-nums}
-input[type="range"]{-webkit-appearance:none;appearance:none;width:100%;height:4px;background:var(--toff);border-radius:2px;outline:0;cursor:pointer}
-input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;height:20px;width:20px;border-radius:50%;background:#fff;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+input[type="range"]{-webkit-appearance:none;appearance:none;width:100%;height:8px;background:var(--toff);border-radius:999px;outline:0;cursor:pointer;touch-action:pan-y}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;height:18px;width:18px;border:0;border-radius:50%;background:var(--blue);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.2);transition:transform .18s cubic-bezier(.32,1.3,.5,1)}
+input[type="range"]::-moz-range-thumb{height:18px;width:18px;border:0;border-radius:50%;background:var(--blue);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.2);transition:transform .18s cubic-bezier(.32,1.3,.5,1)}
+input[type="range"]:hover::-webkit-slider-thumb,input[type="range"]:focus-visible::-webkit-slider-thumb,input[type="range"]:active::-webkit-slider-thumb{transform:scale(1.12)}
+input[type="range"]:hover::-moz-range-thumb,input[type="range"]:focus-visible::-moz-range-thumb,input[type="range"]:active::-moz-range-thumb{transform:scale(1.12)}
 input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(--fill,50%),var(--toff) var(--fill,50%))}
 
 /* Signal bars */
@@ -511,23 +525,24 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 
 /* Select dropdown */
 .sel{background:var(--sbg);border:1.5px solid var(--div);border-radius:12px;padding:10px 36px 10px 14px;font-size:14px;color:var(--tx);font-family:inherit;cursor:pointer;outline:0;width:100%;-webkit-appearance:none;appearance:none;transition:.15s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
-.bk-select{display:flex;align-items:center;width:min(52%,520px);min-width:180px;min-height:40px;box-sizing:border-box;border:1px solid var(--div);border-radius:12px;background-color:var(--sbg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;color:var(--tx);font:inherit;font-size:13.5px;font-weight:500;padding:8px 36px 8px 14px;text-align:left;cursor:pointer;transition:border-color .15s,background-color .15s}
+.bk-select{display:inline-flex;align-items:center;gap:6px;max-width:min(52%,320px);min-height:32px;margin-left:auto;border:1px solid var(--div);border-radius:12px;background-color:var(--sbg);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 9l5-5 5 5M7 15l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;color:var(--tx);font:inherit;font-size:13.5px;font-weight:500;padding:5px 26px 5px 10px;text-align:right;cursor:pointer;transition:background-color .12s}
 .bk-select span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bk-select:hover{border-color:color-mix(in srgb,var(--blue) 55%,var(--div))}
+.bk-select:hover{background-color:var(--act);border-color:color-mix(in srgb,var(--blue) 45%,var(--div))}
+.bk-select:active{transform:scale(.97)}
+.bk-select{transition:background-color .12s,border-color .12s,transform .08s}
 .bk-select:focus-visible{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}
-/* Pista propia: la global de 4px con pulgar blanco plano apenas se distingue
-   sobre la tarjeta oscura. --from/--to los pone desktop.js al pintar y al mover. */
-input[type="range"].bk-range{height:6px;border-radius:3px;margin:8px 0 4px;background:linear-gradient(to right,var(--toff) var(--from,0%),var(--blue) var(--from,0%),var(--blue) var(--to,0%),var(--toff) var(--to,0%))}
-input[type="range"].bk-range::-webkit-slider-thumb{width:22px;height:22px;border:3px solid var(--blue);background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35);transition:transform .12s}
-input[type="range"].bk-range:hover::-webkit-slider-thumb{transform:scale(1.08)}
-input[type="range"].bk-range:active::-webkit-slider-thumb{transform:scale(1.18)}
-input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 5px color-mix(in srgb,var(--blue) 25%,transparent)}
+/* --from/--to conservan el punto cero en controles como balance y velocidad. */
+input[type="range"].bk-range{height:8px;border-radius:999px;margin:8px 0 4px;background:linear-gradient(to right,var(--toff) var(--from,0%),var(--blue) var(--from,0%),var(--blue) var(--to,0%),var(--toff) var(--to,0%))}
+input[type="range"].bk-range::-webkit-slider-thumb{width:18px;height:18px;border:0;background:var(--blue);box-shadow:0 1px 4px rgba(0,0,0,.2)}
+input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;background:var(--blue);box-shadow:0 1px 4px rgba(0,0,0,.2)}
 @media(max-width:720px){.bk-select{width:100%;min-width:0}}
 /* El deslizador va debajo del título: en la misma fila, con width:100%, el
    input se comía el ancho y los títulos se partían palabra por palabra. */
-.bk-slider-row{align-items:stretch;gap:8px}
-.bk-slider-row .detail-texts{flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px}
+.bk-slider-row{flex-direction:column;align-items:stretch;gap:6px}
+.bk-slider-row .detail-texts{flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:100%;min-width:0}
+.bk-slider-row .bk-range{display:block;width:100%;min-width:0}
 .bk-slider-row .ds{margin-top:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+@media(prefers-reduced-motion:reduce){input[type="range"]::-webkit-slider-thumb,input[type="range"]::-moz-range-thumb{transition:none}}
 .audio-page .detail-item-row,.detail-item-row:has(>.bk-select){gap:16px}
 .detail-item-row:has(>.bk-select) .detail-texts{min-width:120px}
 .sel:hover{border-color:var(--blue)}
@@ -539,7 +554,9 @@ input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 
 .spinner{width:18px;height:18px;border:2.5px solid var(--toff);border-top-color:var(--blue);border-radius:50%;animation:spin .6s linear infinite;margin-right:10px}
 
 /* Skeleton Loaders */
-.skeleton{background:var(--card);border-radius:25px;margin-bottom:16px;overflow:hidden;padding:16px 20px}
+/* Invisible los primeros 150ms: si la página carga rápido nunca se ve el esqueleto y no hay parpadeo esqueleto→contenido. */
+@keyframes skelShow{to{opacity:1}}
+.skeleton{opacity:0;animation:skelShow .01s .15s forwards;background:var(--card);border-radius:25px;margin-bottom:16px;overflow:hidden;padding:16px 20px}
 /* Shimmer por transform (composicionable) en vez de background-position, que
    re-rasterizaba cada barra en cada frame justo durante la navegación. */
 .skeleton-line{height:14px;background:var(--sbg);border-radius:7px;margin-bottom:12px;position:relative;overflow:hidden}
@@ -588,17 +605,11 @@ input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 
 .sub-results-card{margin-top:8px}
 .sub-result-ic{font-size:18px;color:var(--tx2);font-weight:600;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--sbg)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-#app>div{animation:fadeIn .22s cubic-bezier(0.25,0.46,0.45,0.94);transform-origin:top center}
 #app.page-enter{animation:pageEnter .28s cubic-bezier(0.25,0.46,0.45,0.94)}
 @keyframes pageEnter{from{opacity:.4;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
 /* Sin will-change/translateZ permanentes: fijaban una capa GPU por tarjeta
    para siempre a cambio de un fadeIn único de 0.2s — el compositor ya
    promociona capas durante la animación por sí solo. */
-.detail-card:nth-child(1){animation:fadeIn .18s cubic-bezier(0.25,0.46,0.45,0.94)}
-.detail-card:nth-child(2){animation:fadeIn .22s cubic-bezier(0.25,0.46,0.45,0.94) 30ms both}
-.detail-card:nth-child(3){animation:fadeIn .22s cubic-bezier(0.25,0.46,0.45,0.94) 55ms both}
-.detail-card:nth-child(4){animation:fadeIn .22s cubic-bezier(0.25,0.46,0.45,0.94) 75ms both}
-.detail-card:nth-child(n+5){animation:fadeIn .22s cubic-bezier(0.25,0.46,0.45,0.94) 90ms both}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
 @keyframes barGrow{from{height:0}to{height:var(--target-h)}}
 .bat-bar-fill.animate{animation:barGrow .5s cubic-bezier(.4,0,.2,1) forwards}
@@ -959,31 +970,25 @@ input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 
 
 /* ═══ Anchored popover select (quick option picker on rows) ═══ */
 .bk-popover{
-    /* Inline panel: flows with the page (pushes content down) instead of floating */
-    position:relative;box-sizing:border-box;width:100%;
-    background:color-mix(in srgb,var(--card) 92%,transparent);
-    border:1px solid color-mix(in srgb,var(--tx) 9%,transparent);
-    border-radius:18px;padding:6px;margin:6px 0;
-    box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 6px 22px rgba(0,0,0,.18);
-    animation:bkPopIn .18s cubic-bezier(.32,1.3,.5,1);transform-origin:top left;
+    position:fixed;z-index:9000;box-sizing:border-box;max-width:min(340px,calc(100vw - 16px));
+    background:var(--card);
+    border:1px solid color-mix(in srgb,var(--tx) 10%,transparent);
+    border-radius:18px;padding:5px;
+    box-shadow:0 6px 22px rgba(0,0,0,.18);
+    animation:bkPopIn .14s cubic-bezier(.2,.9,.3,1);
 }
-@keyframes bkPopIn{from{opacity:0;transform:translateY(-8px) scale(.96)}to{opacity:1;transform:none}}
-.bk-pop-title{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--tx2);padding:8px 12px 6px}
-.bk-pop-list{display:flex;flex-direction:column;gap:2px;max-height:min(60vh,420px);overflow-y:auto}
-.bk-pop-item{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:13px;cursor:pointer;transition:background .13s}
-.bk-pop-item:hover{background:var(--hov)}
-.bk-pop-item:active{background:var(--act);transform:scale(.99)}
-.bk-pop-item.active{background:color-mix(in srgb,var(--blue) 10%,transparent)}
-.bk-pop-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--brd);flex-shrink:0;position:relative;transition:.15s}
-.bk-pop-item.active .bk-pop-radio{border-color:var(--blue);background:var(--blue)}
-.bk-pop-item.active .bk-pop-radio::after{content:"";position:absolute;inset:0;margin:auto;width:6px;height:6px;border-radius:50%;background:#fff}
-.bk-pop-texts{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.bk-pop-label{font-size:14.5px;font-weight:500;color:var(--tx);line-height:1.2}
-.bk-pop-item.active .bk-pop-label{color:var(--blue);font-weight:600}
-.bk-pop-sub{font-size:11.5px;color:var(--tx2);line-height:1.35}
-.bk-pop-right{font-size:13px;font-weight:500;color:var(--tx2);flex-shrink:0;font-variant-numeric:tabular-nums}
-.bk-pop-item.active .bk-pop-right{color:color-mix(in srgb,var(--blue) 80%,var(--tx2))}
-.bk-pop-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px color-mix(in srgb,var(--tx) 8%,transparent)}
+@keyframes bkPopIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+.bk-pop-title{display:none}
+.bk-pop-list{display:flex;flex-direction:column;max-height:min(50vh,360px);overflow-y:auto;scrollbar-width:thin}
+.bk-pop-item{display:flex;align-items:center;gap:8px;padding:7px 12px 7px 6px;border-radius:13px;cursor:pointer;transition:background .1s}
+.bk-pop-item:hover{background:var(--blue);color:#fff}
+.bk-pop-item:hover .bk-pop-label,.bk-pop-item:hover .bk-pop-sub,.bk-pop-item:hover .bk-pop-right,.bk-pop-item:hover .bk-pop-check{color:#fff}
+.bk-pop-check{width:16px;display:grid;place-items:center;flex-shrink:0;color:var(--blue)}
+.bk-pop-texts{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.bk-pop-label{font-size:13.5px;font-weight:500;color:var(--tx);line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-pop-sub{font-size:11.5px;color:var(--tx2);line-height:1.3}
+.bk-pop-right{font-size:12.5px;color:var(--tx2);flex-shrink:0;font-variant-numeric:tabular-nums}
+.bk-pop-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px color-mix(in srgb,var(--tx) 8%,transparent)}
 .bk-pop-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 12px;margin:5px 4px 1px;font-size:13px;font-weight:500;color:var(--blue);cursor:pointer;border-radius:11px;transition:background .13s;border-top:1px solid var(--div);border-radius:0 0 11px 11px}
 .bk-pop-footer:hover{background:var(--hov)}
 .bk-pop-footer svg{opacity:.6}
@@ -1013,13 +1018,8 @@ input[type="range"].bk-range:focus-visible::-webkit-slider-thumb{box-shadow:0 0 
 .wp-change-btn{width:100%;margin-top:14px;padding:13px;border:0;border-radius:14px;background:var(--sbg);color:var(--blue);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
 .wp-change-btn:hover{background:var(--hov)}
 .wp-change-btn:active{transform:scale(.985)}
-.wp-palette-row{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px 14px;background:var(--sbg);border-radius:14px;cursor:pointer;transition:.15s}
-.wp-palette-row:hover{background:var(--hov)}
-.wp-palette-texts{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.wp-palette-title{font-size:13px;font-weight:600;color:var(--tx)}
-.wp-palette-sub{font-size:11px;color:var(--blue)}
 /* ── Wallpaper grid panel ── */
-.wp-grid-panel{background:var(--card);border-radius:25px;padding:18px;margin-top:8px;position:relative}
+.wp-grid-panel{margin-top:16px;position:relative}
 .wp-add-fab{position:fixed;bottom:24px;right:24px;width:52px;height:52px;border:0;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.28);transition:.15s;z-index:50}
 .wp-add-fab:hover{filter:brightness(1.08)}
 .wp-add-fab:active{transform:scale(.92)}
@@ -1603,9 +1603,9 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 
 /* Swipe preview: clipping frame pinned to the content area (so the card
    emerges from the sidebar's edge), card slides inside it */
-.swipe-preview-clip{position:fixed;z-index:9998;display:none;overflow:hidden;pointer-events:none}
+.swipe-preview-clip{position:fixed;z-index:9998;display:none;overflow:hidden;pointer-events:auto}
 .swipe-preview{
-  position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;
+  position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:auto;cursor:pointer;
   background:var(--bg);overflow:hidden;
   border-radius:18px;
   box-shadow:0 8px 40px rgba(0,0,0,.35),0 0 0 .5px var(--div);
@@ -1942,3 +1942,67 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .ed-wx-d svg{width:1.4em;height:1.4em}
 
 .wp-grid-panel [data-wp-more][hidden]{display:none}
+
+/* Escritorio: vista previa del dock y selector segmentado */
+.dock-preview{position:relative;height:170px;padding:0;display:flex;align-items:flex-end;justify-content:center;background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 38%,var(--card)),color-mix(in srgb,var(--blue) 8%,var(--card)) 70%)}
+.dock-desks{position:absolute;top:14px;left:0;right:0;display:flex;gap:6px;justify-content:center}
+.dock-desks b{width:22px;height:5px;border-radius:999px;background:var(--tx);opacity:.22;transition:opacity .15s}
+.dock-desks b.on{opacity:.7}
+.dock-desks b[hidden]{display:none}
+.dock-bar{--dock:50px;display:flex;gap:calc(var(--dock)*.18);padding:calc(var(--dock)*.16);margin-bottom:14px;border-radius:calc(var(--dock)*.5);background:color-mix(in srgb,var(--card) 70%,transparent);border:1px solid var(--brd)}
+.dock-bar i{width:var(--dock);height:var(--dock);border-radius:calc(var(--dock)*.28);box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.bk-seg{display:flex;padding:3px;gap:2px;border-radius:12px;background:var(--sbg)}
+.bk-seg-btn{min-width:38px;height:30px;border:0;border-radius:10px;background:0;color:var(--tx2);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,color .12s}
+.bk-seg-btn:hover{color:var(--tx)}
+.bk-seg-btn.active{background:var(--blue);color:#fff}
+.page-foot{margin:-4px 8px 16px;font-size:12px;line-height:1.5;color:var(--tx2)}
+.dock-desk-name{position:absolute;top:28px;left:0;right:0;text-align:center;font-size:12px;font-weight:600;color:var(--tx);opacity:.6}
+.dock-bar i{display:grid;place-items:center;color:#fff;font-style:normal;font-weight:700;font-size:calc(var(--dock)*.42)}
+.desk-name-row[hidden]{display:none}
+.desk-name{width:min(52%,320px);min-height:38px;border:1px solid var(--div);border-radius:12px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13.5px;padding:6px 14px;transition:border-color .15s}
+.desk-name:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}
+
+/* Maqueta de la pantalla de bloqueo */
+.lock-preview{padding:20px;display:flex;justify-content:center}
+.lp-screen{position:relative;width:346px;max-width:100%;height:216px;border-radius:14px;overflow:hidden;background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 45%,var(--bg)),color-mix(in srgb,var(--blue) 12%,var(--bg)) 75%);color:#fff}
+.lp-clock{position:absolute;top:var(--clock-y,8%);left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:2px}
+.lp-time{font-size:var(--clock,29px);font-weight:300;line-height:1;letter-spacing:-.02em}
+.lp-date{font-size:9px;opacity:.75}
+.lp-date[hidden],.lp-media[hidden]{display:none}
+.lp-access{position:absolute;top:var(--access-y,36%);left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:3px}
+.lp-avatar{width:var(--avatar,26px);height:var(--avatar,26px);border-radius:50%;background:rgba(255,255,255,.28)}
+.lp-name{font-size:8px;font-weight:600}
+.lp-field{width:62px;height:9px;border-radius:999px;background:rgba(0,0,0,.35);margin-top:1px}
+.lp-power{position:absolute;left:8px;bottom:8px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.3)}
+.lp-name[hidden],.lp-power[hidden]{display:none}
+.lp-media{position:absolute;top:var(--media-y,68%);left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:5px 12px 5px 6px;border-radius:999px;background:rgba(255,255,255,.16);font-size:9px}
+.lp-media i{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.5)}
+/* Mismo aspecto que .bk-select; color-scheme hace que el icono del reloj de WebKit siga el tema */
+.bk-time{min-height:40px;padding:8px 14px;border:1px solid var(--div);border-radius:12px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13.5px;font-weight:500;font-variant-numeric:tabular-nums;color-scheme:light dark;cursor:pointer;transition:border-color .15s}
+.bk-time:hover{border-color:color-mix(in srgb,var(--blue) 55%,var(--div))}
+.bk-time:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}
+
+/* Administración general */
+.gen-link{cursor:pointer}
+.gen-link:hover{background:var(--hov)}
+.gen-link:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+.gen-link svg{flex-shrink:0;transition:transform .12s cubic-bezier(.4,0,.2,1)}
+.gen-link[aria-expanded="true"] svg{transform:rotate(90deg)}
+.gen-exec{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tz-panel{padding:0 20px 14px}
+.tz-panel[hidden]{display:none}
+.tz-filter{width:100%;height:36px;padding:0 12px;border:1px solid var(--div);border-radius:12px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13px;outline:0;margin-bottom:8px}
+.tz-filter:focus{border-color:var(--blue)}
+.tz-res{max-height:240px;overflow-y:auto;scrollbar-width:thin}
+.tz-item{padding:8px 12px;border-radius:13px;font-size:13.5px;cursor:pointer;transition:background .12s}
+.tz-item:hover{background:var(--hov)}
+.tz-item.active{color:var(--blue);font-weight:600}
+.tz-item[hidden]{display:none}
+.bk-select .lang-label{display:inline-flex;align-items:center;gap:6px}
+
+/* Paleta dinámica: cada fila ya trae su divisor (::after); los divisores
+   sueltos de antes se sumaban y salían dos rayas seguidas. Con la paleta
+   apagada, la fila del interruptor es la última y no lleva raya. */
+#dyn-block.dyn-off>.detail-item::after{display:none}
+#dyn-body .dyn-tabs{margin-top:14px}
+.wp-hero-name{text-transform:none}

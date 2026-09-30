@@ -282,70 +282,6 @@ pub fn json(seed: &str, style: Style, s: &Scheme) -> String {
         tones(&s.primary), tones(&s.secondary), tones(&s.tertiary), tones(&s.neutral))
 }
 
-// ── Esquema de color del escritorio (.colors) ───────────────────────────
-//
-// Mismo reparto de tonos que `roles()`, pero en el formato `r,g,b` que usa
-// El formato se conserva para aplicaciones externas que leen archivos de
-// colores, mientras BookOS usa CSS y Kvantum como salida principal.
-//
-// Los semánticos (negativo/neutro/positivo) se dejan fijos, calcados de los
-// esquemas estáticos de BookOS — mismo criterio que en `roles()`. "Visited"
-// no es semántico de verdad (es un matiz de enlace visitado), así que ahí
-// sí se usa el secundario de la paleta en vez de un valor fijo.
-
-
-
-
-// ── Kvantum (apps Qt que no leen Kirigami.Theme) ─────────────────────────
-//
-// El .kvconfig de BookOS solo tiene color de verdad en un puñado de valores
-// que se repiten tal cual por todo el archivo (10 en total, contados en las
-// plantillas). Por eso la sustitución es un find&replace de placeholders
-// sobre una copia literal del .kvconfig original, no un generador de
-// secciones: no hay que tocar las claves de estilo (SVG, tamaños, flags).
-fn hex(c: (u8, u8, u8)) -> String { format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2) }
-
-pub fn kvantum_substitutions(s: &Scheme, dark: bool) -> Vec<(&'static str, String)> {
-    let p = &s.primary;
-    let n = &s.neutral;
-    if dark {
-        vec![
-            ("{{BG}}",         hex(n.tone_rgb(6.0))),
-            ("{{CHROME}}",     hex(n.tone_rgb(3.0))),
-            ("{{CARD}}",       hex(n.tone_rgb(12.0))),
-            ("{{CARD2}}",      hex(n.tone_rgb(18.0))),
-            ("{{ACCENT_A30}}", format!("{}4D", hex(p.tone_rgb(80.0)))),
-            ("{{ACCENT}}",     hex(p.tone_rgb(80.0))),
-            ("{{TX}}",         hex(n.tone_rgb(96.0))),
-            ("{{TX2}}",        hex(s.neutral_variant.tone_rgb(68.0))),
-            ("{{DISABLED}}",   hex(n.tone_rgb(24.0))),
-            ("{{VISITED}}",    hex(s.secondary.tone_rgb(70.0))),
-        ]
-    } else {
-        vec![
-            ("{{BG}}",         hex(n.tone_rgb(96.0))),
-            ("{{CHROME}}",     hex(n.tone_rgb(90.0))),
-            ("{{CARD}}",       hex(n.tone_rgb(100.0))),
-            ("{{CARD2}}",      hex(n.tone_rgb(85.0))),
-            ("{{ACCENT_A30}}", format!("{}4D", hex(p.tone_rgb(42.0)))),
-            ("{{ACCENT}}",     hex(p.tone_rgb(42.0))),
-            ("{{TX}}",         hex(n.tone_rgb(12.0))),
-            ("{{TX2}}",        hex(s.neutral_variant.tone_rgb(45.0))),
-            ("{{DISABLED}}",   hex(n.tone_rgb(78.0))),
-            ("{{VISITED}}",    hex(s.secondary.tone_rgb(45.0))),
-        ]
-    }
-}
-
-/// Aplica las sustituciones de `kvantum_substitutions` a una plantilla.
-pub fn kvantum_config(template: &str, s: &Scheme, dark: bool) -> String {
-    let mut out = template.to_string();
-    for (ph, val) in kvantum_substitutions(s, dark) {
-        out = out.replace(ph, &val);
-    }
-    out
-}
-
 // ── Semillas del fondo de pantalla ───────────────────────────────────────
 
 /// Extrae hasta `want` colores representativos, con tonos separados entre sí.
@@ -482,21 +418,5 @@ mod tests {
     fn gray_seed_falls_back() {
         let s = scheme_from_seed("#808080", Style::Vibrant);
         assert!((s.primary.hue - 250.0).abs() < 0.001);
-    }
-
-    /// Las plantillas Kvantum deben quedar sin placeholders sin sustituir
-    /// tras aplicar la paleta, en ambos modos: si un placeholder no tiene
-    /// entrada en `kvantum_substitutions`, el .kvconfig sale con literal
-    /// "{{...}}" en vez de un color y Kvantum lo ignora en silencio.
-    #[test]
-    fn kvantum_templates_have_no_leftover_placeholders() {
-        let s = scheme_from_seed("#0A84FF", Style::Vibrant);
-        for (tmpl, dark) in [
-            (include_str!("../extra/kvantum/bookos-dark-blue.kvconfig.tmpl"), true),
-            (include_str!("../extra/kvantum/bookos-light-blue.kvconfig.tmpl"), false),
-        ] {
-            let out = kvantum_config(tmpl, &s, dark);
-            assert!(!out.contains("{{"), "quedó un placeholder sin sustituir (dark={})", dark);
-        }
     }
 }

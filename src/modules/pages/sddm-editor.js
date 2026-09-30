@@ -250,12 +250,9 @@ const corners = () =>
 // ── Estructura ───────────────────────────────────────────────────────────────
 function markup() {
     return `
-    <div class="ed-top">
-      <button class="ed-back" id="ed-back" aria-label="Atrás">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
-      <span class="ed-title">Pantalla de bloqueo</span>
+    <div class="detail-header">
+      <button type="button" class="back-btn" aria-label="Volver" title="Volver">←</button>
+      <h2 class="detail-title">Pantalla de inicio de sesión</h2>
     </div>
 
     <div class="ed-stage" id="ed-stage">
@@ -916,7 +913,6 @@ export async function renderSddmEditor(c) {
     c._sddmEdBound = true;
     c.addEventListener('click', async ev => {
         if (!mounted()) return;
-        if (ev.target.closest('#ed-back')) { window.goBackExt?.() || window.history.back(); return; }
 
         const tb = ev.target.closest('.ed-tab[data-tab]');
         if (tb) { tab = +tb.dataset.tab; refresh(); return; }

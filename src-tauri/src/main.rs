@@ -458,31 +458,32 @@ fn set_update_channel(channel: String) -> String {
 }
 
 // ── BookOS dnf repo (custom packages: modified libfprint, BookOS apps) ──
+// El .repo lo instala bookos-keyring con gpgcheck=1 y la clave local. Antes se
+// descargaba de https://bookos.es/store-files/bookos.repo y se escribía como
+// root: quien controlase el servidor podía servir gpgcheck=0 o su propia
+// gpgkey y colar paquetes sin firma. Ahora solo se conmuta `enabled` con dnf5,
+// que lo guarda en /etc/dnf/repos.override.d y deja intacto el fichero del
+// paquete.
 const BOOKOS_REPO_PATH: &str = "/etc/yum.repos.d/bookos.repo";
-const BOOKOS_REPO_URL: &str = "https://bookos.es/store-files/bookos.repo";
 
 /// Is the BookOS dnf repo installed on this system?
 #[tauri::command]
 fn get_bookos_repo_status() -> String {
-    let supported = std::path::Path::new("/etc/yum.repos.d").exists();
-    let enabled = std::fs::read_to_string(BOOKOS_REPO_PATH)
-        .map(|c| !c.contains("enabled=0"))
-        .unwrap_or(false);
+    let supported = std::path::Path::new(BOOKOS_REPO_PATH).exists();
+    // Se pregunta a dnf y no al fichero: el override de config-manager manda
+    // sobre el `enabled=` del .repo.
+    let enabled = supported
+        && StdCommand::new("dnf").args(["-q", "repo", "list", "--enabled"]).output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.split_whitespace().next() == Some("bookos")))
+            .unwrap_or(false);
     format!(r#"{{"supported":{},"enabled":{}}}"#, supported, enabled)
 }
 
-/// Install/remove the BookOS dnf repo. Uses pkexec (graphical polkit prompt).
+/// Enable/disable the BookOS dnf repo. Uses pkexec (graphical polkit prompt).
 #[tauri::command]
 async fn set_bookos_repo(enable: bool) -> String {
-    let script = if enable {
-        format!(
-            "curl -fsSL --proto '=https' --max-time 20 {url} -o {path} && chmod 644 {path}",
-            url = BOOKOS_REPO_URL, path = BOOKOS_REPO_PATH
-        )
-    } else {
-        format!("rm -f {}", BOOKOS_REPO_PATH)
-    };
-    match Command::new("pkexec").args(["sh", "-c", &script]).output().await {
+    let opt = format!("bookos.enabled={}", if enable { 1 } else { 0 });
+    match Command::new("pkexec").args(["dnf", "-q", "config-manager", "setopt", &opt]).output().await {
         Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
         Ok(o) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(String::from_utf8_lossy(&o.stderr).trim())),
         Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
@@ -979,6 +980,34 @@ fn detect_book_model() -> Option<String> {
     r#"{"ok":false,"error":"límite de carga no compatible con este hardware"}"#.into()
 }
 
+/// Qué hace el sistema al cerrar la tapa (logind) y con la batería crítica
+/// (UPower). Se lee lo que está en vigor: el drop-in que escribe Ajustes gana
+/// a `logind.conf` porque los `.conf.d` se aplican después, igual que hace
+/// logind. Lo que no esté escrito en ningún sitio es el valor por defecto.
+#[tauri::command] fn get_power_actions() -> String {
+    fn clave(texto: &str, nombre: &str) -> Option<String> {
+        texto.lines().rev().map(str::trim)
+            .filter(|l| !l.starts_with('#'))
+            .find_map(|l| l.strip_prefix(nombre)?.trim_start().strip_prefix('=').map(|v| v.trim().to_string()))
+    }
+    let mut logind = fs::read_to_string("/etc/systemd/logind.conf").unwrap_or_default();
+    for dir in ["/usr/lib/systemd/logind.conf.d", "/etc/systemd/logind.conf.d"] {
+        let mut confs: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "conf")).collect();
+        confs.sort();
+        for c in confs { logind.push('\n'); logind += &fs::read_to_string(c).unwrap_or_default(); }
+    }
+    let upower = fs::read_to_string("/etc/UPower/UPower.conf").unwrap_or_default();
+    let tapa = clave(&logind, "HandleLidSwitch").unwrap_or_else(|| "suspend".into());
+    // Sin valor propio, logind usa el de batería también conectado.
+    let tapa_ac = clave(&logind, "HandleLidSwitchExternalPower").unwrap_or_else(|| tapa.clone());
+    serde_json::json!({
+        "tapa": tapa,
+        "tapa_ac": tapa_ac,
+        "critica": clave(&upower, "CriticalPowerAction").unwrap_or_else(|| "Auto".into()),
+    }).to_string()
+}
+
 #[tauri::command] fn get_firmware_power_controls() -> String {
     let names=[("power_on_lid_open","Encender al abrir la tapa"),("wake_on_ac","Encender al conectar la corriente"),("usb_charging","Cargar dispositivos USB con el portátil apagado"),("usb_power_off","Alimentación USB con el portátil apagado")];
     let mut out=Vec::new();
@@ -1124,7 +1153,10 @@ fn parse_upower(info: &str) -> String {
     let mut recent: Vec<String> = iter.filter_map(|l| {
         let p: Vec<&str> = l.split_whitespace().collect();
         if p.len() >= 3 {
-             Some(format!(r#"{{"t":{},"p":{},"s":"{}"}}"#, p[0], p[1], esc(p[2])))
+             // upower escribe el nivel con coma decimal («73,000»); tal cual
+             // rompía el JSON entero y el gráfico se quedaba sin historial.
+             let pct: f64 = p[1].replace(',', ".").parse().ok()?;
+             Some(format!(r#"{{"t":{},"p":{},"s":"{}"}}"#, p[0], pct, esc(p[2])))
         } else { None }
     }).collect();
     
@@ -1452,8 +1484,23 @@ fn theme_is_dark(name: &str) -> bool {
                 }
             };
             serde_json::json!({"scheme":d["tema"],"is_dark":dark}).to_string()
-        },Err(e)=>system_client::failure(e)
+        },
+        // Sin `org.bookos.Desktop` en el bus (el compositor pierde el nombre si
+        // dbus recarga su configuración y no lo reclama) la app caía a «claro»
+        // aunque el tema fuera oscuro. `panel.conf` sí dice la verdad cuando el
+        // tema es fijo; con «automatico» no hay forma de saberlo sin él.
+        Err(e)=>match tema_fijo_de_panel_conf() {
+            Some(dark)=>serde_json::json!({"scheme":if dark{"oscuro"}else{"claro"},"is_dark":dark}).to_string(),
+            None=>system_client::failure(e),
+        }
     }
+}
+
+fn tema_fijo_de_panel_conf() -> Option<bool> {
+    let home = std::env::var("HOME").ok()?;
+    let texto = std::fs::read_to_string(format!("{}/.config/bookos/panel.conf", home)).ok()?;
+    let valor = texto.lines().find_map(|l| l.strip_prefix("tema")?.trim_start().strip_prefix('=').map(str::trim))?;
+    match valor { "oscuro"=>Some(true), "claro"=>Some(false), _=>None }
 }
 
 /// Logout current session. Faster than reboot, applies theme to all apps cleanly.
@@ -1518,28 +1565,6 @@ async fn sync_sddm_accent(hex: &str) {
 
 
 // ── Theme config helpers ─────────────────────────────────────────────────
-#[tauri::command] fn get_available_kvantum_themes() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = format!("{}/.config/Kvantum", home);
-    let mut themes: Vec<String> = fs::read_dir(&path).ok()
-        .map(|entries| entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| !n.starts_with('.'))
-            .collect())
-        .unwrap_or_default();
-    themes.sort();
-    let active = fs::read_to_string(format!("{}/.config/Kvantum/kvantum.kvconfig", home))
-        .unwrap_or_default()
-        .lines()
-        .find_map(|l| l.strip_prefix("theme=").map(|v| v.trim().to_string()))
-        .unwrap_or_default();
-    let items: Vec<String> = themes.iter()
-        .map(|n| format!(r#"{{"name":"{}","active":{}}}"#, esc(n), *n == active))
-        .collect();
-    format!("[{}]", items.join(","))
-}
 
 
 
@@ -2234,22 +2259,9 @@ fn detect_pkg_mgr() -> &'static str {
 
 // Get per-app CPU/power stats using ps
 #[tauri::command] fn get_app_power_usage() -> String {
-    // Known system/daemon process name prefixes (lowercase)
-    let system_procs: &[&str] = &[
-        "systemd","dbus-daemon","dbus-broker",
-        "xwayland","polkit","gsd-","gnome-","akonadi",
-        "webkitwebproces","webkitnetworkpro","bwrap","dconf","pulseaudio","pipewire",
-        "wireplumber","xdg-","at-spi","ibus","fcitx","udisksd","udevd","bluetoothd",
-        "networkmanager","wpa_supplicant","thermald","tlp","irqbalance","alsactl",
-        "baloo",
-        "akonadiserver","mysqld","gvfsd","gvfs-","pcscd","upowerd","logind",
-        "accounts-daemon","colord","cups","avahi","chronyd","sshd","containerd",
-        "dockerd","sh","bash","fish","zsh","cat","grep","sed","awk","ps","top",
-        "htop","less","more","tail","head","cargo","rustc","cc","ld","bookos-settings",
-        "sd-pam","(sd-pam)","[kworker","[kswapd","[migration","[rcu_","[watchdog",
-        "krb5kdc","sssd","gssproxy","packagekitd","snapd","flatpak-session",
-        "xdg-document","xdg-permission","xdg-desktop-po",
-    ];
+    use std::collections::HashMap;
+    struct App { id: String, name: String, icon: String, cpu: f64, mem: f64 }
+
     let icon_dirs = [
         "/usr/share/pixmaps",
         "/usr/share/icons/hicolor/48x48/apps",
@@ -2264,89 +2276,102 @@ fn detect_pkg_mgr() -> &'static str {
         "/usr/share/icons/Papirus/64x64/apps",
         "/usr/share/icons/Papirus/48x48/apps",
     ];
-    let icon_exts = ["png", "svg", "xpm"];
+    let find_icon = |icon: &str| -> String {
+        if icon.starts_with('/') { return icon.to_string(); }
+        icon_dirs.iter()
+            .flat_map(|d| ["png", "svg", "xpm"].map(|e| format!("{d}/{icon}.{e}")))
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or_default()
+    };
+
+    // Solo cuenta como app lo que tiene un .desktop visible y no de terminal:
+    // es lo que el usuario reconoce como «aplicación» (Firefox, Archivos…),
+    // no los procesos de línea de órdenes. La clave es el binario del Exec
+    // recortado a 15 caracteres, porque `comm` del kernel viene así truncado.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dirs = ["/usr/share/applications".to_string(),
+                format!("{home}/.local/share/applications"),
+                "/var/lib/flatpak/exports/share/applications".to_string()];
+    let mut desktop: HashMap<String, (String, String)> = HashMap::new();
+    for dir in &dirs {
+        let Ok(entries) = fs::read_dir(dir) else { continue };
+        for e in entries.flatten() {
+            let Ok(text) = fs::read_to_string(e.path()) else { continue };
+            let (mut name, mut exec, mut icon, mut hidden) = ("", "", "", false);
+            // Solo la sección principal; las [Desktop Action …] repiten Name/Exec.
+            for l in text.lines().skip_while(|l| l.trim() != "[Desktop Entry]").skip(1)
+                .take_while(|l| !l.starts_with('[')) {
+                match l.split_once('=') {
+                    Some(("Name", v)) => name = v,
+                    Some(("Exec", v)) => exec = v,
+                    Some(("Icon", v)) => icon = v,
+                    Some(("NoDisplay" | "Terminal", "true")) => hidden = true,
+                    _ => {}
+                }
+            }
+            let Some(bin) = exec.split_whitespace()
+                .find(|w| *w != "env" && !w.contains('=')) else { continue };
+            let bin: String = bin.rsplit('/').next().unwrap_or(bin).chars().take(15).collect();
+            if hidden || name.is_empty() { continue; }
+            desktop.entry(bin).or_insert_with(|| (name.to_string(), icon.to_string()));
+        }
+    }
 
     let out = StdCommand::new("ps")
-        .args(["--no-headers", "-eo", "pid,comm,%cpu,%mem", "--sort=-%cpu"])
+        .args(["--no-headers", "-eo", "pid,ppid,%cpu,%mem,comm"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
+    // comm va al final porque puede llevar espacios («Isolated Web Co»).
+    let procs: HashMap<u32, (u32, f64, f64, String)> = out.lines().filter_map(|l| {
+        let mut p = l.split_whitespace();
+        let pid = p.next()?.parse().ok()?;
+        let ppid = p.next()?.parse().ok()?;
+        let cpu = p.next()?.replace(',', ".").parse().ok()?;
+        let mem = p.next()?.replace(',', ".").parse().ok()?;
+        Some((pid, (ppid, cpu, mem, p.collect::<Vec<_>>().join(" "))))
+    }).collect();
 
-    let apps: Vec<String> = out.lines()
-        .filter(|l| !l.trim().is_empty())
-        .take(40)
-        .filter_map(|l| {
-            let p: Vec<&str> = l.split_whitespace().collect();
-            let name = p.get(1).unwrap_or(&"").to_string();
-            let cpu = p.get(2).unwrap_or(&"0").to_string();
-            let mem = p.get(3).unwrap_or(&"0").to_string();
-            if name.is_empty() { return None; }
+    // Los hijos (pestañas de Firefox, renderers…) se suman a su app subiendo
+    // por los padres. Se para en una shell: si no, todo lo lanzado desde la
+    // terminal (claude, cargo) se atribuiría a Konsole.
+    let shells = ["bash", "sh", "zsh", "fish", "dash", "systemd"];
+    let owner = |mut pid: u32| -> Option<&String> {
+        for _ in 0..16 {
+            let (ppid, _, _, comm) = procs.get(&pid)?;
+            if let Some((k, _)) = desktop.get_key_value(comm) { return Some(k); }
+            if shells.contains(&comm.as_str()) || *ppid <= 1 { return None; }
+            pid = *ppid;
+        }
+        None
+    };
 
-            let nl = name.to_lowercase();
-            let is_sys = name.starts_with('(') || name.starts_with('[') ||
-                system_procs.iter().any(|s| nl == *s || nl.starts_with(s));
-
-            // Process names truncated by the kernel often differ from the
-            // .desktop "Icon=" field. Map well-known cases first.
-            let aliases: &[(&str, &[&str])] = &[
-                ("firefox",        &["firefox", "firefox-default"]),
-                ("firefox-bin",    &["firefox"]),
-                ("code",           &["visual-studio-code", "code", "code-oss", "vscode"]),
-                ("code-oss",       &["code-oss", "code"]),
-                ("electron",       &["electron"]),
-                ("konsole",        &["utilities-terminal", "konsole"]),
-                ("kitty",          &["kitty"]),
-                ("alacritty",      &["alacritty"]),
-                ("dolphin",        &["system-file-manager", "dolphin"]),
-                ("kate",           &["kate"]),
-                ("gwenview",       &["gwenview"]),
-                ("spectacle",      &["spectacle"]),
-                ("vlc",            &["vlc"]),
-                ("mpv",            &["mpv"]),
-                ("steam",          &["steam"]),
-                ("discord",        &["discord"]),
-                ("telegram-deskto",&["telegram", "telegram-desktop"]),
-                ("thunderbird",    &["thunderbird"]),
-                ("chrome",         &["google-chrome"]),
-                ("chromium",       &["chromium"]),
-                ("brave",          &["brave-browser", "brave"]),
-                ("obsidian",       &["obsidian"]),
-                ("blender",        &["blender"]),
-                ("gimp",           &["gimp"]),
-                ("inkscape",       &["inkscape"]),
-                ("claude",         &["claude"]),
-                ("python",         &["python", "applications-development"]),
-                ("python3",        &["python", "applications-development"]),
-                ("node",           &["nodejs", "applications-development"]),
-                ("cargo",          &["applications-development"]),
-                ("rustc",          &["applications-development"]),
-            ];
-
-            let mut candidates: Vec<String> = vec![name.clone(), nl.clone()];
-            for (key, aliases) in aliases {
-                if nl == *key || nl.starts_with(key) {
-                    candidates.extend(aliases.iter().map(|s| s.to_string()));
-                    break;
-                }
+    let mut apps: HashMap<&String, App> = HashMap::new();
+    let mut others: Vec<(&String, f64, f64)> = Vec::new();
+    for (pid, (_, cpu, mem, comm)) in &procs {
+        match owner(*pid) {
+            Some(k) => {
+                let a = apps.entry(k).or_insert_with(|| {
+                    let (name, icon) = &desktop[k];
+                    App { id: k.clone(), name: name.clone(), icon: find_icon(icon), cpu: 0.0, mem: 0.0 }
+                });
+                a.cpu += cpu;
+                a.mem += mem;
             }
-
-            let mut icon = String::new();
-            'outer: for cand in &candidates {
-                for dir in &icon_dirs {
-                    for ext in &icon_exts {
-                        let path = format!("{}/{}.{}", dir, cand, ext);
-                        if std::path::Path::new(&path).exists() {
-                            icon = path;
-                            break 'outer;
-                        }
-                    }
-                }
-            }
-
-            Some(format!(r#"{{"name":"{}","cpu":"{}","mem":"{}","is_system":{},"icon":"{}"}}"#,
-                esc(&name), esc(&cpu), esc(&mem), is_sys, esc(&icon)))
-        }).collect();
-    format!("[{}]", apps.join(","))
+            None => others.push((comm, *cpu, *mem)),
+        }
+    }
+    // El resto se devuelve como is_system para que el porcentaje de cada app
+    // siga siendo sobre el consumo total, no solo sobre el de las apps.
+    let mut rows: Vec<(f64, String)> = apps.values()
+        .map(|a| (a.cpu, format!(r#"{{"id":"{}","name":"{}","cpu":"{:.1}","mem":"{:.1}","is_system":false,"icon":"{}"}}"#,
+            esc(&a.id), esc(&a.name), a.cpu, a.mem, esc(&a.icon))))
+        .chain(others.iter().map(|(n, c, m)| (*c, format!(r#"{{"name":"{}","cpu":"{:.1}","mem":"{:.1}","is_system":true,"icon":""}}"#,
+            esc(n), c, m))))
+        .collect();
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    rows.truncate(40);
+    format!("[{}]", rows.into_iter().map(|r| r.1).collect::<Vec<_>>().join(","))
 }
 
 // Get SDDM themes
@@ -3366,45 +3391,35 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 fn list_wallpapers() -> String {
     let mut wallpapers: Vec<String> = Vec::new();
-    let dirs = ["/usr/share/wallpapers", &format!("{}/.local/share/wallpapers", std::env::var("HOME").unwrap_or_default())];
-    for dir in &dirs {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                // Los fondos pueden ser directorios con contents/images/.
-                let img_dir = path.join("contents").join("images");
-                if img_dir.is_dir() {
-                    if let Ok(imgs) = fs::read_dir(&img_dir) {
-                        // Get the highest resolution image
-                        let mut best = String::new();
-                        for img in imgs.flatten() {
-                            let name = img.file_name().to_string_lossy().to_string();
-                            if name.ends_with(".jpg") || name.ends_with(".png") {
-                                if name > best || best.is_empty() { best = img.path().to_string_lossy().to_string(); }
-                            }
-                        }
-                        if !best.is_empty() {
-                            let wp_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            // Use screenshot.png as thumbnail if available
-                            let thumb = path.join("contents").join("screenshot.png");
-                            let thumb_str = if thumb.exists() { thumb.to_string_lossy().to_string() } else { best.clone() };
-                            wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}"}}"#, esc(&wp_name), esc(&best), esc(&thumb_str)));
-                        }
-                    }
-                } else if path.is_file() {
-                    let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-                    if ["jpg","jpeg","png","webp"].contains(&ext.as_str()) {
-                        let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-                        let p = path.to_string_lossy().to_string();
-                        wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}"}}"#, esc(&name), esc(&p), esc(&p)));
-                    }
-                }
-            }
-        }
-    }
-    // Also check ~/Imágenes and ~/Pictures
+    // Los de BookOS primero, en las mismas carpetas donde los busca el
+    // escritorio (`bookos-shell/src/fondos.rs`). No son paquetes de KDE —van
+    // sueltos en `Light/` y `Dark/`— y el recorrido de abajo no los veía: la
+    // galería enseñaba los fondos de Plasma y ninguno de los propios. Uno por
+    // pareja, el claro: al elegirlo, `set_wallpaper` escribe los dos.
     let home = std::env::var("HOME").unwrap_or_default();
-    for pic_dir in &[format!("{}/Imágenes", home), format!("{}/Pictures", home)] {
+    for base in [format!("{home}/Descargas/BookOS/BookOS-Wallpapers/Wallpapers-0.6"), "/usr/share/wallpapers/BookOS".into()] {
+        let Ok(entries) = fs::read_dir(format!("{base}/Light")) else { continue };
+        let mut claros: Vec<_> = entries.flatten().map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| ["png","jpg","jpeg","webp"].contains(&x.to_string_lossy().to_lowercase().as_str())))
+            .collect();
+        claros.sort();
+        for path in claros {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let mut nombre = stem.replace(['_', '-'], " ");
+            if let Some(primera) = nombre.get(..1) { nombre = primera.to_uppercase() + &nombre[1..]; }
+            let p = path.to_string_lossy().into_owned();
+            wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}"}}"#, esc(&nombre), esc(&p), esc(&p)));
+        }
+        // Instalados y en desarrollo son los mismos: con encontrar unos basta.
+        break;
+    }
+    // Los paquetes de fondos de Plasma (`/usr/share/wallpapers/<Nombre>/contents`)
+    // ya no se listan: BookOS no usa Plasma, y la galería enseñaba Altai o
+    // Autumn por delante de las fotos del usuario.
+    // Los que el usuario añade con «+» (`add_wallpapers` los copia a
+    // `~/.local/share/wallpapers`), y sus carpetas de imágenes. Solo archivos
+    // sueltos: los directorios de ahí son paquetes de Plasma.
+    for pic_dir in &[format!("{home}/.local/share/wallpapers"), format!("{}/Imágenes", home), format!("{}/Pictures", home)] {
         if let Ok(entries) = fs::read_dir(pic_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -3452,14 +3467,108 @@ fn list_wallpapers() -> String {
 }
 #[tauri::command] async fn get_current_wallpaper() -> String {
     match bookos_desktop::config_value().await {
-        Ok(d)=>serde_json::json!({"path":d["fondo"]}).to_string(),Err(e)=>system_client::failure(e)
+        Ok(d)=>serde_json::json!({"path":fondo_efectivo(&d)}).to_string(),Err(e)=>system_client::failure(e)
     }
+}
+
+/// El fondo que el escritorio pinta ahora mismo.
+///
+/// Con `fondo_claro`/`fondo_oscuro` puestos, el escritorio usa el del tema en
+/// pantalla y `fondo` no cuenta (`bookos-comp/src/fondo.rs`: el específico gana
+/// al común). Leer solo `fondo` daba cadena vacía en cuanto se elegía una
+/// pareja, y la paleta dinámica decía «No se pudo leer el fondo de pantalla».
+fn fondo_efectivo(d: &serde_json::Value) -> String {
+    let del_tema = if d["tema_efectivo"].as_str() == Some("oscuro") { "fondo_oscuro" } else { "fondo_claro" };
+    [del_tema, "fondo"]
+        .iter()
+        .filter_map(|k| d[*k].as_str())
+        .find(|s| !s.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// El acento del escritorio más parecido a un color, de la tabla cerrada de
+/// `bookos-shell/src/tema.rs` (valores del tema claro). Por tono, no por
+/// distancia RGB: un salmón pálido y un rojo intenso son el mismo acento, y
+/// por RGB el salmón caía en naranja. Un color casi gris va a grafito.
+fn acento_mas_cercano(hex: &str) -> &'static str {
+    const TABLA: [(&str, u32); 9] = [
+        ("azul", 0x007aff), ("indigo", 0x5856d6), ("morado", 0xaf52de),
+        ("rosa", 0xff2d55), ("rojo", 0xff3b30), ("naranja", 0xff9500),
+        ("amarillo", 0xffcc00), ("verde", 0x34c759), ("turquesa", 0x009ba8),
+    ];
+    let hsv = |rgb: u32| {
+        let (r, g, b) = (((rgb >> 16) & 255) as f32 / 255.0, ((rgb >> 8) & 255) as f32 / 255.0, (rgb & 255) as f32 / 255.0);
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let d = max - min;
+        let h = if d == 0.0 { 0.0 } else if max == r { 60.0 * ((g - b) / d).rem_euclid(6.0) } else if max == g { 60.0 * ((b - r) / d + 2.0) } else { 60.0 * ((r - g) / d + 4.0) };
+        (h, if max == 0.0 { 0.0 } else { d / max })
+    };
+    let Ok(rgb) = u32::from_str_radix(hex.trim_start_matches('#'), 16) else { return "azul" };
+    let (h, sat) = hsv(rgb);
+    if sat < 0.15 {
+        return "grafito";
+    }
+    let distancia = |a: f32, b: f32| { let d = (a - b).abs(); d.min(360.0 - d) };
+    TABLA.iter()
+        .min_by(|a, b| distancia(h, hsv(a.1).0).total_cmp(&distancia(h, hsv(b.1).0)))
+        .map_or("azul", |(nombre, _)| nombre)
+}
+
+/// Con «Acento automático» encendido, pone de acento del escritorio el más
+/// cercano al color principal del fondo. Antes el interruptor solo guardaba
+/// la preferencia y no hacía nada: el escritorio seguía en su acento y las
+/// apps con la paleta dinámica salían de otro color.
+async fn sincronizar_acento_escritorio() -> Result<(), String> {
+    if load_bookos_settings().get("ColorPalette").and_then(|v| v.as_str()) != Some("true") {
+        return Ok(());
+    }
+    let d = bookos_desktop::config_value().await?;
+    let fondo = fondo_efectivo(&d);
+    let semillas = palette::seeds_from_image(&fondo)?;
+    let Some(semilla) = semillas.first() else { return Ok(()) };
+    bookos_desktop::bookos_apply_config(serde_json::json!({"acento": acento_mas_cercano(semilla)})).await.map(|_| ())
+}
+
+#[tauri::command] async fn sync_desktop_accent() -> String {
+    match sincronizar_acento_escritorio().await {
+        Ok(()) => r#"{"ok":true}"#.into(),
+        Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e)),
+    }
+}
+
+/// La pareja clara/oscura de un fondo de BookOS, si la tiene: los fondos
+/// vienen como `Light/purple.png` y `Dark/purple_dark.png`.
+fn pareja_de_fondo(path: &str) -> Option<(String, String)> {
+    let p = std::path::Path::new(path);
+    let dir = p.parent()?;
+    let base = dir.parent()?;
+    let ext = p.extension()?.to_str()?;
+    let stem = p.file_stem()?.to_str()?;
+    let (claro, oscuro) = match dir.file_name()?.to_str()? {
+        "Light" => (p.to_path_buf(), base.join("Dark").join(format!("{stem}_dark.{ext}"))),
+        "Dark" => (base.join("Light").join(format!("{}.{ext}", stem.strip_suffix("_dark")?)), p.to_path_buf()),
+        _ => return None,
+    };
+    (claro.is_file() && oscuro.is_file())
+        .then(|| (claro.to_string_lossy().into_owned(), oscuro.to_string_lossy().into_owned()))
 }
 /// Ruta del fondo actual, sin envolver en JSON: la usa también el color
 /// dinámico, que necesita el path a secas para leer la imagen.
 
 #[tauri::command] async fn set_wallpaper(path: String) -> String {
-    if let Err(e)=bookos_desktop::bookos_apply_config(serde_json::json!({"fondo":path})).await {return system_client::failure(e);}
+    // La pareja manda sobre `fondo` en el escritorio: escribir solo `fondo`
+    // con una pareja puesta no cambiaba nada en pantalla. Un fondo con pareja
+    // se guarda como pareja —el cambio de tema se lleva la imagen con él— y
+    // uno suelto vacía la pareja para poder verse.
+    let cambio = match pareja_de_fondo(&path) {
+        Some((claro, oscuro)) => serde_json::json!({"fondo":"","fondo_claro":claro,"fondo_oscuro":oscuro}),
+        None => serde_json::json!({"fondo":path,"fondo_claro":"","fondo_oscuro":""}),
+    };
+    if let Err(e)=bookos_desktop::bookos_apply_config(cambio).await {return system_client::failure(e);}
+    if let Err(e) = sincronizar_acento_escritorio().await {
+        eprintln!("[fondo] no se pudo ajustar el acento del escritorio: {e}");
+    }
     // Con el color dinámico en automático, cambiar de fondo recalcula la paleta
     // con el MISMO estilo elegido. La semilla se recalcula porque es propiedad
     // de la imagen; el estilo es una preferencia del usuario y se respeta.
@@ -3824,33 +3933,6 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     cfg["DynamicColorStyle"] = serde_json::Value::String(st.id().to_string());
     save_bookos_settings(&cfg);
 
-    // Kvantum: solo hay plantilla para bookos-dark-blue/bookos-light-blue,
-    // así que se actualizan sus archivos cuando el flag está activo.
-    // No se abre Kvantum Manager al cambiar el fondo.
-    if cfg.get("DynamicColorKvantum").and_then(|v| v.as_bool()).unwrap_or(false) {
-        let home = std::env::var("HOME").unwrap_or_default();
-        // Instalado por el paquete; en dev (cargo run / tauri dev) cae a la
-        // plantilla del propio repo.
-        let staged = std::path::PathBuf::from("/usr/share/bookos-settings/kvantum");
-        let extra_dir = if staged.is_dir() { staged } else {
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("extra/kvantum")
-        };
-        let write_kv = |name: &str, tmpl_file: &str, dark: bool| {
-            if let Ok(tmpl) = fs::read_to_string(extra_dir.join(tmpl_file)) {
-                let body = palette::kvantum_config(&tmpl, &scheme, dark);
-                let dir = std::path::PathBuf::from(&home).join(".config/Kvantum").join(name);
-                let _ = fs::create_dir_all(&dir);
-                let _ = fs::write(dir.join(format!("{}.kvconfig", name)), body);
-            }
-        };
-        write_kv("bookos-dark-blue", "bookos-dark-blue.kvconfig.tmpl", true);
-        write_kv("bookos-light-blue", "bookos-light-blue.kvconfig.tmpl", false);
-
-        // Updating the existing theme files must not launch the graphical
-        // manager or change the user's active Kvantum theme.
-
-    }
-
     // Lockscreen/SDDM: un único acento (no hay par claro/oscuro aquí, igual
     // que el default fijo "#007AFF" que reemplaza), a medio camino entre el
     // tono oscuro (80) y claro (42) que usa `roles()` para que se lea bien
@@ -3864,7 +3946,7 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
 /// Colores candidatos del fondo actual (o de `path` si se pasa uno).
 #[tauri::command] async fn dynamic_color_seeds(path: Option<String>) -> String {
     let p = if let Some(path)=path.filter(|s|!s.is_empty()){path}else{
-        match bookos_desktop::config_value().await {Ok(d)=>d["fondo"].as_str().unwrap_or_default().to_owned(),Err(e)=>return system_client::failure(e)}
+        match bookos_desktop::config_value().await {Ok(d)=>fondo_efectivo(&d),Err(e)=>return system_client::failure(e)}
     };
     if p.is_empty() { return r#"{"ok":false,"error":"no hay fondo de pantalla"}"#.into(); }
     match palette::seeds_from_image(&p) {
@@ -3900,10 +3982,9 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
     let seed = cfg.get("DynamicColorSeed").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let style = cfg.get("DynamicColorStyle").and_then(|v| v.as_str()).unwrap_or("vibrant").to_string();
     let css = fs::read_to_string(bookos_shared_dir().join("palette.css")).unwrap_or_default();
-    let kvantum = cfg.get("DynamicColorKvantum").and_then(|v| v.as_bool()).unwrap_or(false);
     let lockscreen = cfg.get("DynamicColorLockscreen").and_then(|v| v.as_bool()).unwrap_or(false);
-    format!(r#"{{"enabled":{},"seed":"{}","style":"{}","css":"{}","kvantum":{},"lockscreen":{}}}"#,
-            dynamic_color_enabled(), esc(&seed), esc(&style), esc(&css), kvantum, lockscreen)
+    format!(r#"{{"enabled":{},"seed":"{}","style":"{}","css":"{}","lockscreen":{}}}"#,
+            dynamic_color_enabled(), esc(&seed), esc(&style), esc(&css), lockscreen)
 }
 
 /// Apaga o vuelve a encender el color dinámico. Al apagarlo se borra el CSS
@@ -3926,20 +4007,6 @@ async fn write_dynamic_palette(seed: &str, style: &str) -> Result<String, String
 
 /// interruptor de iconos: mismo patrón, cada uno se recuerda por su cuenta.
 
-
-/// Aplica la paleta a Kvantum (apps Qt que no
-/// leen Kirigami.Theme: Dolphin, Kate, VLC...).
-#[tauri::command] async fn dynamic_color_set_kvantum(enabled: bool) -> String {
-    let mut cfg = load_bookos_settings();
-    cfg["DynamicColorKvantum"] = serde_json::Value::Bool(enabled);
-    let seed = cfg.get("DynamicColorSeed").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let style = cfg.get("DynamicColorStyle").and_then(|v| v.as_str()).unwrap_or("vibrant").to_string();
-    save_bookos_settings(&cfg);
-    if enabled && dynamic_color_enabled() && !seed.is_empty() {
-        let _ = write_dynamic_palette(&seed, &style).await;
-    }
-    r#"{"ok":true}"#.into()
-}
 
 /// Aplica la paleta al tema de acceso
 /// (y, best-effort sin sudo, el saludo SDDM si ya tiene permisos).
@@ -4039,13 +4106,18 @@ fn app_label_icon(id: &str) -> (String, String) {
 
 #[tauri::command] async fn get_default_apps() -> String {
     let roles = default_app_roles();
-    let mut parts: Vec<String> = Vec::new();
-    for (role, query_mime, _all_mimes, _cat) in &roles {
-        let id = if *role == "browser" {
+    // Las nueve consultas a la vez: cada `xdg-mime` es un script de shell de
+    // ~75 ms, y en fila sumaban 683 ms —medido—, que era lo que tardaba en
+    // abrirse la página de Aplicaciones. En paralelo, 99 ms.
+    let ids = futures::future::join_all(roles.iter().map(|(role, query_mime, _, _)| async move {
+        if *role == "browser" {
             run("xdg-settings", &["get", "default-web-browser"]).await
         } else {
             run("xdg-mime", &["query", "default", query_mime]).await
-        };
+        }
+    })).await;
+    let mut parts: Vec<String> = Vec::new();
+    for ((role, _, _, _), id) in roles.iter().zip(&ids) {
         let id = id.trim();
         let (name, icon) = app_label_icon(id);
         parts.push(format!(r#""{}":{{"id":"{}","name":"{}","icon":"{}"}}"#,
@@ -4088,6 +4160,11 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         "/var/lib/flatpak/exports/share/applications".to_string(),
         format!("{}/.local/share/flatpak/exports/share/applications", home),
     ];
+    // Las apps de BookOS salen siempre en su rol: sus .desktop los genera el
+    // empaquetador de Tauri sin MimeType y con Categories=Utility, así que
+    // por tipo o categoría no aparecían. Solo las que abren el archivo que
+    // reciben por argumento; Archivos y Reproductor todavía lo ignoran.
+    let ours: &[(&str, &str)] = &[("image", "bookos-viewer.desktop"), ("text", "bookos-notepad.desktop")];
     let mut seen = std::collections::HashSet::new();
     let mut apps: Vec<serde_json::Value> = Vec::new();
     for d in &dirs {
@@ -4106,7 +4183,8 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
             // category matches as a fallback.
             let mime_match = declared.iter().any(|m| role_mimes.contains(m));
             let cat_match = !cat.is_empty() && cats.contains(cat);
-            if !mime_match && !cat_match { continue; }
+            let is_ours = ours.iter().any(|(r, i)| *r == role && *i == id);
+            if !mime_match && !cat_match && !is_ours { continue; }
             let name = desktop_field(&path, "Name");
             if name.is_empty() { continue; }
             let icon = resolve_icon_file(&desktop_field(&path, "Icon"));
@@ -4556,7 +4634,7 @@ fn get_startup_page() -> String {
 }
 
 /// Opens the Software Updates page: drops the page hint where both a running
-/// instance (polled via check_navigation_request) and a fresh launch
+/// instance (a second launch forwards it over the socket) and a fresh launch
 /// (get_startup_page) will pick it up, then launches/focuses the app.
 fn open_updates_page() {
     let _ = std::fs::write("/tmp/bookos-start-page", "actualizacion");
@@ -4570,19 +4648,6 @@ fn open_updates_page() {
             .args(["--page", "actualizacion"])
             .spawn();
     }
-}
-
-/// Checks if another process has requested a page navigation (single-instance signal).
-/// Called periodically by the running instance. Reads and deletes /tmp/bookos-start-page.
-#[tauri::command]
-fn check_navigation_request() -> String {
-    let tmp = "/tmp/bookos-start-page";
-    if let Ok(page) = std::fs::read_to_string(tmp) {
-        let _ = std::fs::remove_file(tmp);
-        let p = page.trim().to_string();
-        if !p.is_empty() { return p; }
-    }
-    String::new()
 }
 
 /// Called once at startup — re-applies battery limit and performance mode from saved settings.
@@ -5010,9 +5075,10 @@ fn lock_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
     format!("{}/bookos-settings.lock", dir)
 }
-fn toggle_path() -> String {
+/// Por donde otra instancia le pide cosas a la que ya corre.
+fn socket_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    format!("{}/bookos-toggle", dir)
+    format!("{}/bookos-settings.sock", dir)
 }
 
 /// Returns true if a process with the given PID is currently running.
@@ -5021,9 +5087,30 @@ fn pid_alive(pid: u32) -> bool {
 }
 
 /// Single-instance guard.
-/// If another instance is already running, signal it (write the desired page to
-/// /tmp/bookos-start-page) and return false → caller should exit immediately.
+/// If another instance is already running, return false: `main` forwards the
+/// mode and page to it over `socket_path()` and exits.
 /// Otherwise write our PID to the lock file and return true → caller continues.
+/// Encoge la ventana a lo que quepa en la pantalla.
+///
+/// Nace de 1000×820 lógicos, y un portátil de 16:10 a escala 1,75 tiene 800 de
+/// alto: la ventana salía más alta que la pantalla y el dock le tapaba el final
+/// de la barra lateral. Se deja sitio al panel de arriba y al dock de abajo; en
+/// una pantalla grande se queda con su tamaño.
+fn encajar_en_pantalla(window: &tauri::WebviewWindow) {
+    // En Wayland, antes de mostrarse, la ventana no está en ninguna pantalla
+    // y no hay «principal»: las dos dan `None` (medido). La lista de pantallas
+    // sí está, y con una sola —un portátil— es esa.
+    let monitor = window.current_monitor().ok().flatten()
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.available_monitors().ok().and_then(|v| v.into_iter().next()));
+    let Some(monitor) = monitor else { return };
+    let pantalla = monitor.size().to_logical::<f64>(monitor.scale_factor());
+    let ancho = 1000f64.min(pantalla.width * 0.92);
+    let alto = 820f64.min(pantalla.height - 140.0);
+    let _ = window.set_size(tauri::LogicalSize::new(ancho, alto.max(500.0)));
+    let _ = window.center();
+}
+
 fn acquire_instance_lock() -> bool {
     let lock = lock_path();
     if let Ok(contents) = std::fs::read_to_string(&lock) {
@@ -5080,11 +5167,11 @@ fn desactivar_zoom_por_pellizco<R: tauri::Runtime>(
 fn main() {
 
 
-    // webkit2gtk's DMABUF renderer has a known perf/glitch regression on
-    // Wayland + Intel (Mesa) GPUs — scrolling anything with clipped rounded
-    // corners (sidebar cards) drops to low fps. Falling back to the GL
-    // renderer fixes it. Must be set before the webview is created.
-    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    // Sin WEBKIT_DISABLE_DMABUF_RENDERER: entró en d0bba5a contra un fallo de
+    // versiones viejas, pero en WebKitGTK 2.52 apagar DMABUF manda cada frame
+    // por memoria compartida (lectura de GPU a CPU y copia). A escala 2× eso son
+    // ~4× más píxeles por frame y el scroll no llega a 60 Hz. Quien lo necesite
+    // puede exportarla a mano.
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -5098,11 +5185,20 @@ fn main() {
         // A live instance is already running. Forward intent via /tmp/bookos-toggle:
         //   "1" → toggle (show if hidden, hide if visible)
         //   "show" → always show + focus (used when launched without --toggle)
-        let tp = toggle_path();
-        if args.iter().any(|a| a == "--toggle") {
-            let _ = std::fs::write(&tp, "1");
-        } else {
-            let _ = std::fs::write(&tp, "show");
+        let modo = if args.iter().any(|a| a == "--toggle") { "toggle" } else { "show" };
+        // La página, de `--page` o del fichero que dejan la notificación de
+        // actualizaciones y `open_updates_page` antes de lanzarnos.
+        let pagina = args.iter().position(|a| a == "--page")
+            .and_then(|i| args.get(i + 1).cloned())
+            .or_else(|| {
+                let p = std::fs::read_to_string("/tmp/bookos-start-page").ok()?;
+                let _ = std::fs::remove_file("/tmp/bookos-start-page");
+                Some(p.trim().to_string())
+            })
+            .unwrap_or_default();
+        use std::io::Write;
+        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(socket_path()) {
+            let _ = write!(s, "{modo} {pagina}");
         }
         std::process::exit(0);
     }
@@ -5161,6 +5257,7 @@ fn main() {
             tauri::async_runtime::spawn(async move { weather_refresh_loop().await; });
             tauri::async_runtime::spawn(async move { devices_refresh_loop().await; });
             if let Some(window) = app.get_webview_window("main") {
+                encajar_en_pantalla(&window);
                 if is_hidden || toggle_only {
                     let _ = window.set_skip_taskbar(true);
                     // Stay hidden — launched as background service
@@ -5168,16 +5265,26 @@ fn main() {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
-                // Watch for /tmp/bookos-toggle requests (from `bookos-settings --toggle`)
+                // Lo que pide otra instancia (`bookos-settings`, `--toggle`,
+                // `--page X`) llega por un socket. Antes era un fichero que
+                // este hilo miraba cada 400 ms, y la página, otro que la
+                // interfaz miraba cada 2 s: la app despertaba 2,5 veces por
+                // segundo todo el día, oculta incluida, para esperar algo que
+                // pasa unas pocas veces al día. Bloqueado en `accept()` no
+                // despierta nunca.
                 let win = window.clone();
-                std::thread::spawn(move || {
-                    let path = toggle_path();
-                    let path = path.as_str();
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(400));
-                        if std::fs::metadata(path).is_ok() {
-                            let mode = std::fs::read_to_string(path).unwrap_or_default().trim().to_string();
-                            let _ = std::fs::remove_file(path);
+                let _ = std::fs::remove_file(socket_path());
+                match std::os::unix::net::UnixListener::bind(socket_path()) {
+                Err(e) => eprintln!("[instancia] no se pudo abrir el socket: {e}"),
+                Ok(escucha) => { std::thread::spawn(move || {
+                    use std::io::Read;
+                    for conexion in escucha.incoming().flatten() {
+                        let mut mensaje = String::new();
+                        let _ = (&conexion).take(256).read_to_string(&mut mensaje);
+                        let mut partes = mensaje.split_whitespace();
+                        let mode = partes.next().unwrap_or("show").to_string();
+                        let pagina = partes.next().unwrap_or("").to_string();
+                        {
                             let visible = win.is_visible().unwrap_or(false);
                             let minimized = win.is_minimized().unwrap_or(false);
                             // Ask the desktop to raise and focus the window.
@@ -5207,9 +5314,14 @@ fn main() {
                             } else {
                                 raise();
                             }
+                            if !pagina.is_empty() {
+                                use tauri::Emitter;
+                                let _ = win.emit("navigate", pagina);
+                            }
                         }
                     }
-                });
+                }); }
+                }
             }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
@@ -5454,7 +5566,7 @@ fn main() {
             system_extras::list_keymaps_pretty,
             system_extras::set_avatar_data,
             get_user_info,set_display_name,set_hostname,get_system_info,get_default_hostname,get_bookos_release,refresh_bookos_release,get_update_channel,set_update_channel,apply_bookos_release,list_bookos_snapshots,rollback_bookos_snapshot,get_snapshot_support,enable_snapshot_access,create_snapshot,get_bookos_repo_status,set_bookos_repo,
-            check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,get_firmware_power_controls,set_firmware_power_control,
+            check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,get_power_actions,get_firmware_power_controls,set_firmware_power_control,
             system_settings::get_wifi_status,system_settings::toggle_wifi,system_settings::get_wifi_list,system_settings::connect_wifi,system_settings::wifi_rescan,
             system_settings::get_bluetooth_status,system_settings::toggle_bluetooth,system_settings::get_bluetooth_devices,system_settings::connect_bluetooth,system_settings::disconnect_bluetooth,system_settings::bluetooth_scan,
             system_settings::get_airplane_mode,system_settings::toggle_airplane_mode,
@@ -5477,11 +5589,10 @@ fn main() {
             system_settings::forget_wifi,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
             wallpaper_preview::wallpaper_preview,get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
             refresh_weather_cache,refresh_devices_cache,
-            dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,
-            dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_kvantum,dynamic_color_set_lockscreen,
+            dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,sync_desktop_accent,
+            dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_lockscreen,
             get_default_apps,list_apps_for_role,set_default_app,
-            get_bookos_setting,set_bookos_setting,get_settings_batch,configure_auto_update,restore_startup_settings,get_startup_page,check_navigation_request,write_ipc_state,read_ipc_state,
-            get_available_kvantum_themes,
+            get_bookos_setting,set_bookos_setting,get_settings_batch,configure_auto_update,restore_startup_settings,get_startup_page,write_ipc_state,read_ipc_state,
             get_bt_device_battery,get_kdeconnect_devices,
             system_settings::get_audio_devices,system_settings::set_default_sink,system_settings::set_default_source,system_settings::get_app_audio,system_settings::set_app_volume,system_settings::get_sink_descriptions,
             launch_app,which_app,open_external_url,
@@ -5532,4 +5643,48 @@ async fn open_printers()->Result<(),String> {
 #[tauri::command]
 fn get_available_themes()->String {
     serde_json::json!([{"name":"claro","is_dark":false},{"name":"oscuro","is_dark":true}]).to_string()
+}
+
+#[cfg(test)]
+mod pruebas_fondo {
+    use super::{fondo_efectivo, pareja_de_fondo};
+
+    /// Con la pareja puesta, el fondo es el del tema en pantalla, y `fondo`
+    /// solo cuenta si no hay pareja: es lo que hace el escritorio.
+    #[test]
+    fn se_lee_el_fondo_que_se_ve() {
+        let d = serde_json::json!({"fondo":"","fondo_claro":"/c.png","fondo_oscuro":"/o.png","tema_efectivo":"oscuro"});
+        assert_eq!(fondo_efectivo(&d), "/o.png");
+        let d = serde_json::json!({"fondo":"/f.png","fondo_claro":null,"fondo_oscuro":null,"tema_efectivo":"claro"});
+        assert_eq!(fondo_efectivo(&d), "/f.png");
+    }
+
+    /// Los fondos de BookOS se emparejan en los dos sentidos.
+    #[test]
+    fn los_fondos_de_bookos_tienen_pareja() {
+        let raiz = "/home/eve/Descargas/BookOS/BookOS-Wallpapers/Wallpapers-0.6";
+        if !std::path::Path::new(raiz).is_dir() {
+            return;
+        }
+        let claro = format!("{raiz}/Light/purple.png");
+        let oscuro = format!("{raiz}/Dark/purple_dark.png");
+        assert_eq!(pareja_de_fondo(&claro), Some((claro.clone(), oscuro.clone())));
+        assert_eq!(pareja_de_fondo(&oscuro), Some((claro, oscuro)));
+        assert_eq!(pareja_de_fondo("/tmp/foto.png"), None);
+    }
+}
+
+#[cfg(test)]
+mod pruebas_acento {
+    use super::acento_mas_cercano;
+
+    /// El salmón que la paleta dinámica sacó de un fondo rojo es rojo, no
+    /// naranja; un morado es morado; y un gris no tiene acento.
+    #[test]
+    fn el_color_del_fondo_cae_en_su_acento() {
+        assert_eq!(acento_mas_cercano("#FFAEA7"), "rojo");
+        assert_eq!(acento_mas_cercano("#6A2FC0"), "morado");
+        assert_eq!(acento_mas_cercano("#2F6FE0"), "azul");
+        assert_eq!(acento_mas_cercano("#7A7A80"), "grafito");
+    }
 }

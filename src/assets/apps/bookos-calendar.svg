@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="512" height="512" rx="80" fill="#1E293B"/>
+<rect x="436" y="302" width="361" height="193" rx="40" transform="rotate(-180 436 302)" fill="#2A95FF"/>
+<rect x="436" y="346" width="361" height="183" rx="42" transform="rotate(-180 436 346)" fill="#9BCDFF"/>
+<rect x="436" y="412" width="361" height="163" rx="31" transform="rotate(-180 436 412)" fill="#9BCDFF"/>
+<rect x="145" y="77" width="35" height="60" rx="17.5" fill="url(#paint0_linear_798_277)"/>
+<rect x="331" y="77" width="35" height="109" rx="17.5" fill="#69B4FF"/>
+<rect x="145" y="77" width="35" height="109" rx="17.5" fill="#69B4FF"/>
+<path d="M264.46 341.44C260.74 341.44 257.86 340.42 255.82 338.38C253.9 336.22 252.94 333.28 252.94 329.56V238.66H263.92L239.62 260.8C237.7 262.48 235.72 263.5 233.68 263.86C231.64 264.1 229.78 263.8 228.1 262.96C226.54 262.12 225.34 260.92 224.5 259.36C223.66 257.68 223.42 255.88 223.78 253.96C224.26 251.92 225.58 249.88 227.74 247.84L254.92 222.28C256.84 220.6 258.7 219.46 260.5 218.86C262.3 218.26 264.22 217.96 266.26 217.96C268.3 217.96 270.04 218.38 271.48 219.22C272.92 219.94 274 221.08 274.72 222.64C275.56 224.08 275.98 225.88 275.98 228.04V329.56C275.98 333.28 275.02 336.22 273.1 338.38C271.18 340.42 268.3 341.44 264.46 341.44Z" fill="white"/>
+<defs>
+<linearGradient id="paint0_linear_798_277" x1="162.5" y1="77" x2="162.5" y2="137" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2A95FF"/>
+<stop offset="1" stop-color="#195999"/>
+</linearGradient>
+</defs>
+</svg>

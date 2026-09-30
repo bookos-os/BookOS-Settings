@@ -1,6 +1,6 @@
 [package]
 name = "bookos-settings"
-version = "0.6.2"
+version = "0.6.3"
 description = "Settings for the BookOS desktop"
 authors = ["BookOS"]
 edition = "2021"
