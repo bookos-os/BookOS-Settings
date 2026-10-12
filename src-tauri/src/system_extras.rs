@@ -36,6 +36,23 @@ pub fn set_avatar_data(data: Vec<u8>) -> Result<String, String> {
         return Err("formato no soportado".into());
     }
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
-    std::fs::write(format!("{home}/.face"), &data).map_err(|e| e.to_string())?;
+    let face = format!("{home}/.face");
+    std::fs::write(&face, &data).map_err(|e| e.to_string())?;
+    publicar_avatar(&face);
     Ok(r#"{"ok":true}"#.into())
+}
+
+/// Copia la foto a AccountsService, que es de donde leen el bloqueo de
+/// pantalla y SDDM; con solo ~/.face se quedaban con la foto antigua.
+/// SetIconFile sobre la cuenta propia no pide autorización (probado con
+/// busctl). Si el servicio no está, ~/.face sigue siendo válido para el resto
+/// de consumidores, así que el fallo no aborta el cambio.
+pub fn publicar_avatar(face: &str) {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(uid) = std::fs::metadata("/proc/self").map(|m| m.uid()) else { return };
+    let _ = std::process::Command::new("busctl")
+        .args(["--system", "call", "org.freedesktop.Accounts",
+               &format!("/org/freedesktop/Accounts/User{uid}"),
+               "org.freedesktop.Accounts.User", "SetIconFile", "s", face])
+        .output();
 }

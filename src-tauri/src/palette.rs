@@ -146,18 +146,22 @@ pub fn scheme_from_seed(seed_hex: &str, style: Style) -> Scheme {
     let (_, seed_c, seed_h) = rgb_to_oklch(r, g, b);
 
     // Una semilla casi gris no tiene tono utilizable: el atan2 devuelve ruido.
-    // Se cae al azul de BookOS antes que generar una paleta con un tono al azar.
-    let h = if seed_c < 0.012 { 250.0 } else { seed_h };
+    // El matiz de referencia es estable; el croma de la semilla conserva el gris.
+    let h = if seed_c < 0.001 { 250.0 } else { seed_h };
+    let saturacion = (seed_c / 0.16).min(1.0);
 
-    // (primary, secondary, tertiary, neutral, neutralVariant, giro de tertiary,
-    //  giro de secondary). El croma de primary se topa con el de la semilla en
-    //  los estilos suaves para que un fondo apagado no salga fosforito.
     let (pc, sc, tc, nc, nvc, t_rot, s_rot) = match style {
         Style::Vibrant    => (0.155, 0.075, 0.140, 0.013, 0.030,  60.0,   0.0),
         Style::Expressive => (0.130, 0.100, 0.140, 0.012, 0.028, 120.0,  35.0),
-        Style::Muted      => (seed_c.min(0.085).max(0.055), 0.042, 0.055, 0.009, 0.020, 60.0, 0.0),
+        Style::Muted      => (seed_c.min(0.085), 0.042, 0.055, 0.009, 0.020, 60.0, 0.0),
         Style::Neutral    => (0.030, 0.020, 0.022, 0.005, 0.011,  30.0,   0.0),
     };
+
+    let pc = seed_c.min(pc);
+    let sc = sc * saturacion;
+    let tc = tc * saturacion;
+    let nc = seed_c.min(nc);
+    let nvc = seed_c.min(nvc);
 
     Scheme {
         primary:         Tonal { hue: h,                     chroma: pc },
@@ -284,102 +288,84 @@ pub fn json(seed: &str, style: Style, s: &Scheme) -> String {
 
 // ── Semillas del fondo de pantalla ───────────────────────────────────────
 
-/// Extrae hasta `want` colores representativos, con tonos separados entre sí.
-///
-/// El histograma de ImageMagick da los colores dominantes, pero en crudo salen
-/// cinco variantes del mismo azul: si un fondo es mayoritariamente de un color,
-/// las 16 entradas más pobladas son ese color. Por eso se agrupa por TONO y de
-/// cada grupo sale un único representante.
 pub fn seeds_from_image(path: &str) -> Result<Vec<String>, String> {
     use std::process::Command;
-    let magick = if Command::new("magick").arg("-version").output().is_ok() { "magick" } else { "convert" };
+    let magick = if Command::new("magick").arg("-version").output().is_ok() {
+        "magick"
+    } else {
+        "convert"
+    };
     let out = Command::new(magick)
-        .args([path, "-resize", "160x160!", "-colors", "48", "-format", "%c", "histogram:info:"])
+        // `[0]` evita decodificar todos los fotogramas de un fondo animado.
+        .args([
+            &format!("{path}[0]"),
+            "-resize",
+            "160x160!",
+            "-colorspace",
+            "sRGB",
+            "-colors",
+            "48",
+            "-depth",
+            "8",
+            "-format",
+            "%c",
+            "histogram:info:",
+        ])
         .output()
         .map_err(|e| format!("ImageMagick no disponible: {}", e))?;
-    if !out.status.success() { return Err("ImageMagick falló al leer la imagen".into()); }
-    let text = String::from_utf8_lossy(&out.stdout);
-
-    struct Bucket { hue: f64, score: f64, chroma: f64, r: f64, g: f64, b: f64, w: f64 }
-    let mut buckets: Vec<Bucket> = Vec::new();
-    let mut gray_score = 0.0f64;
-    let mut gray_hue = 250.0f64;
-
-    for line in text.lines() {
-        // Formato: "   1234: ( 41, 62,110) #295A6E srgb(...)"
-        let count: f64 = match line.trim().split(':').next().and_then(|c| c.trim().parse().ok()) {
-            Some(c) => c, None => continue,
-        };
-        let hex = match line.split('#').nth(1) { Some(h) => h, None => continue };
-        let hex: String = hex.chars().take(6).collect();
-        let (r, g, b) = match hex_to_rgb(&hex) { Some(v) => v, None => continue };
-        let (l, c, h) = rgb_to_oklch(r, g, b);
-        // Ni lo casi negro ni lo casi blanco sirven de semilla: no tienen tono
-        // fiable y de ellos no sale ninguna paleta distinguible.
-        if !(0.20..=0.92).contains(&l) { continue; }
-        // Superficie x croma, igual que el acento del SDDM: un color mayoritario
-        // aunque apagado manda sobre un destello saturado de cuatro píxeles.
-        let score = count * (0.20 + c * 6.0).min(1.6);
-        if c < 0.025 {
-            if score > gray_score { gray_score = score; gray_hue = h; }
-            continue;
-        }
-        // Los tonos a menos de 22° se consideran el mismo color y se funden,
-        // ponderando por la puntuación para que el representante caiga donde
-        // está el peso, no en el primero que llegó.
-        match buckets.iter_mut().find(|b| {
-            let d = (b.hue - h).abs();
-            d.min(360.0 - d) < 22.0
-        }) {
-            Some(bk) => {
-                let w = bk.w + score;
-                bk.hue = circ_mean(bk.hue, bk.w, h, score);
-                bk.r = (bk.r * bk.w + r as f64 * score) / w;
-                bk.g = (bk.g * bk.w + g as f64 * score) / w;
-                bk.b = (bk.b * bk.w + b as f64 * score) / w;
-                bk.chroma = (bk.chroma * bk.w + c * score) / w;
-                bk.score += score;
-                bk.w = w;
-            }
-            None => buckets.push(Bucket { hue: h, score, chroma: c, w: score,
-                                          r: r as f64, g: g as f64, b: b as f64 }),
-        }
+    if !out.status.success() {
+        return Err("ImageMagick falló al leer la imagen".into());
     }
-
-    buckets.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    // Cuatro semillas del fondo: las más "interesantes" (mayor score = más
-    // presencia x croma) primero. Si el fondo no da para tantos tonos
-    // distintos, se rellena con el gris neutro; si tampoco hay eso, se
-    // devuelven menos de 4 en vez de inventar color donde no lo hay.
-    let want = 4;
-    let mut seeds: Vec<String> = buckets.iter().take(want).map(|b| {
-        // El representante se normaliza a un croma y una luminosidad usables:
-        // la semilla es solo el TONO, la paleta ya decide el resto.
-        let (_, _, h) = rgb_to_oklch(b.r.round() as u8, b.g.round() as u8, b.b.round() as u8);
-        oklch_to_hex(tone_to_okl(60.0), b.chroma.clamp(0.05, 0.16), h)
-    }).collect();
-
-    // Relleno neutro solo si hacen falta plazas: fondos (blanco y negro, nieve,
-    // noche) de los que no sale ningún color honesto igual necesitan una
-    // opción, pero un fondo con 4+ tonos reales no debería perder una plaza
-    // por un gris que nadie pidió.
-    if seeds.len() < want {
-        seeds.push(oklch_to_hex(tone_to_okl(60.0), 0.02, gray_hue));
-    }
-
-    if seeds.is_empty() { return Err("sin colores utilizables en la imagen".into()); }
-    Ok(seeds)
+    semillas_del_histograma(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// Media de dos ángulos en el círculo de tono, ponderada. Promediar 350° y 10°
-/// a pelo da 180° (el color opuesto), que es el error clásico al agrupar tonos.
-fn circ_mean(h1: f64, w1: f64, h2: f64, w2: f64) -> f64 {
-    let (a1, a2) = (h1.to_radians(), h2.to_radians());
-    let x = a1.cos() * w1 + a2.cos() * w2;
-    let y = a1.sin() * w1 + a2.sin() * w2;
-    let mut h = y.atan2(x).to_degrees();
-    if h < 0.0 { h += 360.0; }
-    h
+fn semillas_del_histograma(texto: &str) -> Result<Vec<String>, String> {
+    struct Color {
+        semilla: String,
+        puntuacion: f64,
+        a: f64,
+        b: f64,
+    }
+    let mut colores: Vec<Color> = texto
+        .lines()
+        .filter_map(|linea| {
+            let cantidad: f64 = linea.trim().split(':').next()?.trim().parse().ok()?;
+            let semilla: String = linea.split('#').nth(1)?.chars().take(6).collect();
+            let (r, g, b) = hex_to_rgb(&semilla)?;
+            let (_, c, h) = rgb_to_oklch(r, g, b);
+            Some(Color {
+                semilla: format!("#{semilla}"),
+                puntuacion: cantidad * (0.20 + c * 6.0).min(1.6),
+                a: c * h.to_radians().cos(),
+                b: c * h.to_radians().sin(),
+            })
+        })
+        .collect();
+    colores.sort_by(|a, b| b.puntuacion.total_cmp(&a.puntuacion));
+
+    let mut grupos: Vec<Color> = Vec::new();
+    for color in colores {
+        // La paleta fija la luminosidad por contraste; distinguir solo por
+        // luminosidad ofrecería varias fichas con la misma paleta.
+        if let Some(grupo) = grupos
+            .iter_mut()
+            .find(|grupo| (grupo.a - color.a).hypot(grupo.b - color.b) < 0.008)
+        {
+            grupo.puntuacion += color.puntuacion;
+        } else {
+            grupos.push(color);
+        }
+    }
+    grupos.sort_by(|a, b| b.puntuacion.total_cmp(&a.puntuacion));
+    let semillas: Vec<String> = grupos
+        .into_iter()
+        .take(4)
+        .map(|color| color.semilla)
+        .collect();
+    if semillas.is_empty() {
+        return Err("sin colores utilizables en la imagen".into());
+    }
+    Ok(semillas)
 }
 
 #[cfg(test)]
@@ -412,11 +398,86 @@ mod tests {
         }
     }
 
-    /// Una semilla gris no tiene tono utilizable: debe caer al azul de BookOS
-    /// en vez de generar una paleta con un hue de ruido.
     #[test]
     fn gray_seed_falls_back() {
         let s = scheme_from_seed("#808080", Style::Vibrant);
         assert!((s.primary.hue - 250.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn conserva_colores_distintos_del_fondo() {
+        let semillas =
+            semillas_del_histograma("100: #FF0000\n100: #00FF00\n100: #0000FF\n100: #FFFF00")
+                .expect("histograma con cuatro colores válidos");
+        assert_eq!(semillas.len(), 4);
+        for color in ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"] {
+            assert!(semillas.iter().any(|seed| seed == color), "falta {color}");
+        }
+    }
+
+    #[test]
+    fn no_inventa_semillas_en_un_fondo_monocromo() {
+        let semillas =
+            semillas_del_histograma("100: #79715C").expect("histograma con un beige válido");
+        assert_eq!(semillas, ["#79715C"]);
+        assert!(semillas_del_histograma("").is_err());
+    }
+
+    #[test]
+    fn distingue_saturaciones_del_mismo_matiz() {
+        let semillas = semillas_del_histograma("100: #F5E6D2\n100: #79715C")
+            .expect("histograma con dos beiges válidos");
+        assert_eq!(semillas.len(), 2);
+    }
+
+    #[test]
+    fn fondo_gris_conserva_una_paleta_neutra() {
+        let semillas = semillas_del_histograma("100: #000000\n100: #808080\n100: #FFFFFF")
+            .expect("histograma con grises válidos");
+        assert_eq!(semillas.len(), 1);
+        let esquema = scheme_from_seed(&semillas[0], Style::Expressive);
+        for rampa in [esquema.primary, esquema.secondary, esquema.tertiary] {
+            assert!(
+                rampa.chroma < 0.001,
+                "el gris debe conservarse sin saturación"
+            );
+        }
+    }
+
+    #[test]
+    fn un_fondo_apagado_no_genera_acentos_chillones() {
+        let (_, croma, _) = rgb_to_oklch(121, 113, 92);
+        for estilo in [
+            Style::Vibrant,
+            Style::Expressive,
+            Style::Muted,
+            Style::Neutral,
+        ] {
+            let esquema = scheme_from_seed("#79715C", estilo);
+            for rampa in [esquema.primary, esquema.secondary, esquema.tertiary] {
+                assert!(
+                    rampa.chroma <= croma,
+                    "el acento no debe saturarse más que el fondo"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn un_marron_poco_saturado_conserva_su_matiz() {
+        let (_, _, matiz) = rgb_to_oklch(48, 43, 39);
+        let esquema = scheme_from_seed("#302B27", Style::Expressive);
+        assert!((esquema.primary.hue - matiz).abs() < 0.001);
+    }
+
+    #[test]
+    fn lee_svg_sin_confundir_canales_de_16_bits() {
+        let ruta = std::env::temp_dir().join(format!("bookos-paleta-{}.svg", std::process::id()));
+        std::fs::write(&ruta, r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#79715C"/></svg>"##)
+            .expect("directorio temporal disponible para el SVG de prueba");
+        let resultado = seeds_from_image(ruta.to_str().expect("ruta temporal UTF-8"));
+        std::fs::remove_file(ruta).expect("SVG temporal creado por esta prueba");
+        let semillas = resultado.expect("ImageMagick disponible para leer el SVG");
+        assert_eq!(semillas, ["#79715C"]);
     }
 }

@@ -23,9 +23,10 @@
  * Nada toca el disco hasta pulsar "Hecho".
  */
 import {
-    tauriInvoke, getAssetUrl, esc, toast, showRootAuth
+    tauriInvoke, getAssetUrl, elegirRuta, esc, toast, showRootAuth
 } from './_common.js';
 import { t, getLang } from '../i18n.js';
+import { ico } from './iconos.js';
 
 // Textos que el greeter de SDDM y la pantalla de bloqueo NO pueden traducir por
 // su cuenta: el primero arranca antes de que haya sesión y el segundo es un QML
@@ -126,15 +127,15 @@ function wxStateNow() {
 // Catálogo de widgets. Añadir uno aquí basta para que salga en el editor;
 // su pintado real vive en GreeterWidgets.qml.
 const WIDGETS = [
-    ['battery', 'Batería', 'Portátil, móvil, tablet y auriculares', '🔋'],
-    ['weather', 'Tiempo',  'De tu zona, sin consultar nada al iniciar', '⛅'],
-    ['date',    'Fecha',   'Día del mes y tu próximo evento', '📅'],
+    ['battery', 'Batería', 'Portátil, móvil, tablet y auriculares', ico('battery', { size: 20 })],
+    ['weather', t('weather'), 'De tu zona, sin consultar nada al iniciar', ico('cloud-sun', { size: 20 })],
+    ['date',    'Fecha',   'Día del mes y tu próximo evento', ico('calendar', { size: 20 })],
     // Los dos siguientes necesitan datos de la sesión, así que solo se pintan
     // con Win+L. En la pantalla de acceso no hay bus de sesión al que preguntar
     // y la tarjeta simplemente no aparece.
-    ['media',   'Música',  'Lo que suena, con controles · solo con Win+L', '🎵'],
-    ['notifications', 'Notificaciones', 'Solo aparece si hay avisos · solo con Win+L', '🔔'],
-    ['calendar',      'Calendario',     'Hoy y mañana con tus eventos · solo con Win+L', '🗓️']
+    ['media',   'Música',  'Lo que suena, con controles · solo con Win+L', ico('music', { size: 20 })],
+    ['notifications', 'Notificaciones', 'Solo aparece si hay avisos · solo con Win+L', ico('bell', { size: 20 })],
+    ['calendar',      'Calendario',     'Hoy y mañana con tus eventos · solo con Win+L', ico('calendar-days', { size: 20 })]
 ];
 /** Widgets que no existen en el greeter de SDDM. */
 const SESSION_ONLY = ['notifications', 'calendar', 'media'];
@@ -251,7 +252,7 @@ const corners = () =>
 function markup() {
     return `
     <div class="detail-header">
-      <button type="button" class="back-btn" aria-label="Volver" title="Volver">←</button>
+      <button type="button" class="back-btn" aria-label="Volver" title="Volver">${ico('arrow-left', { size: 22, sw: 2.2 })}</button>
       <h2 class="detail-title">Pantalla de inicio de sesión</h2>
     </div>
 
@@ -386,7 +387,7 @@ function paint() {
             const meta = WIDGETS.find(m => m[0] === w) || [w, w, '', ''];
             const body = w === 'date'
                 ? `<span class="ed-wt ed-wt-date"><i>${
-                    new Date().toLocaleDateString((cfg.locale||'es_ES').replace('_','-'),
+                    new Date().toLocaleDateString(getLang(),
                     { weekday:'short' }).toUpperCase()}</i><b>${new Date().getDate()}</b>
                     <u>${esc(t('ls_no_events'))}</u></span>`
                 : w === 'weather' && wSize(w) === 'large'
@@ -401,18 +402,18 @@ function paint() {
                      </span>
                    </span>`
                 : w === 'weather'
-                ? `<span class="ed-wi">⛅</span><span class="ed-wt"><b>18°</b><i>Madrid</i></span>`
+                ? `<span class="ed-wi">${ico('cloud-sun', { size: 24 })}</span><span class="ed-wt"><b>18°</b><i>Madrid</i></span>`
                 // Notificaciones: se maqueta la cabecera y tres avisos de
                 // ejemplo. Sin texto del aviso, igual que en la pantalla real.
                 : w === 'notifications'
-                ? `<span class="ed-wn"><i class="ed-wn-h">NOTIFICACIONES 🔔</i>${
+                ? `<span class="ed-wn"><i class="ed-wn-h">${t('ls_notifications')} ${ico('bell', { size: 10, sw: 2.4 })}</i>${
                     [['17:00','Mensajes'],['16:00','Correo'],['15:00','Calendario']]
                     .map(([t, app]) => `<span class="ed-wn-r"><span><i>${t}</i><b>${app}</b></span>
                         <span class="ed-wn-dot"></span></span>`).join('')}</span>`
                 // Calendario: hoy y mañana, con los nombres de día del locale.
                 : w === 'calendar'
                 ? (() => {
-                    const loc = (cfg.locale || 'es_ES').replace('_', '-');
+                    const loc = getLang();
                     const d0 = new Date(), d1 = new Date();
                     d1.setDate(d1.getDate() + 1);
                     const col = (d, ev) => `<span class="ed-wc-c">
@@ -423,10 +424,10 @@ function paint() {
                   })()
                 : w === 'media'
                 ? `<span class="ed-wm">
-                     <span class="ed-wm-art">♪</span>
+                     <span class="ed-wm-art">${ico('music', { size: 22 })}</span>
                      <span class="ed-wm-txt">
                        <b>Título de la canción</b><i>Artista</i>
-                       <span class="ed-wm-ctl"><u>◀◀</u><u class="main">▶</u><u>▶▶</u></span>
+                       <span class="ed-wm-ctl"><u>${ico('skip-back', { size: 11 })}</u><u class="main">${ico('play', { size: 11 })}</u><u>${ico('skip-forward', { size: 11 })}</u></span>
                      </span>
                    </span>`
                 : w === 'battery' && wSize(w) === 'large'
@@ -437,7 +438,7 @@ function paint() {
                        </span>
                        <i>${d.pct} %</i>
                      </span>`).join('')}</span>`
-                : `<span class="ed-wi">🔋</span><span class="ed-wt"><b>${
+                : `<span class="ed-wi">${ico('battery', { size: 24 })}</span><span class="ed-wt"><b>${
                     esc(t('ls_battery'))}</b><i>69 %</i></span>`;
             const wxBg = w === 'weather'
                 ? (() => { const [a, b] = WX_STATES[wxStateNow()];
@@ -498,8 +499,10 @@ function paint() {
     bar.dataset.pos = cfg.bookBarPosition;
     const pill = document.getElementById('ed-pill');
     pill.classList.toggle('compact', cfg.bookBarSize === 'compact');
-    pill.textContent = !barOn ? 'BookBar oculta · toca para activarla'
-        : isTrue(cfg.showBattery) ? '⚡ 69% · 219 min' : 'Modo Concentración';
+    // El rayo es el zap de Lucide y no un emoji.
+    const RAYO = ico('zap', { size: 13, sw: 2.2, cls: 'ico-t' }) + ' ';
+    pill.innerHTML = !barOn ? 'BookBar oculta · toca para activarla'
+        : isTrue(cfg.showBattery) ? `${RAYO}69% · 219 min` : 'Modo Concentración';
 
     document.querySelectorAll('.ed-el').forEach(e =>
         e.classList.toggle('ed-sel', e.dataset.el === selected));
@@ -515,7 +518,7 @@ function paint() {
 }
 
 function fmtDate(d) {
-    const loc = (cfg.locale || 'es_ES').replace('_', '-');
+    const loc = getLang();
     try {
         if (cfg.dateStyle === 'short') return d.toLocaleDateString(loc);
         if (cfg.dateStyle === 'weekday') return d.toLocaleDateString(loc, { weekday: 'long' });
@@ -977,9 +980,8 @@ export async function renderSddmEditor(c) {
 
         if (ev.target.closest('#ed-pick') || ev.target.closest('#ed-wall')) {
             try {
-                const { open } = window.__TAURI__.dialog;
-                const path = await open({ multiple: false,
-                    filters: [{ name: 'Imagen', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+                const path = await elegirRuta('open',{ multiple: false,
+                    filters: [{ name: t('image'), extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
                 if (path) {
                     cfg.bgImage = path;
                     if (cfg.background === 'solid') cfg.background = 'blur';

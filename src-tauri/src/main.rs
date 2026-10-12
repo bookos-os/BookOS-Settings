@@ -23,6 +23,7 @@ async fn upower_bat_path() -> String {
 mod hardware_control;
 mod buds;
 mod bluez_profile;
+mod isla;
 mod quickshare;
 mod p2p;
 mod system_extras;
@@ -454,6 +455,9 @@ fn set_update_channel(channel: String) -> String {
             let _ = std::fs::write(format!("{}/.config/bookos-update.conf", home), &out);
         }
     }
+    // El logo del panel lleva el color del canal; sin este aviso no cambiaría
+    // hasta reiniciar la sesión. Fuera de BookOS no hay quien conteste y no pasa nada.
+    tauri::async_runtime::spawn(bookos_desktop::bookos_reload_config("canal".into()));
     format!(r#"{{"ok":true,"channel":"{}"}}"#, esc(&channel))
 }
 
@@ -1005,6 +1009,9 @@ fn detect_book_model() -> Option<String> {
         "tapa": tapa,
         "tapa_ac": tapa_ac,
         "critica": clave(&upower, "CriticalPowerAction").unwrap_or_else(|| "Auto".into()),
+        // Umbral de «batería baja» del sistema; el gráfico de 24 h pinta en
+        // rojo por debajo. 20 es el valor por defecto de UPower.
+        "bajo": clave(&upower, "PercentageLow").and_then(|v| v.parse::<f64>().ok()).unwrap_or(20.0),
     }).to_string()
 }
 
@@ -1164,6 +1171,31 @@ fn parse_upower(info: &str) -> String {
     recent.reverse();
     
     Ok(format!("[{}]", recent.join(",")))
+}
+
+// ── Historial del perfil de energía ──────────────────────────────────────
+// Ni upower ni power-profiles-daemon guardan cuándo estuvo el equipo en ahorro,
+// y el gráfico de 24 h lo necesita para pintar esas barras de naranja. Lo
+// anota el hilo de batería de fondo, una línea «marca perfil» por cambio.
+
+fn perfil_energia_log() -> String {
+    format!("{}/.local/share/bookos/perfil-energia.log", std::env::var("HOME").unwrap_or_default())
+}
+
+/// Mismo orden de lectura que `check_hw_features`. Sin subproceso: se mira
+/// cada minuto todo el día.
+fn perfil_energia_actual() -> String {
+    let p = read("/sys/class/platform-profile/platform-profile-0/profile");
+    if p.is_empty() { read("/sys/firmware/acpi/platform_profile") } else { p }
+}
+
+#[tauri::command] fn get_power_profile_history() -> String {
+    let filas: Vec<String> = fs::read_to_string(perfil_energia_log()).unwrap_or_default().lines()
+        .filter_map(|l| {
+            let (t, perfil) = l.split_once(' ')?;
+            Some(format!(r#"{{"t":{},"p":"{}"}}"#, t.parse::<i64>().ok()?, esc(perfil)))
+        }).collect();
+    format!("[{}]", filas.join(","))
 }
 
 // ── Adaptive Battery (BookOS CSV system) ─────────────────────────────────
@@ -1773,8 +1805,41 @@ fn install_icon_pack(variant: &str, theme_name: &str, base_tint: Option<(f64, f6
                 });
             }
         });
+        completar_iconos_tintados(&dst_apps);
     }
     Ok(theme_name.to_string())
+}
+
+/// Base64 estándar; solo lo usa `completar_iconos_tintados` y no compensa una
+/// dependencia para esto.
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    bytes.chunks(3).map(|c| {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        let s = |i: u32| T[(n >> (18 - 6 * i) & 63) as usize] as char;
+        format!("{}{}{}{}", s(0), s(1), if c.len() > 1 { s(2) } else { '=' }, if c.len() > 2 { s(3) } else { '=' })
+    }).collect()
+}
+
+/// Papirus no trae estos: sin ellos el dock los pinta con su PNG, sin la placa
+/// teñida. Se hacen como el generador: la placa del pack (`head` de otro icono
+/// ya teñido) y el logo encima al 65 %.
+fn completar_iconos_tintados(dst_apps: &std::path::Path) {
+    let Ok(modelo) = std::fs::read_to_string(dst_apps.join("bookos-settings.svg")) else { return };
+    let Some(pos) = modelo.find("<g transform=") else { return };
+    let head = &modelo[..pos];
+    // (nombre en el tema, PNG del que sale el logo)
+    for (nombre, png) in [("wireguard-gui", "/usr/share/icons/hicolor/128x128/apps/wireguard-gui.png")] {
+        let Ok(bytes) = std::fs::read(png) else { continue };
+        let svg = format!(
+            "{head}<g transform=\"translate(89.60, 89.60) scale(0.650)\" filter=\"url(#logoShadow)\" opacity=\"0.95\">\n<image width=\"512\" height=\"512\" href=\"data:image/png;base64,{}\"/>\n</g>\n</svg>\n",
+            base64(&bytes)
+        );
+        let _ = std::fs::write(dst_apps.join(format!("{nombre}.svg")), svg);
+    }
+    // Zen: el pack lo trae como `zen-browser`, pero su `.desktop` lo pide por
+    // la clase de ventana.
+    let _ = std::fs::copy(dst_apps.join("zen-browser.svg"), dst_apps.join("zen.svg"));
 }
 
 // Apply the chosen icon theme to the running session.
@@ -1807,7 +1872,9 @@ async fn set_icon_style(mode: String, hue: Option<f64>, strength: Option<f64>, d
             let is_dark = dark.unwrap_or(true);
             // Alternate names so the session sees every palette change.
             let cur = run("gsettings", &["get","org.gnome.desktop.interface","icon-theme"]).await;
-            let name = if cur.trim() == "BookOS-Tinted" { "BookOS-Tinted-B" } else { "BookOS-Tinted" };
+            // gsettings lo devuelve entre comillas: sin quitarlas nunca era
+            // igual y siempre salía «-B», así que la sesión no veía el cambio.
+            let name = if cur.trim().trim_matches('\'') == "BookOS-Tinted" { "BookOS-Tinted-B" } else { "BookOS-Tinted" };
             // The pack rewrite touches ~8k SVGs — run it off the async runtime
             // so the UI stays responsive.
             let nm = name.to_string();
@@ -1821,7 +1888,22 @@ async fn set_icon_style(mode: String, hue: Option<f64>, strength: Option<f64>, d
         _ => return r#"{"ok":false,"error":"modo inválido"}"#.into(),
     };
     apply_icon_theme(&theme).await;
+    // El dock es del compositor y no escucha a gsettings: hay que avisarle.
+    bookos_desktop::bookos_reload_config("appearance".into()).await;
     format!(r#"{{"ok":true,"theme":"{}"}}"#, esc(&theme))
+}
+
+/// Qué estilo de `set_icon_style` está puesto, por el nombre del tema de
+/// iconos. Vacío si es uno ajeno a BookOS (breeze, Adwaita…).
+#[tauri::command] async fn get_icon_style() -> String {
+    let cur = run("gsettings", &["get","org.gnome.desktop.interface","icon-theme"]).await;
+    let mode = match cur.trim().trim_matches('\'') {
+        "BookOS-Light" => "light",
+        "BookOS-Dark" => "dark",
+        t if t.starts_with("BookOS-Tinted") => "tinted",
+        _ => "",
+    };
+    serde_json::json!({"mode":mode}).to_string()
 }
 
 // ── Notifications ────────────────────────────────────────────────────────
@@ -1830,6 +1912,15 @@ async fn set_icon_style(mode: String, hue: Option<f64>, strength: Option<f64>, d
 }
 #[tauri::command] async fn toggle_dnd(enable: bool) -> String {
     match bookos_desktop::dnd(Some(enable)).await {Ok(v)=>serde_json::json!({"ok":true,"dnd_active":v}).to_string(),Err(e)=>system_client::failure(e)}
+}
+// Por D-Bus y no con notify-send: así un servidor caído llega como error a
+// la página en vez de perderse en un proceso hijo que nadie espera.
+#[tauri::command] async fn probar_notificacion(titulo: String, cuerpo: String) -> Result<(), String> {
+    let c=zbus::Connection::session().await.map_err(|e|e.to_string())?;
+    let p=zbus::Proxy::new(&c,"org.freedesktop.Notifications","/org/freedesktop/Notifications","org.freedesktop.Notifications").await.map_err(|e|e.to_string())?;
+    let hints:std::collections::HashMap<&str,zbus::zvariant::Value>=std::collections::HashMap::new();
+    let _id:u32=p.call("Notify",&("Ajustes",0u32,"bookos-settings",titulo.as_str(),cuerpo.as_str(),Vec::<&str>::new(),hints,-1i32)).await.map_err(|e|e.to_string())?;
+    Ok(())
 }
 
 // ── Lock Screen ──────────────────────────────────────────────────────────
@@ -1939,12 +2030,43 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
     let enrolled = r.contains("finger") && !r.contains("no fingers");
     format!(r#"{{"available":{},"enrolled":{}}}"#,available,enrolled)
 }
-#[tauri::command] async fn enroll_fingerprint(app: tauri::AppHandle) -> Result<String, String> {
+/// Los dedos con el nombre que usa fprintd. Lista cerrada: lo que llega de la
+/// interfaz va de argumento a `fprintd-enroll`/`fprintd-delete`.
+const DEDOS: [&str; 10] = [
+    "right-index-finger", "left-index-finger", "right-thumb", "left-thumb",
+    "right-middle-finger", "left-middle-finger", "right-ring-finger",
+    "left-ring-finger", "right-little-finger", "left-little-finger",
+];
+
+/// Lector, huellas registradas y cuántas pasadas pide el lector para registrar
+/// una (el Egis del Book5 Pro pide 16), para que la interfaz pinte el progreso.
+#[tauri::command] async fn list_fingerprints() -> String {
+    let user = run("whoami",&[]).await;
+    let r = run("fprintd-list",&[&user]).await;
+    let available = r.contains("found 1 devices") || r.contains("Using device");
+    let fingers: Vec<&str> = r.lines()
+        .filter_map(|l| l.trim().strip_prefix("- #").and_then(|l| l.split_once(": ")).map(|(_, f)| f.trim()))
+        .filter(|f| DEDOS.contains(f))
+        .collect();
+    let etapas = run("busctl",&["--system","get-property","net.reactivated.Fprint","/net/reactivated/Fprint/Device/0","net.reactivated.Fprint.Device","num-enroll-stages"]).await;
+    let stages: u32 = etapas.trim().strip_prefix("i ").and_then(|n| n.parse().ok()).unwrap_or(0);
+    serde_json::json!({"available": available, "fingers": fingers, "stages": stages}).to_string()
+}
+
+#[tauri::command] async fn delete_fingerprint(finger: String) -> Result<(), String> {
+    if !DEDOS.contains(&finger.as_str()) { return Err("dedo desconocido".into()); }
+    let user = run("whoami",&[]).await;
+    let out = Command::new("fprintd-delete").args([&user, "-f", &finger]).output().await.map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stdout).trim().to_string()) }
+}
+
+#[tauri::command] async fn enroll_fingerprint(app: tauri::AppHandle, finger: String) -> Result<String, String> {
     use tauri::Emitter;
     use tokio::io::{AsyncBufReadExt, BufReader};
+    if !DEDOS.contains(&finger.as_str()) { return Err("dedo desconocido".into()); }
     let user = run("whoami",&[]).await;
     let mut child = Command::new("fprintd-enroll")
-        .arg(&user)
+        .args([&user, "-f", &finger])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1966,6 +2088,9 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
         if line.contains("enroll-completed") {
             stages += 1;
             let _ = app.emit("fp-progress", serde_json::json!({"stage": stages, "done": true}));
+        } else if line.contains("retry") || line.contains("too-short") {
+            // Pasada no válida: no cuenta, pero la interfaz avisa de que se repita.
+            let _ = app.emit("fp-progress", serde_json::json!({"stage": stages, "retry": true}));
         }
     }
     let status = child.wait().await.map_err(|e| e.to_string())?;
@@ -2530,7 +2655,7 @@ const SDDM_KEYS: &[(&str, &str)] = &[
     ("strWrongPassword",     "Contraseña incorrecta"),
     ("strCapsLock",          "Bloqueo de mayúsculas activado"),
     ("strSession",           "Sesión"),
-    ("strExit",              "✕  Salir (Esc)"),
+    ("strExit",              "Salir (Esc)"),
     ("strStarted",           "Inicio"),
     ("strFinish",            "Fin"),
     ("strObjective",         "Objetivo"),
@@ -3386,6 +3511,9 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 
 // ── Wallpaper ─────────────────────────────────────────────────────────
+/// Lo que el escritorio sabe pintar de fondo. Los vídeos los decodifica
+/// `bookos-comp` con ffmpeg (`EXTENSIONES_VIDEO` en `bookos-comp/src/fondo.rs`).
+const FONDO_EXTENSIONES: [&str; 9] = ["jpg","jpeg","png","webp","mp4","webm","mkv","mov","m4v"];
 #[tauri::command] async fn get_wallpapers() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(list_wallpapers).await.map_err(|e| e.to_string())
 }
@@ -3408,7 +3536,10 @@ fn list_wallpapers() -> String {
             let mut nombre = stem.replace(['_', '-'], " ");
             if let Some(primera) = nombre.get(..1) { nombre = primera.to_uppercase() + &nombre[1..]; }
             let p = path.to_string_lossy().into_owned();
-            wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}"}}"#, esc(&nombre), esc(&p), esc(&p)));
+            // La variante oscura va aparte para que la galería enseñe la
+            // pareja partida en dos, como se ve al cambiar de tema.
+            let oscuro = pareja_de_fondo(&p).map(|(_, o)| o).unwrap_or_default();
+            wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}","dark":"{}","origen":"bookos"}}"#, esc(&nombre), esc(&p), esc(&p), esc(&oscuro)));
         }
         // Instalados y en desarrollo son los mismos: con encontrar unos basta.
         break;
@@ -3425,10 +3556,10 @@ fn list_wallpapers() -> String {
                 let path = entry.path();
                 if path.is_file() {
                     let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-                    if ["jpg","jpeg","png","webp"].contains(&ext.as_str()) {
+                    if FONDO_EXTENSIONES.contains(&ext.as_str()) {
                         let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
                         let p = path.to_string_lossy().to_string();
-                        wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}"}}"#, esc(&name), esc(&p), esc(&p)));
+                        wallpapers.push(format!(r#"{{"name":"{}","path":"{}","thumbnail":"{}","dark":"","origen":"usuario"}}"#, esc(&name), esc(&p), esc(&p)));
                     }
                 }
             }
@@ -3448,11 +3579,14 @@ fn list_wallpapers() -> String {
     for p in &paths {
         let src = std::path::Path::new(p);
         let ext = src.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-        if !["jpg","jpeg","png","webp"].contains(&ext.as_str()) { continue; }
+        if !FONDO_EXTENSIONES.contains(&ext.as_str()) { continue; }
         let fname = match src.file_name() { Some(f) => f.to_string_lossy().to_string(), None => continue };
         // Avoid clobbering an existing file with a different image: suffix on collision.
         let mut dest = std::path::Path::new(&dest_dir).join(&fname);
-        if dest.exists() && fs::read(&dest).ok() != fs::read(src).ok() {
+        // El tamaño primero: con un vídeo, leer los dos enteros para compararlos
+        // eran cientos de megas en memoria.
+        let len = |p: &std::path::Path| fs::metadata(p).map(|m| m.len()).ok();
+        if dest.exists() && (len(&dest) != len(src) || fs::read(&dest).ok() != fs::read(src).ok()) {
             let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_string();
             let mut n = 1;
             loop {
@@ -3575,10 +3709,19 @@ fn pareja_de_fondo(path: &str) -> Option<(String, String)> {
     if dynamic_color_enabled() {
         let style = load_bookos_settings().get("DynamicColorStyle")
             .and_then(|v| v.as_str()).unwrap_or("vibrant").to_string();
-        if let Ok(seeds) = palette::seeds_from_image(&path) {
-            if let Some(seed) = seeds.first() {
-                let _ = write_dynamic_palette(seed, &style).await;
+        let fondo = match bookos_desktop::config_value().await {
+            Ok(config) => fondo_efectivo(&config),
+            Err(e) => { eprintln!("[fondo] no se pudo leer el fondo aplicado: {e}"); path }
+        };
+        match palette::seeds_from_image(&fondo) {
+            Ok(seeds) => {
+                if let Some(seed) = seeds.first() {
+                    if let Err(e) = write_dynamic_palette(seed, &style).await {
+                        eprintln!("[fondo] no se pudo actualizar la paleta: {e}");
+                    }
+                }
             }
+            Err(e) => eprintln!("[fondo] no se pudieron extraer los colores: {e}"),
         }
     }
     r#"{"ok":true}"#.into()
@@ -4090,6 +4233,12 @@ fn resolve_icon_file(name: &str) -> String {
     String::new()
 }
 
+/// Rutas de varios iconos de golpe, en el mismo orden; "" si no aparece.
+/// Para pintar los lanzadores del dock, que el compositor guarda por nombre.
+#[tauri::command] fn resolver_iconos(nombres: Vec<String>) -> String {
+    serde_json::json!(nombres.iter().map(|n| resolve_icon_file(n)).collect::<Vec<_>>()).to_string()
+}
+
 fn app_label_icon(id: &str) -> (String, String) {
     match desktop_file_path(id) {
         Some(p) => {
@@ -4284,7 +4433,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     let home = std::env::var("HOME").unwrap_or_default();
     let dest = format!("{}/.face", home);
     match fs::copy(&source_path, &dest) {
-        Ok(_) => r#"{"ok":true}"#.into(),
+        Ok(_) => { system_extras::publicar_avatar(&dest); r#"{"ok":true}"#.into() }
         Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string()))
     }
 }
@@ -4633,6 +4782,21 @@ fn get_startup_page() -> String {
     String::new()
 }
 
+/// La URL de `--share-url`, si la hay. Solo http(s): es lo que se manda como
+/// enlace, y así una llamada con otra cosa no acaba en el móvil de nadie.
+fn argumento_compartir(args: &[String]) -> Option<String> {
+    let i = args.iter().position(|a| a == "--share-url")?;
+    let url = args.get(i + 1)?;
+    (url.starts_with("https://") || url.starts_with("http://")).then(|| url.clone())
+}
+
+/// La URL que pidió compartir quien lanzó esta instancia (`--share-url`).
+/// Las que llegan con la app ya abierta van por el evento `compartir-url`.
+#[tauri::command]
+fn get_startup_share() -> String {
+    argumento_compartir(&std::env::args().collect::<Vec<_>>()).unwrap_or_default()
+}
+
 /// Opens the Software Updates page: drops the page hint where both a running
 /// instance (a second launch forwards it over the socket) and a fresh launch
 /// (get_startup_page) will pick it up, then launches/focuses the app.
@@ -4690,6 +4854,26 @@ fn save_bookos_settings(v: &serde_json::Value) {
     let _ = fs::write(&path, serde_json::to_string_pretty(v).unwrap_or_default());
 }
 
+// La isla y los avisos se generan fuera del WebView y no ven localStorage.
+fn idioma_interfaz() -> &'static str {
+    let ajustes = load_bookos_settings();
+    match ajustes.get("AppLanguage").and_then(|v| v.as_str()) {
+        Some("es") => "es",
+        Some("en") => "en",
+        _ => {
+            let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
+                .iter()
+                .find_map(|clave| std::env::var(clave).ok().filter(|v| !v.is_empty()))
+                .unwrap_or_default();
+            if locale.starts_with("es") {
+                "es"
+            } else {
+                "en"
+            }
+        }
+    }
+}
+
 #[tauri::command] fn get_bookos_setting(key: String, default_val: String) -> String {
     let cfg = load_bookos_settings();
     let val = cfg.get(&key)
@@ -4736,7 +4920,9 @@ fn save_bookos_settings(v: &serde_json::Value) {
 "/bin/sh -c '\
 CFG=\"$HOME/.config/bookos/settings.json\"; \
 if [ -f \"$CFG\" ] && grep -q \"\\\"UpdateNotifications\\\"[[:space:]]*:[[:space:]]*\\\"false\\\"\" \"$CFG\"; then exit 0; fi; \
-LANG_PREFIX=$(echo \"${{LANG:-en}}\" | cut -c1-2); \
+LANG_PREFIX=$(echo \"${{LC_ALL:-${{LC_MESSAGES:-${{LANG:-en}}}}}}\" | cut -c1-2); \
+if [ -f \"$CFG\" ] && grep -q \"\\\"AppLanguage\\\"[[:space:]]*:[[:space:]]*\\\"es\\\"\" \"$CFG\"; then LANG_PREFIX=es; fi; \
+if [ -f \"$CFG\" ] && grep -q \"\\\"AppLanguage\\\"[[:space:]]*:[[:space:]]*\\\"en\\\"\" \"$CFG\"; then LANG_PREFIX=en; fi; \
 ICON=software-update-available; \
 [ -f /usr/share/icons/hicolor/scalable/apps/bookos-settings.svg ] && ICON=bookos-settings; \
 [ \"$LANG_PREFIX\" = \"es\" ] && OPENLBL=Abrir || OPENLBL=Open; \
@@ -4813,158 +4999,6 @@ fi'",
         return format!(r#"{{"percentage":"{}","found":true}}"#, esc(&pct));
     }
     r#"{"percentage":"","found":false}"#.into()
-}
-
-// ── Earbud detection daemon ─────────────────────────────────────────────
-// Polls connected Bluetooth audio devices; when a new pair of earbuds/headset
-// connects, fires a desktop notification with the battery levels (Galaxy Buds
-// Client style). Runs in the background for the lifetime of the app.
-
-// Is this bluez "Icon" value an audio/earbud device?
-fn bt_icon_is_audio(icon: &str) -> bool {
-    let i = icon.to_lowercase();
-    i.contains("headphone") || i.contains("headset") || i.contains("earbud")
-        || i.contains("audio-card") || i == "audio-headphones" || i == "audio-headset"
-}
-
-// List currently-connected audio devices: Vec<(mac, name)>.
-async fn connected_audio_devices() -> Vec<(String, String)> {
-    let s=system_client::snapshot();
-    s["bluetooth"]["devices"].as_array().into_iter().flatten()
-        .filter(|d|d["connected"] == true && bt_icon_is_audio(d["icon"].as_str().unwrap_or_default()))
-        .filter_map(|d|Some((d["mac"].as_str()?.to_owned(),d["name"].as_str()?.to_owned()))).collect()
-}
-
-// Is this device a Samsung Galaxy Buds (by BT name)?
-fn name_is_galaxy_buds(name: &str) -> bool {
-    let n = name.to_lowercase();
-    n.contains("buds") || n.contains("galaxy buds")
-}
-
-// Read native L/R/case battery from an already-open BudsConn in BudsState.
-// Returns (left, right, case) if connected to this mac.
-fn native_buds_battery(state: &buds::BudsState) -> Option<(u8, u8, u8, String)> {
-    let guard = state.0.lock().ok()?;
-    let conn = guard.as_ref()?;
-    // Ask for a fresh extended-status; the reader thread updates conn.status.
-    let s = conn.status.lock().ok()?.clone();
-    if !s.connected { return None; }
-    Some((s.battery_l, s.battery_r, s.battery_case, s.model.clone()))
-}
-
-// Background loop: detect newly-connected Galaxy Buds, connect natively over the
-// Samsung SPP protocol (no GalaxyBudsClient needed), read L/R/case battery and
-// fire a desktop notification — Quick-Share style native integration.
-async fn earbud_watch_loop(app: tauri::AppHandle) {
-    use std::collections::HashSet;
-    let mut known: HashSet<String> = HashSet::new();
-    let mut first_pass = true;
-    loop {
-        // Cheap gate: when the adapter is powered off there's nothing to watch —
-        // skip device enumeration entirely and back off (saves constant spawns).
-        if system_client::snapshot()["bluetooth"]["enabled"] != true {
-            known.clear();   // forget state so a reconnect after power-on notifies again
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-            continue;
-        }
-        let devs = connected_audio_devices().await;
-        let current: HashSet<String> = devs.iter().map(|(m, _)| m.clone()).collect();
-        known.retain(|m| current.contains(m));
-        for (mac, name) in &devs {
-            if known.insert(mac.clone()) && !first_pass && name_is_galaxy_buds(name) {
-                handle_buds_appeared(&app, mac, name).await;
-            }
-        }
-        first_pass = false;
-        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-    }
-}
-
-// Themed icon installed by the package (line-art earbuds) used in buds notifications.
-// Minimal percent-encoder for query values (name/mac → popup URL).
-fn pct_encode(s: &str) -> String {
-    s.bytes().map(|b| match b {
-        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-        _ => format!("%{:02X}", b),
-    }).collect()
-}
-
-// Create (or replace) the frameless Buds popup window, top-right of the primary
-// monitor. `state` is "connect" (Conectar/Descartar prompt) or "connected"
-// (battery rings). Must run on the main thread — see spawn via run_on_main_thread.
-fn create_buds_popup(app: &tauri::AppHandle, state: &str, name: &str, mac: &str, l: u8, r: u8, c: u8) {
-    use tauri::{Manager, WebviewWindowBuilder, WebviewUrl, PhysicalPosition, PhysicalSize};
-    // Replace any existing popup so data is always fresh.
-    if let Some(w) = app.get_webview_window("buds-popup") { let _ = w.close(); }
-
-    let url = format!(
-        "buds-popup.html?state={}&name={}&mac={}&l={}&r={}&c={}",
-        state, pct_encode(name), pct_encode(mac), l, r, c
-    );
-    let built = WebviewWindowBuilder::new(app, "buds-popup", WebviewUrl::App(url.into()))
-        .title("BookOS Buds")
-        .inner_size(400.0, 330.0)
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .focused(false)
-        .shadow(false)
-        .visible(false)
-        .build();
-
-    let win = match built { Ok(w) => w, Err(e) => { eprintln!("[buds/popup] build failed: {e}"); return; } };
-    // Anchor top-right with a small margin.
-    if let Ok(Some(mon)) = win.primary_monitor() {
-        let sz = mon.size();
-        let outer = win.outer_size().unwrap_or(PhysicalSize::new(400, 330));
-        let margin = 24i32;
-        let x = (sz.width as i32 - outer.width as i32 - margin).max(0);
-        let y = 52i32;
-        let _ = win.set_position(PhysicalPosition::new(x, y));
-    }
-    let _ = win.show();
-
-    // Buds already linked → bring the full app up too (not just the popup).
-    if state == "connected" { show_main_window(app); }
-}
-
-// Bring the main window to the foreground (used on buds connect + from the popup).
-fn show_main_window(app: &tauri::AppHandle) {
-    use tauri::Manager;
-    if let Some(mw) = app.get_webview_window("main") {
-        let _ = mw.unminimize();
-        let _ = mw.set_skip_taskbar(false);
-        let _ = mw.show();
-        let _ = mw.set_focus();
-    }
-}
-
-#[tauri::command]
-fn open_main_window(app: tauri::AppHandle) {
-    show_main_window(&app);
-}
-
-// React to a freshly-detected pair of Galaxy Buds:
-//   • already linked (quick reconnect)  → battery-rings popup straight away
-//   • not linked yet                    → Conectar / Descartar popup; the popup's
-//                                          Connect button opens the native SPP link
-//                                          (buds_connect) and swaps to battery rings.
-// Window creation is dispatched to the main thread.
-async fn handle_buds_appeared(app: &tauri::AppHandle, mac: &str, name: &str) {
-    use tauri::Manager;
-    let (state, l, r, c) = match native_buds_battery(&app.state::<buds::BudsState>()) {
-        Some((l, r, c, _)) => ("connected", l, r, c),
-        None => ("connect", 0u8, 0u8, 0u8),
-    };
-    let app2 = app.clone();
-    let name2 = name.to_string();
-    let mac2 = mac.to_string();
-    let state2 = state.to_string();
-    let _ = app.run_on_main_thread(move || {
-        create_buds_popup(&app2, &state2, &name2, &mac2, l, r, c);
-    });
 }
 
 // Returns KDE Connect paired devices (phone battery etc.)
@@ -5082,8 +5116,18 @@ fn socket_path() -> String {
 }
 
 /// Returns true if a process with the given PID is currently running.
+///
+/// Un zombi no cuenta: sigue teniendo `/proc/<pid>` hasta que su padre lo
+/// recoge, y bookos-comp recoge a sus hijos al lanzar el siguiente programa
+/// (keybinds.rs, `lanzar`). Mientras tanto la instancia muerta parecía viva y
+/// las nuevas le mandaban «show» a un socket sin nadie y se cerraban.
 fn pid_alive(pid: u32) -> bool {
-    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{}/stat", pid)) else {
+        return false;
+    };
+    // El nombre va entre paréntesis y puede llevar espacios o paréntesis: el
+    // estado es lo primero tras el último «)».
+    !matches!(stat.rsplit_once(')').and_then(|(_, resto)| resto.trim_start().chars().next()), Some('Z' | 'X'))
 }
 
 /// Single-instance guard.
@@ -5164,6 +5208,89 @@ fn desactivar_zoom_por_pellizco<R: tauri::Runtime>(
     });
 }
 
+/// Qué quiere elegir el frontend. Cada campo es una bandera `--pick-*` de
+/// `bookos-explorer`.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Eleccion {
+    modo: ModoEleccion,
+    #[serde(default)]
+    multiple: bool,
+    #[serde(default)]
+    patrones: Vec<String>,
+    nombre_filtro: Option<String>,
+    titulo: Option<String>,
+    nombre: Option<String>,
+    inicio: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ModoEleccion {
+    Open,
+    Save,
+    Folder,
+}
+
+/// Selector de archivos del sistema: `bookos-explorer` en modo portal
+/// (AI-DESIGN-SYSTEM §9), nunca el diálogo de GTK. `None` es que el usuario
+/// canceló. Sin el explorador instalado devuelve el error `sin-explorador` y
+/// el frontend cae al diálogo de Tauri.
+#[tauri::command]
+async fn elegir_ruta(eleccion: Eleccion) -> Result<Option<Vec<String>>, String> {
+    let salida = std::env::temp_dir().join(format!(
+        "{}-pick-{}-{}.txt",
+        env!("CARGO_PKG_NAME"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos()
+    ));
+    let mut orden = std::process::Command::new("bookos-explorer");
+    orden.arg("--bookos-portal").arg(&salida).arg("--pick-mode").arg(match eleccion.modo {
+        ModoEleccion::Open => "open",
+        ModoEleccion::Save => "save",
+        ModoEleccion::Folder => "folder",
+    });
+    if eleccion.multiple {
+        orden.arg("--pick-multiple");
+    }
+    for patron in &eleccion.patrones {
+        orden.arg("--pick-pattern").arg(patron);
+    }
+    for (bandera, valor) in [
+        ("--pick-filter-name", &eleccion.nombre_filtro),
+        ("--pick-title", &eleccion.titulo),
+        ("--pick-name", &eleccion.nombre),
+        ("--pick-start", &eleccion.inicio),
+    ] {
+        if let Some(valor) = valor {
+            orden.arg(bandera).arg(valor);
+        }
+    }
+    let mut hijo = match orden.spawn() {
+        Ok(hijo) => hijo,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err("sin-explorador".into()),
+        Err(e) => return Err(e.to_string()),
+    };
+    // Se espera a que el explorador salga y solo entonces se lee: escribe el
+    // fichero justo antes de `exit`, y leerlo en cuanto aparece (lo que hace
+    // el Viewer) puede pillarlo vacío y tomarlo por una cancelación. Es lo
+    // mismo que hace el portal del compositor.
+    tauri::async_runtime::spawn_blocking(move || {
+        let fin = hijo.wait();
+        let texto = std::fs::read_to_string(&salida);
+        // Sin fichero es que se canceló: no hay nada que borrar.
+        let _ = std::fs::remove_file(&salida);
+        fin.map_err(|e| e.to_string())?;
+        let rutas: Vec<String> = texto.unwrap_or_default().lines().map(str::to_owned).collect();
+        Ok((!rutas.is_empty()).then_some(rutas))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn main() {
 
 
@@ -5186,6 +5313,15 @@ fn main() {
         //   "1" → toggle (show if hidden, hide if visible)
         //   "show" → always show + focus (used when launched without --toggle)
         let modo = if args.iter().any(|a| a == "--toggle") { "toggle" } else { "show" };
+        // `--share-url URL` (el botón de compartir del navegador): la URL va
+        // en el sitio de la página, con su propio modo. No lleva espacios.
+        if let Some(url) = argumento_compartir(&args) {
+            use std::io::Write;
+            if let Ok(mut s) = std::os::unix::net::UnixStream::connect(socket_path()) {
+                let _ = write!(s, "compartir {url}");
+            }
+            std::process::exit(0);
+        }
         // La página, de `--page` o del fichero que dejan la notificación de
         // actualizaciones y `open_updates_page` antes de lanzarnos.
         let pagina = args.iter().position(|a| a == "--page")
@@ -5210,12 +5346,10 @@ fn main() {
         .on_page_load(desactivar_zoom_por_pellizco)
         .plugin(tauri_plugin_dialog::init())
         .manage(UpdateState::default())
-        .manage(buds::BudsState::default())
         .manage(quickshare::QsState::default())
         .manage(p2p::P2PState::default())
-        // Close-to-background: hiding the main window (instead of quitting) keeps the
-        // earbud-detection daemon + routines alive so the popup works "with the app
-        // closed". The popup window closes normally.
+        // Close-to-background: hiding the main window (instead of quitting) keeps
+        // the routines alive "with the app closed".
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -5247,10 +5381,6 @@ fn main() {
                     }
                 }
             }
-            // Background earbud-detection daemon: notifies on new buds/headset connect.
-            // Use Tauri's async runtime (a tokio runtime isn't active inside setup()).
-            let buds_app = app.handle().clone();
-            tauri::async_runtime::spawn(async move { earbud_watch_loop(buds_app).await; });
             // Caché del tiempo para el widget de la pantalla de bloqueo. Va aquí
                             // y no en el greeter porque no tiene red propia ni
             // sitio donde guardar nada: solo lee el fichero.
@@ -5280,7 +5410,10 @@ fn main() {
                     use std::io::Read;
                     for conexion in escucha.incoming().flatten() {
                         let mut mensaje = String::new();
-                        let _ = (&conexion).take(256).read_to_string(&mut mensaje);
+                        // 8 KiB y no 256 bytes: el mensaje puede traer una URL
+                        // de `--share-url`, y las URL largas (con parámetros) se
+                        // cortaban.
+                        let _ = (&conexion).take(8192).read_to_string(&mut mensaje);
                         let mut partes = mensaje.split_whitespace();
                         let mode = partes.next().unwrap_or("show").to_string();
                         let pagina = partes.next().unwrap_or("").to_string();
@@ -5296,6 +5429,12 @@ fn main() {
                                 let _ = win.set_always_on_top(false);
                                 let _ = win.request_user_attention(Some(tauri::UserAttentionType::Critical));
                             };
+                            if mode == "compartir" {
+                                raise();
+                                use tauri::Emitter;
+                                let _ = win.emit("compartir-url", pagina.clone());
+                                continue;
+                            }
                             if mode == "show" {
                                 // Reabrir desde oculto debe empezar limpio: si el usuario
                                 // cerró con la X estando en "Batería", volver a abrir desde
@@ -5347,8 +5486,22 @@ fn main() {
 
                 let mut warned_15 = false;
                 let mut warned_5 = false;
+                let mut ultimo_perfil = fs::read_to_string(perfil_energia_log()).unwrap_or_default()
+                    .lines().last().and_then(|l| l.split_once(' ')).map(|(_, p)| p.to_string()).unwrap_or_default();
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(60));
+                    let perfil = perfil_energia_actual();
+                    if !perfil.is_empty() && perfil != ultimo_perfil {
+                        let ruta = perfil_energia_log();
+                        if let Some(dir) = std::path::Path::new(&ruta).parent() { let _ = fs::create_dir_all(dir); }
+                        let marca = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                        use std::io::Write;
+                        match fs::OpenOptions::new().create(true).append(true).open(&ruta)
+                            .and_then(|mut f| writeln!(f, "{marca} {perfil}")) {
+                            Ok(()) => ultimo_perfil = perfil,
+                            Err(e) => eprintln!("[perfil] no se pudo anotar en {ruta}: {e}"),
+                        }
+                    }
                     let b = battery_sync();
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&b) {
                         let pct = v.get("percentage").and_then(|p| p.as_str()).and_then(|p| p.parse::<u32>().ok()).unwrap_or(100);
@@ -5505,8 +5658,7 @@ fn main() {
                             // Pretty, branded notification — matches the timer notification.
                             let icon = if std::path::Path::new("/usr/share/icons/hicolor/scalable/apps/bookos-settings.svg").exists()
                                 { "bookos-settings" } else { "software-update-available" };
-                            let lang = std::env::var("LANG").unwrap_or_default();
-                            let is_es = lang.starts_with("es");
+                            let is_es = idioma_interfaz() == "es";
                             let (title, body) = if is_es {
                                 let t = if total == 1 { "1 actualización disponible".to_string() }
                                         else { format!("{} actualizaciones disponibles", total) };
@@ -5558,8 +5710,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_printers,system_client::system_answer_pairing, system_client::system_set_volume, system_client::system_set_mute, system_client::pair_bluetooth, system_client::forget_bluetooth, system_client::set_audio_profile,
-            open_main_window,
+            elegir_ruta,
+            open_printers,open_teclas,system_client::system_answer_pairing, system_client::system_set_volume, system_client::system_set_mute, system_client::pair_bluetooth, system_client::forget_bluetooth, system_client::set_audio_profile,
             bookos_desktop::bookos_get_config,bookos_desktop::bookos_apply_config,bookos_desktop::bookos_desktop_available,bookos_desktop::bookos_get_capabilities,
             bookos_desktop::bookos_get_outputs,bookos_desktop::bookos_apply_output_config,
             bookos_desktop::bookos_reload_config,
@@ -5572,10 +5724,10 @@ fn main() {
             system_settings::get_airplane_mode,system_settings::toggle_airplane_mode,
             get_brightness,set_brightness,get_kbd_brightness,set_kbd_brightness,
             system_settings::get_volume,system_settings::set_volume,system_settings::toggle_mute,system_settings::set_balance,system_settings::get_balance,
-            get_battery_status,get_battery_sysfs,get_battery_history,get_battery_csv_data,get_adaptive_predictions,set_adaptive_charging,
-            get_current_theme,get_available_themes,set_color_scheme,get_theme_schedule,set_theme_schedule,set_icon_style,
-            get_dnd_status,toggle_dnd,
-            get_lock_timeout,set_lock_timeout,check_fingerprint,enroll_fingerprint,verify_password,verify_fingerprint,
+            get_battery_status,get_battery_sysfs,get_battery_history,get_power_profile_history,get_battery_csv_data,get_adaptive_predictions,set_adaptive_charging,
+            get_current_theme,get_available_themes,set_color_scheme,get_theme_schedule,set_theme_schedule,set_icon_style,get_icon_style,resolver_iconos,
+            get_dnd_status,toggle_dnd,probar_notificacion,
+            get_lock_timeout,set_lock_timeout,check_fingerprint,list_fingerprints,delete_fingerprint,enroll_fingerprint,verify_password,verify_fingerprint,
             get_locale_info,get_available_locales,set_locale,get_available_keymaps,set_keymap,
             get_datetime_info,list_timezones,set_timezone,set_ntp,
             check_system_updates,check_aur_updates,check_flatpak_updates,run_system_update,run_pacman_update_silent,get_update_progress,cancel_update,run_flatpak_update,run_aur_update,get_pkg_mgr,has_flatpak,logout_session,
@@ -5602,14 +5754,15 @@ fn main() {
             hardware_control::set_brillo,
             hardware_control::obtener_estado_pantalla,
             buds::buds_connect,buds::buds_disconnect,buds::buds_get_status,
-            buds::buds_set_auto_reconnect,buds::buds_get_prefs,buds::buds_try_auto_reconnect,buds::buds_audio_switch_check,
-            buds::buds_fit_test_start,buds::buds_fit_test_stop,buds::buds_set_easy_pairing,buds::buds_request_info,buds::buds_notify_battery,
+            buds::buds_set_auto_reconnect,buds::buds_get_prefs,buds::buds_audio_switch_check,
+            buds::buds_fit_test_start,buds::buds_fit_test_stop,buds::buds_set_easy_pairing,buds::buds_request_info,
             buds::buds_set_anc,buds::buds_set_eq,buds::buds_set_touch_lock,
             buds::gbc_is_available,buds::gbc_get_device,
             buds::gbc_execute_action,buds::gbc_activate,
             quickshare::qs_start,quickshare::qs_stop,
             quickshare::qs_discover,quickshare::qs_stop_discover,
-            quickshare::qs_send_files,quickshare::qs_action,
+            quickshare::qs_send_files,quickshare::qs_send_url,quickshare::qs_action,
+            get_startup_share,
             quickshare::qs_cancel,quickshare::qs_set_visibility,
             quickshare::qs_set_download_path,
             p2p::p2p_start_discover,p2p::p2p_stop_discover,
@@ -5637,6 +5790,14 @@ fn native_backlight()->Result<(String,u32,u32),String> {
 #[tauri::command]
 async fn open_printers()->Result<(),String> {
     Command::new("system-config-printer").spawn().map_err(|e|e.to_string())?;
+    Ok(())
+}
+
+// Los atajos y remapeos los edita la app Teclas: repetirlos aquí sería un
+// segundo editor del mismo `teclas.conf`.
+#[tauri::command]
+async fn open_teclas()->Result<(),String> {
+    Command::new("bookos-teclas").spawn().map_err(|e|e.to_string())?;
     Ok(())
 }
 

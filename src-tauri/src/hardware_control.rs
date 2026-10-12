@@ -147,8 +147,10 @@ pub async fn aplicar_perfil_termico(modo: String) -> Result<String, String> {
 
     // Wait for PPD/firmware to settle, then write RAPL (twice, races against background daemons).
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    if let Some(e) = write_sysfs_soft(RAPL_PL1, &pl1.to_string()) { warns.push(e); }
-    if let Some(e) = write_sysfs_soft(RAPL_PL2, &pl2.to_string()) { warns.push(e); }
+    // PL1 y PL2 fallan por el mismo permiso: sin dedup el aviso sale duplicado en el toast.
+    for e in [write_sysfs_soft(RAPL_PL1, &pl1.to_string()), write_sysfs_soft(RAPL_PL2, &pl2.to_string())].into_iter().flatten() {
+        if !warns.contains(&e) { warns.push(e); }
+    }
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let _ = write_sysfs_soft(RAPL_PL1, &pl1.to_string());
     let _ = write_sysfs_soft(RAPL_PL2, &pl2.to_string());

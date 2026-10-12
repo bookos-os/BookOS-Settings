@@ -36,7 +36,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 /* Home landing: keep the detail pane useful instead of leaving a blank
    canvas when no category is selected. The layout follows the HIG detail
    column while keeping quick actions one clear action per card. */
-.home-landing{width:min(760px,100%);margin:clamp(24px,8vh,84px) auto 0;padding:0 4px 36px;color:var(--tx);animation:fadeIn .22s cubic-bezier(.25,.46,.45,.94)}
+.home-landing{width:min(760px,100%);margin:clamp(24px,8vh,84px) auto 0;padding:0 4px 36px;color:var(--tx)}
+/* Solo al arrancar: al volver al inicio el fundido se veía como una recarga. */
+.home-landing.arranque{animation:fadeIn .22s cubic-bezier(.25,.46,.45,.94)}
 .home-landing-hero{display:flex;align-items:stretch;gap:18px;padding:24px 28px;background:var(--card);border-radius:22px;box-shadow:0 1px 3px rgba(0,0,0,.05),0 0 0 .5px rgba(0,0,0,.02)}
 :root.dark-mode .home-landing-hero{box-shadow:none}
 @media(prefers-color-scheme:dark){:root:not(.light-mode) .home-landing-hero{box-shadow:none}}
@@ -116,12 +118,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 .home-more-card.is-collapsed .home-more-items{display:none}
 
 /* Profile Card */
-.card-profile .item{justify-content:space-between;height:70px;padding:0 16px}
+.card-profile .item{justify-content:flex-start;gap:14px;height:84px;padding:0 16px}
 .profile-left{display:flex;flex-direction:column;min-width:0;flex:1}
 .profile-left .title{font-size:15px;font-weight:600}
 .profile-left .subtitle{font-size:11px;color:var(--tx2);margin-top:1px}
-.profile-avatar{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
-.profile-avatar-placeholder{width:44px;height:44px;background:var(--blue);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:600;flex-shrink:0}
+.profile-avatar{width:60px;height:60px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.profile-avatar-placeholder{width:60px;height:60px;background:var(--blue);border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:600;flex-shrink:0}
 
 /* Detail View */
 .detail-view{flex:1;padding:0 44px 32px;overflow-y:auto;scrollbar-width:none;min-width:0;user-select:none;-webkit-user-select:none;scroll-behavior:auto;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;scroll-padding-top:12px}
@@ -365,6 +367,8 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .bat-time-num{font-size:34px;font-weight:700;letter-spacing:-.5px;font-style:normal}
 .bat-time-label{font-size:22px;font-weight:400;letter-spacing:-.2px}
 .bat-sub{font-size:16px;color:var(--tx2)}
+.bat-sub{display:inline-flex;align-items:center;gap:6px}
+.bat-ico{color:var(--green);flex-shrink:0}
 .bat-level-bar{height:29px;background:#E3E3E3;border-radius:20px;overflow:visible;margin:7px 0 6px;position:relative}
 .dark-mode .bat-level-bar{background:#696969}
 @media(prefers-color-scheme:dark){:root:not(.light-mode) .bat-level-bar{background:#696969}}
@@ -392,7 +396,30 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .bat-bar-tooltip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;font-size:10px;padding:3px 7px;border-radius:6px;opacity:0;pointer-events:none;transition:.15s;white-space:nowrap;z-index:10}
 .bat-bar-col:hover .bat-bar-tooltip{opacity:1}
 .chart-legend{display:flex;gap:16px;margin-top:10px;font-size:10px;color:var(--tx2)}
-.bat-chart-legend{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;margin-top:14px;font-size:12px;color:var(--tx2)}
+.bat-history{margin-bottom:0;background:transparent;border-radius:0}
+/* Rejilla a lo macOS: líneas horizontales continuas cada 25 %, verticales
+   discontinuas cada 3 h que bajan hasta las etiquetas, y la hora a la derecha
+   de su línea. Los 48px de margen son la columna de porcentajes. */
+.bat-history-chart{position:relative;margin:12px 48px 0 0}
+.bat-history-vline{position:absolute;top:0;bottom:0;border-left:1px dashed var(--div);pointer-events:none}
+.bat-history-vline.edge{border-left-style:solid}
+.bat-history-plot{position:relative;height:190px;background-image:linear-gradient(to bottom,var(--div) 1px,transparent 1px);background-size:100% 25%;border-bottom:1px solid var(--div)}
+.bat-history-bars{position:absolute;inset:1px 0 0;display:grid;grid-template-columns:repeat(96,minmax(0,1fr));gap:2px;padding:0 2px}
+.bat-history-slot{height:100%;display:flex;align-items:flex-end;justify-content:center}
+.bat-history-bar{width:100%;max-width:5px;background:var(--green);border-radius:2px 2px 0 0}
+.bat-history-bar.ahorro,.bat-history-key.ahorro{background:var(--orange)}
+.bat-history-bar.bajo,.bat-history-key.bajo{background:var(--red)}
+.bat-history-band{position:absolute;top:1px;bottom:0;background:color-mix(in srgb,var(--green) 20%,transparent);border-radius:4px 4px 0 0}
+.bat-history-tick{position:absolute;left:calc(100% + 10px);transform:translateY(-50%);font-size:12px;color:var(--tx2);white-space:nowrap}
+.bat-history-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--tx2)}
+.bat-history-charge-row{position:relative;height:8px;margin:4px 0 0}
+.bat-history-charging{position:absolute;top:0;bottom:0;background:var(--green);border-radius:0 0 4px 4px}
+.bat-history-hours{position:relative;height:36px;padding-top:8px;font-size:12px;color:var(--tx2)}
+.bat-history-hours span{position:absolute;padding-left:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bat-history-hours small{display:block;font-size:11px;margin-top:2px}
+.bat-history-key{width:14px;height:8px;border-radius:4px;background:var(--green);display:inline-block;margin-right:6px;vertical-align:middle}
+@media(max-width:600px){.bat-history-bars{gap:1px;padding:0 1px}}
+.bat-chart-legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:14px;font-size:12px;color:var(--tx2)}
 .chart-legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
 /* Battery stats chips row */
 .bat-stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:0 0 14px;padding:0 4px}
@@ -465,7 +492,8 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .res-item{padding:14px 20px;font-size:15px;font-weight:500;cursor:pointer;position:relative;transition:background .12s;display:flex;justify-content:space-between;align-items:center}
 .res-item:hover{background:var(--hov)}
 .res-item.active{color:var(--blue)}
-.res-item.active::after{content:"✓";font-size:16px;font-weight:700;color:var(--blue)}
+/* Check de Lucide como máscara, no el carácter ✓: cada fuente lo pintaba distinto. */
+.res-item.active::after{content:"";width:16px;height:16px;background:var(--blue);-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat}
 .res-item:not(:last-child)::before{content:"";position:absolute;bottom:0;left:20px;right:20px;height:.5px;background:var(--div)}
 
 /* Theme grid */
@@ -542,8 +570,23 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 .bk-slider-row .detail-texts{flex-direction:row;align-items:baseline;justify-content:space-between;gap:12px;width:100%;min-width:0}
 .bk-slider-row .bk-range{display:block;width:100%;min-width:0}
 .bk-slider-row .ds{margin-top:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* La tonalidad de la luz nocturna: la pista es el propio tinte. El blanco cae
+   en 6500 K, el 72,7 % de 2500–8000. No lleva relleno de progreso: aquí no hay
+   «cuánto», hay «hacia dónde». */
+input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255,160,72),#fff 72.7%,rgb(221,230,255));box-shadow:inset 0 0 0 1px var(--div)}
+.bk-temp-ejes{display:flex;justify-content:space-between;font-size:12px;color:var(--tx2)}
 @media(prefers-reduced-motion:reduce){input[type="range"]::-webkit-slider-thumb,input[type="range"]::-moz-range-thumb{transition:none}}
 .audio-page .detail-item-row,.detail-item-row:has(>.bk-select){gap:16px}
+.audio-pestanas .bk-seg-btn,.pasos-pestanas .bk-seg-btn{flex:1}
+.pasos-pestanas{width:100%}
+.audio-silencio{display:grid;place-items:center;padding:4px;margin:-4px;border:0;border-radius:8px;background:0;color:inherit;cursor:pointer}
+.audio-silencio:hover{color:var(--tx)}
+.audio-silencio[aria-pressed="true"]{color:var(--red)}
+.disp-brillo-ctl input[data-mudo]{opacity:.45}
+.audio-lado{width:20px;text-align:center;font-size:13px;font-weight:600}
+.audio-disp{justify-content:flex-start;gap:10px}
+.audio-disp .ds{margin:0 0 0 auto}
+.audio-check{display:grid;place-items:center;width:16px;color:var(--blue)}
 .detail-item-row:has(>.bk-select) .detail-texts{min-width:120px}
 .sel:hover{border-color:var(--blue)}
 .sel:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 18%,transparent)}
@@ -605,8 +648,10 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 .sub-results-card{margin-top:8px}
 .sub-result-ic{font-size:18px;color:var(--tx2);font-weight:600;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--sbg)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
-#app.page-enter{animation:pageEnter .28s cubic-bezier(0.25,0.46,0.45,0.94)}
-@keyframes pageEnter{from{opacity:.4;transform:translateX(8px)}to{opacity:1;transform:translateX(0)}}
+/* Solo fundido: el desplazamiento lateral de 8 px se leía como un rebote al
+   abrir cada página. La dirección ya la da el gesto cuando lo hay. */
+#app.page-enter,#app.page-enter-back{animation:pageEnter .14s ease-out}
+@keyframes pageEnter{from{opacity:.55}to{opacity:1}}
 /* Sin will-change/translateZ permanentes: fijaban una capa GPU por tarjeta
    para siempre a cambio de un fadeIn único de 0.2s — el compositor ya
    promociona capas durante la animación por sí solo. */
@@ -781,21 +826,8 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 /* ═══════════════════════════════════════════════════════════ */
 /* ── ACCOUNTS HERO & SYSTEM USERS ────────────────────────── */
 /* ═══════════════════════════════════════════════════════════ */
-.acc-hero{background:var(--card);border-radius:25px;padding:28px 24px;margin-bottom:16px;display:flex;align-items:center;gap:18px}
-.acc-avatar-big{width:72px;height:72px;border-radius:50%;object-fit:cover;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,.1)}
-.acc-avatar-big-ph{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,var(--blue),#5856d6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;font-weight:700;flex-shrink:0;box-shadow:0 4px 12px rgba(0,122,255,.2)}
-.acc-hero-info{display:flex;flex-direction:column;gap:2px}
-.acc-hero-name{font-size:20px;font-weight:700;letter-spacing:-.2px}
-.acc-hero-sub{font-size:13px;color:var(--tx2)}
 .sys-users-list{display:flex;flex-direction:column}
-.sys-user-item{display:flex;align-items:center;gap:14px;padding:14px 20px;position:relative}
-.sys-user-item:not(:last-child)::after{content:"";position:absolute;bottom:0;left:20px;right:20px;height:.5px;background:var(--div)}
-.sys-user-av,.sys-user-av-ph{width:40px;height:40px;border-radius:50%;flex-shrink:0}
-.sys-user-av{object-fit:cover}
-.sys-user-av-ph{background:var(--sbg);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--tx2)}
-.sys-user-info{display:flex;flex-direction:column}
-.sys-user-name{font-size:14px;font-weight:500}
-.sys-user-id{font-size:11px;color:var(--tx2);margin-top:1px}
+.sys-user-info{display:flex;flex-direction:column;flex:1;min-width:0}
 
 /* ═══ Theme Preview Mini Window ═══ */
 .theme-preview{border-radius:10px;height:56px;overflow:hidden;position:relative}
@@ -832,21 +864,156 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 /* Rows inside a theme-block align to the block padding (no double inset) */
 .theme-block .detail-item{padding-left:0;padding-right:0}
 .theme-block .detail-item:not(:last-child)::after{left:0;right:0}
-/* Light/Dark mode swatch — wide, fills available space, well spaced */
-.mode-swatch-row{display:flex;gap:40px;justify-content:center;padding:8px 4% 4px}
-.mode-swatch{flex:0 1 200px;max-width:200px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer}
-.mode-swatch-preview{width:100%;aspect-ratio:16/10;border-radius:18px;border:2px solid transparent;transition:.15s;box-shadow:0 2px 10px rgba(0,0,0,.18);position:relative;overflow:hidden}
-.mode-swatch-preview::before{content:'';position:absolute;left:12%;top:18%;width:76%;height:14%;border-radius:6px}
-.mode-swatch-preview::after{content:'';position:absolute;left:12%;top:42%;width:48%;height:9%;border-radius:5px;box-shadow:0 16px 0 -2px currentColor}
-.mode-swatch-preview.light{background:#ffffff;border-color:var(--div);color:rgba(0,0,0,.07)}
-.mode-swatch-preview.light::before{background:rgba(0,0,0,.13)}
-.mode-swatch-preview.light::after{background:rgba(0,0,0,.09)}
-.mode-swatch-preview.dark{background:#26262b;border-color:rgba(255,255,255,.16);color:rgba(255,255,255,.06)}
-.mode-swatch-preview.dark::before{background:rgba(255,255,255,.14)}
-.mode-swatch-preview.dark::after{background:rgba(255,255,255,.09)}
-.mode-swatch.active .mode-swatch-preview{border-color:var(--blue)}
-.mode-swatch-label{font-size:13px;font-weight:500;color:var(--tx2)}
-.mode-swatch.active .mode-swatch-label{color:var(--blue)}
+/* En el bloque las filas van sin relleno lateral y el hover salía como un
+   rectángulo pegado al texto: se le devuelve el aire con margen negativo. */
+.theme-block .nav-row{margin:0 -12px;padding-left:12px;padding-right:12px;border-radius:var(--r-control)}
+.theme-block .nav-row:not(:last-child)::after{left:12px;right:12px}
+/* Apariencia: miniaturas del escritorio con el fondo real y el acento puesto */
+.ap-cab{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;column-gap:12px;margin-bottom:14px}
+.ap-cab .ds{flex-basis:100%}
+.ap-valor{font-size:13px;color:var(--tx2)}
+.ap-nota{display:block;margin:-8px 0 14px}
+.ap-opciones{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+/* Con dos fichas, dos columnas: en la rejilla de tres quedaba un hueco a la
+   derecha que parecía una opción que faltaba. */
+.ap-opciones:has(>.ap-opcion:nth-child(2):last-child){grid-template-columns:repeat(2,minmax(0,1fr))}
+.ap-opcion{background:0;border:0;padding:0;font:inherit;color:inherit;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer}
+.ap-opcion:focus-visible{outline:0}
+.ap-mini,.ap-icono{outline:3px solid transparent;outline-offset:2px;transition:outline-color .15s}
+.ap-opcion[aria-checked=true] .ap-mini,.ap-opcion[aria-checked=true] .ap-icono{outline-color:var(--blue)}
+.ap-opcion:focus-visible .ap-mini,.ap-opcion:focus-visible .ap-icono{outline-color:color-mix(in srgb,var(--blue) 50%,transparent)}
+.ap-nombre{font-size:12.5px;font-weight:500;color:var(--tx2)}
+.ap-opcion[aria-checked=true] .ap-nombre{color:var(--tx);font-weight:600}
+.ap-mini{position:relative;display:block;width:100%;container-type:inline-size;aspect-ratio:16/10;border-radius:14px;overflow:hidden;background:var(--ap-fondo,linear-gradient(135deg,color-mix(in srgb,var(--ap-acento) 45%,#fff),var(--ap-acento))) center/cover;box-shadow:0 0 0 1px var(--brd)}
+/* El oscuro oscurece el fondo como hace el escritorio con el fondo nocturno;
+   sin esto las tres miniaturas se distinguían solo por la ventana. */
+.ap-mini.oscuro::before,.ap-capa.oscuro{background:rgba(0,0,0,.38)}
+.ap-mini.oscuro::before{content:'';position:absolute;inset:0}
+.ap-capa{position:absolute;inset:0}
+.ap-capa.oscuro{clip-path:inset(0 0 0 50%)}
+.ap-ventana{position:absolute;left:14%;top:22%;width:62%;height:54%;border-radius:7px;padding:6px 7px;display:flex;flex-direction:column;gap:5px;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.claro .ap-ventana{background:rgba(255,255,255,.94);color:#000}
+.oscuro .ap-ventana{background:rgba(30,30,34,.94);color:#fff}
+/* Controles de BookOS (minimizar, maximizar, cerrar) a la derecha y en el
+   color del texto, como en las ventanas reales; no los semáforos de macOS. */
+.ap-puntos{display:flex;gap:5px;align-self:flex-end;opacity:.6}
+.ap-puntos i{width:5px;height:5px;box-sizing:border-box}
+.ap-puntos i:nth-child(1){background:linear-gradient(currentColor,currentColor) center/100% 1px no-repeat}
+.ap-puntos i:nth-child(2){border:1px solid currentColor;border-radius:1px}
+.ap-puntos i:nth-child(3){background:linear-gradient(45deg,transparent calc(50% - .5px),currentColor calc(50% - .5px) calc(50% + .5px),transparent calc(50% + .5px)),linear-gradient(-45deg,transparent calc(50% - .5px),currentColor calc(50% - .5px) calc(50% + .5px),transparent calc(50% + .5px))}
+.ap-linea{height:6px;width:80%;border-radius:3px;background:var(--ap-acento)}
+.ap-linea.corta{width:50%;background:currentColor;opacity:.15}
+.ap-panel{position:absolute;left:0;right:0;top:0;height:9%}
+/* En cqw y no en px: la ventana va en % y, con la ficha a ~170 px de ancho
+   (ventana de Ajustes estrecha), un dock fijo de 18 px de alto le pisaba la
+   base. Los valores son los px de antes medidos sobre una ficha de 300 px. */
+.ap-dock{position:absolute;bottom:7%;left:50%;transform:translateX(-50%);display:flex;gap:1.33cqw;padding:1.33cqw 2cqw;border-radius:2.67cqw}
+.ap-dock i{width:3.33cqw;height:3.33cqw;border-radius:1cqw;background:var(--ap-acento)}
+.ap-dock i:nth-child(even){opacity:.55}
+.claro.cristal .ap-panel,.claro.cristal .ap-dock{background:rgba(255,255,255,.32);backdrop-filter:blur(6px) saturate(1.6)}
+.oscuro.cristal .ap-panel,.oscuro.cristal .ap-dock{background:rgba(120,120,130,.28);backdrop-filter:blur(6px) saturate(1.6)}
+.claro.solido .ap-panel,.claro.solido .ap-dock{background:#f2f2f7}
+.oscuro.solido .ap-panel,.oscuro.solido .ap-dock{background:#1c1c1e}
+/* Al pasar el ratón, las dos miniaturas de Efectos hacen el mismo ciclo y con
+   la misma duración para poder compararlas: abrir desde el dock, quedarse y
+   volver. Completos lo hace con transición; Reducidos, a cortes, que es lo que
+   hace el compositor sin animaciones de ventana. El origen es el dock visto
+   desde la caja de la ventana: (50%-14%)/62% y (88%-22%)/54%. */
+.cristal .ap-ventana,.solido .ap-ventana{transform-origin:58% 122%}
+.ap-opcion:is(:hover,:focus-visible) .cristal .ap-ventana{animation:ap-abrir 2.4s cubic-bezier(.3,.7,.3,1) infinite}
+.ap-opcion:is(:hover,:focus-visible) .solido .ap-ventana{animation:ap-corte 2.4s linear infinite}
+@keyframes ap-abrir{0%{transform:scale(.08);opacity:0}22%,62%{transform:none;opacity:1}82%,100%{transform:scale(.08);opacity:0}}
+@keyframes ap-corte{0%,21.9%{opacity:0}22%,81.9%{opacity:1}82%,100%{opacity:0}}
+/* Minimizar: el mismo ciclo (irse al dock y volver) en las tres fichas, con
+   la misma duración para compararlas. Solo transform y opacity, que van por
+   el compositor: el genio de antes recortaba con clip-path y salía un
+   triángulo que no se parecía a la ventana. Con perspective + rotateX
+   WebKitGTK la sesgaba en vez de estrecharle la base, así que el genio es
+   2D: primero se adelgaza y se estira hacia el dock (la lámpara) y luego el
+   dock se la traga. El origen es el dock visto desde la caja de la ventana:
+   (50%-14%)/62% y (88%-22%)/54% de la miniatura. */
+.genio .ap-ventana,.escala .ap-ventana{transform-origin:58% 122%}
+/* Tiempos comunes a las tres: reposo, se va (8%→37%), en el dock
+   (37%→52%), vuelve (52%→85%), reposo. La vuelta dura más que la ida
+   (0,86 s frente a 0,75 s) porque lo que aparece es lo que se mira; antes
+   era al revés y la ventana parecía caer de golpe al volver. */
+.ap-opcion:is(:hover,:focus-visible) .genio .ap-ventana{animation:ap-genio 2.6s linear infinite}
+.ap-opcion:is(:hover,:focus-visible) .escala .ap-ventana{animation:ap-escala 2.6s linear infinite}
+.ap-opcion:is(:hover,:focus-visible) .sin-animacion .ap-ventana{animation:ap-sin 2.6s linear infinite}
+@keyframes ap-sin{0%,36.9%{opacity:1}37%,84.9%{opacity:0}85%,100%{opacity:1}}
+/* Cada tramo lleva su curva: acelera al irse y frena al llegar. Con un solo
+   ease-in-out el genio se quedaba flotando a media lámpara. */
+@keyframes ap-genio{
+    0%,8%{transform:none;opacity:1;animation-timing-function:cubic-bezier(.3,0,.2,1)}
+    14%{transform:translate(0,-2%) scale(1.03,1.03);opacity:1;animation-timing-function:cubic-bezier(.5,0,.9,.6)}
+    26%{transform:translate(2%,6%) skewX(-7deg) scale(.55,1.1);opacity:1;animation-timing-function:cubic-bezier(.6,0,1,.6)}
+    37%,52%{transform:scale(.05,.1);opacity:0;animation-timing-function:cubic-bezier(.2,.7,.3,1)}
+    70%{transform:translate(-1%,5%) skewX(5deg) scale(.6,1.06);opacity:1;animation-timing-function:cubic-bezier(.2,.8,.3,1.2)}
+    85%,100%{transform:none;opacity:1}}
+@keyframes ap-escala{
+    0%,8%{transform:none;opacity:1;animation-timing-function:cubic-bezier(.4,0,1,1)}
+    37%,52%{transform:scale(.08);opacity:0;animation-timing-function:cubic-bezier(0,0,.2,1)}
+    85%,100%{transform:none;opacity:1}}
+/* Sin animación: desaparece y vuelve de golpe cuando las otras acaban de irse
+   y de volver. */
+/* Capa secundaria: el dock da un latido al tragarse la ventana (genio y
+   escala, la de sin animación no se mueve) y, mientras está minimizada, sale
+   el punto de app minimizada bajo el dock. Sin ese punto la ventana
+   simplemente desaparecía y no se leía adónde había ido. */
+.ap-opcion:is(:hover,:focus-visible) :is(.genio,.escala) .ap-dock{animation:ap-dock-latido 2.6s ease-out infinite}
+@keyframes ap-dock-latido{0%,34%,48%,100%{transform:translateX(-50%)}39%{transform:translateX(-50%) scale(1.07,1.12)}}
+.ap-mini:is(.genio,.escala,.sin-animacion) .ap-dock::after{content:'';position:absolute;left:50%;bottom:-2cqw;width:1.3cqw;height:1.3cqw;border-radius:50%;background:var(--ap-acento);opacity:0;transform:translateX(-50%)}
+.ap-opcion:is(:hover,:focus-visible) :is(.genio,.escala) .ap-dock::after{animation:ap-dock-punto 2.6s ease-out infinite}
+@keyframes ap-dock-punto{0%,37%,60%,100%{opacity:0}42%,52%{opacity:1}}
+.ap-opcion:is(:hover,:focus-visible) .sin-animacion .ap-dock::after{animation:ap-dock-punto-sin 2.6s linear infinite}
+@keyframes ap-dock-punto-sin{0%,36.9%,84.9%,100%{opacity:0}37%,84.8%{opacity:1}}
+/* Notificaciones: la campana del panel y el aviso de arriba a la derecha,
+   en cqw por lo mismo que el dock. En reposo las dos fichas ya se distinguen
+   (aviso a la vista frente a punto en la campana); el puntero solo cuenta
+   cómo llega. */
+.ap-panel:has(.ap-campana){display:flex;align-items:center;justify-content:flex-end;padding-right:9cqw}
+.ap-campana{position:relative;width:3.6cqw;height:3.6cqw}
+/* bell de Lucide como máscara, en ::before: una máscara en el propio
+   elemento recortaría también el punto de ::after. */
+.ap-campana::before{content:'';position:absolute;inset:0;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.268 21a2 2 0 0 0 3.464 0'/%3E%3Cpath d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.268 21a2 2 0 0 0 3.464 0'/%3E%3Cpath d='M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326'/%3E%3C/svg%3E") center/contain no-repeat}
+.claro .ap-campana{color:rgba(0,0,0,.6)}
+.oscuro .ap-campana{color:rgba(255,255,255,.8)}
+.ap-campana::after{content:'';position:absolute;top:-.6cqw;right:-.8cqw;width:1.8cqw;height:1.8cqw;border-radius:50%;background:var(--ap-acento);transform:scale(0)}
+.calla .ap-campana::after{transform:none}
+.ap-aviso{position:absolute;right:3%;top:13%;width:44%;height:21%;box-sizing:border-box;padding:2cqw;border-radius:2.6cqw;display:grid;grid-template-columns:auto 1fr;column-gap:1.4cqw;align-content:center;row-gap:1cqw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+/* Opaco: con 0,94 se transparentaban los controles y la línea de la ventana. */
+.claro .ap-aviso{background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.2),0 0 0 1px rgba(0,0,0,.06)}
+.oscuro .ap-aviso{background:#2a2a30;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.06)}
+.ap-aviso i{grid-row:span 2;width:6cqw;height:6cqw;border-radius:1.2cqw;background:var(--ap-acento);align-self:center}
+.ap-aviso .ap-linea{height:1.8cqw;width:90%}
+.calla .ap-aviso{opacity:0}
+/* Ciclo de 3 s: el aviso a la vista, se va hacia el borde acelerando, un
+   rato fuera y vuelve a entrar frenando. Empieza visible para no dar un
+   salto al poner el puntero encima. En No molestar el aviso no sale: en el
+   instante en que entraría, late el punto de la campana. */
+.ap-opcion:is(:hover,:focus-visible) .avisa .ap-aviso{animation:ap-aviso 3s linear infinite}
+.ap-opcion:is(:hover,:focus-visible) .calla .ap-campana::after{animation:ap-campana 3s linear infinite}
+@keyframes ap-aviso{
+    0%,50%{transform:none;opacity:1;animation-timing-function:cubic-bezier(.4,0,1,1)}
+    62%,76%{transform:translateX(115%);opacity:0;animation-timing-function:cubic-bezier(.05,.7,.1,1)}
+    92%,100%{transform:none;opacity:1}}
+@keyframes ap-campana{
+    0%,76%{transform:none;animation-timing-function:cubic-bezier(.2,0,0,1)}
+    82%{transform:scale(1.8);animation-timing-function:cubic-bezier(.3,0,.2,1)}
+    92%,100%{transform:none}}
+.ap-pie{display:block;margin-top:14px}
+@media (prefers-reduced-motion:reduce){.ap-opcion :is(.ap-ventana,.ap-dock,.ap-dock::after,.ap-aviso,.ap-campana::after){animation:none!important}}
+.ap-colores{display:flex;flex-wrap:wrap;gap:12px}
+.ap-color{position:relative;width:28px;height:28px;border-radius:50%;border:0;padding:0;background:var(--c);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);transition:transform .12s,box-shadow .15s}
+.ap-color:hover{transform:scale(1.08)}
+.ap-color:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.ap-color[aria-checked=true]{box-shadow:inset 0 0 0 1px rgba(0,0,0,.12),0 0 0 2px var(--card),0 0 0 4px var(--c)}
+/* Punto blanco con borde: Arena es casi blanco y sin borde no se veía. */
+.ap-color[aria-checked=true]::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.ap-opciones.iconos{margin-bottom:6px}
+.ap-icono{width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px var(--brd),0 2px 8px rgba(0,0,0,.12)}
+.ap-glifo{width:46px;height:46px;border-radius:30%;display:flex;align-items:center;justify-content:center}
+.ap-horas{margin-top:10px}
 .mode-radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--brd);transition:.15s}
 .mode-radio.on{border-color:var(--blue);background:var(--blue);box-shadow:inset 0 0 0 3px var(--card)}
 /* Paleta de colores (estilo Android): maquetas, tiras de color y fichas */
@@ -921,14 +1088,6 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 .dyn-style-label{font-size:12px;font-weight:500;color:var(--tx2)}
 .dyn-style.on .dyn-style-label{color:var(--blue)}
 
-/* Icon style swatch — spread across the width, generous spacing */
-.icon-swatch-row{display:flex;justify-content:space-evenly;align-items:flex-start;padding:8px 6% 4px;gap:24px}
-.icon-swatch{flex:0 1 130px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer}
-.icon-swatch-tile{width:100%;aspect-ratio:1/1;max-width:80px;border-radius:22px;display:flex;align-items:center;justify-content:center;border:2px solid transparent;transition:.15s;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-.icon-swatch.active .icon-swatch-tile{border-color:var(--blue)}
-.icon-swatch-glyph{width:64%;height:64%;border-radius:30%;display:flex;align-items:center;justify-content:center}
-.icon-swatch-label{font-size:13px;font-weight:500;color:var(--tx2)}
-.icon-swatch.active .icon-swatch-label{color:var(--blue)}
 /* Mode settings sub-page schedule grid */
 .ms-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .ms-grid .ds{display:block;margin-bottom:5px}
@@ -1013,31 +1172,53 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 /* ═══ Wallpaper Desktop Preview ═══ */
 .wp-preview-desktop{margin-bottom:20px}
 /* ── Wallpaper hero card (redesign) ── */
-.wp-hero-card{background:var(--card);border-radius:25px;padding:18px;margin-bottom:16px}
-.wp-hero-name{font-size:15px;font-weight:600;color:var(--tx);margin:0 2px 12px;text-transform:capitalize}
-.wp-change-btn{width:100%;margin-top:14px;padding:13px;border:0;border-radius:14px;background:var(--sbg);color:var(--blue);font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
-.wp-change-btn:hover{background:var(--hov)}
-.wp-change-btn:active{transform:scale(.985)}
 /* ── Wallpaper grid panel ── */
-.wp-grid-panel{margin-top:16px;position:relative}
-.wp-add-fab{position:fixed;bottom:24px;right:24px;width:52px;height:52px;border:0;border-radius:50%;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.28);transition:.15s;z-index:50}
-.wp-add-fab:hover{filter:brightness(1.08)}
-.wp-add-fab:active{transform:scale(.92)}
-.wp-add-fab:focus-visible{outline:2px solid #fff;outline-offset:2px}
-.card-profile .home-buds-row{height:60px;justify-content:flex-start;gap:14px;padding:0 18px}
-.home-buds-row .item-icon{width:auto;height:28px;color:var(--tx)}
-.home-buds-pair{display:inline-flex;align-items:center;gap:1px}
-.home-buds-pair img{width:15px;height:22px;object-fit:contain}
-.home-buds-name{font-size:15px;font-weight:500}
+/* Columna del icono con el ancho de la foto de arriba (60 px): así el nombre
+   de los auriculares queda alineado con el de la cuenta. */
+.card-profile .home-buds-row{height:64px;justify-content:flex-start;gap:14px;padding:0 16px}
+.home-buds-row .item-icon{width:60px;height:36px}
+.home-buds-pair{display:inline-flex;align-items:center;gap:0;color:var(--tx)}
+.home-buds-pair i{width:22px;height:34px;background:currentColor;-webkit-mask:var(--src) center/contain no-repeat;mask:var(--src) center/contain no-repeat}
+.home-buds-name{font-size:14px;font-weight:600}
 .buds-color-sw{width:24px;height:24px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;box-shadow:0 0 0 1px rgba(0,0,0,.12) inset;transition:.12s}
 .buds-color-sw.active{border-color:var(--blue)}
 .buds-color-sw:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .lang-label{display:inline-flex;align-items:center;gap:8px;vertical-align:middle}
-.lang-flag{flex-shrink:0;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
-.wallpaper-card:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .controls button:focus-visible,.sb-toggle:focus-visible,.search-clear:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
 .wp-grid-head{font-size:15px;font-weight:600;color:var(--blue);margin:0 2px 14px}
-.wp-desktop-screen{aspect-ratio:16/10;border-radius:16px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.2);background:#1a1a2e}
+.wp-desktop-screen{aspect-ratio:16/10;border-radius:16px;position:relative;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.2);background:var(--sbg)}
+/* Fondos: cabecera con el fondo puesto y galería por secciones */
+/* La vista previa saca el alto de su ancho: estirada a la altura de la fila,
+   aspect-ratio hacía lo contrario y en pantalla completa se quedaba en
+   ~430 px de ancho (270 de alto de la tarjeta × 1,6) con un hueco al lado.
+   Su columna para en 520 px para no ocupar media pantalla a lo ancho. */
+.fnd-cab{display:grid;grid-template-columns:minmax(0,520px) minmax(260px,1fr);gap:16px;align-items:start}
+@media(max-width:640px){.fnd-cab{grid-template-columns:1fr}}
+.fnd-vista{width:100%;box-shadow:0 0 0 1px var(--brd),0 8px 24px rgba(0,0,0,.18)}
+.fnd-panel{position:absolute;top:0;left:0;right:0;height:7%;background:rgba(255,255,255,.18);backdrop-filter:blur(10px)}
+.fnd-dock{position:absolute;bottom:5%;left:50%;transform:translateX(-50%);display:flex;gap:5px;padding:5px 7px;border-radius:10px;background:rgba(255,255,255,.2);backdrop-filter:blur(10px)}
+.fnd-dock i{width:14px;height:14px;border-radius:4px;background:rgba(255,255,255,.75)}
+.fnd-info{margin:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:4px}
+.fnd-nombre{font-size:20px;font-weight:600;color:var(--tx);overflow-wrap:anywhere}
+.fnd-anadir{margin-top:14px;align-self:flex-start;display:inline-flex;align-items:center;gap:6px}
+.fnd-seccion{display:flex;justify-content:space-between;align-items:baseline;margin:24px 6px 10px;font-size:15px;font-weight:600;color:var(--tx)}
+.fnd-cuenta{font-size:13px;font-weight:500;color:var(--tx2)}
+.fnd-mas{border:0;background:0;padding:0;color:var(--tx2);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:color .15s}
+.fnd-mas:hover{color:var(--blue)}
+#wp-grid .wallpaper-grid{gap:16px 14px;margin-bottom:0}
+.fnd-tarjeta{display:flex;flex-direction:column;gap:7px;padding:0;border:0;background:0;font:inherit;color:var(--tx);cursor:pointer;text-align:center;min-width:0}
+.fnd-tarjeta:focus-visible{outline:0}
+.fnd-miniatura{position:relative;display:block;aspect-ratio:16/10;border-radius:14px;overflow:hidden;background:var(--sbg);box-shadow:0 0 0 1px var(--brd);outline:3px solid transparent;outline-offset:2px;transition:outline-color .15s,transform .15s;contain:layout paint}
+.fnd-tarjeta:hover .fnd-miniatura{transform:translateY(-2px)}
+.fnd-tarjeta.active .fnd-miniatura{outline-color:var(--blue)}
+.fnd-tarjeta:focus-visible .fnd-miniatura{outline-color:color-mix(in srgb,var(--blue) 50%,transparent)}
+/* La pareja se enseña partida en diagonal: la mitad clara y la oscura. */
+.fnd-oscura{clip-path:polygon(58% 0,100% 0,100% 100%,42% 100%)}
+.fnd-insignia{position:absolute;left:7px;bottom:7px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.4);backdrop-filter:blur(6px);display:grid;place-items:center;color:#fff}
+.fnd-nombre-tarjeta{font-size:12.5px;font-weight:500;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fnd-tarjeta.active .fnd-nombre-tarjeta{color:var(--tx);font-weight:600}
+.fnd-anadir-tarjeta{align-self:start;aspect-ratio:16/10;border:1.5px dashed var(--brd);border-radius:14px;background:var(--sbg);color:var(--tx2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;transition:color .15s,border-color .15s}
+.fnd-anadir-tarjeta:hover,.fnd-anadir-tarjeta:focus-visible{color:var(--blue);border-color:var(--blue);outline:0}
 .wp-desktop-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .wp-desktop-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.15)}
 .wp-desktop-clock{display:flex;flex-direction:column;align-items:center;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.4)}
@@ -1061,12 +1242,7 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 .ws-icon{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center}
 .ws-label{font-size:11px;font-weight:500;color:var(--tx2);text-align:center}
 /* Wallpaper card uses img tag */
-.wallpaper-card{position:relative;border-radius:16px;overflow:hidden;cursor:pointer;border:3px solid transparent;padding:0;appearance:none;font:inherit;text-align:left;transition:border-color .15s;aspect-ratio:16/10;background:#1c1c1e;contain:layout paint}
 .wp-card-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-.wp-card-placeholder{position:absolute;inset:0;width:100%;height:100%;align-items:center;justify-content:center}
-.wallpaper-card:hover{border-color:var(--tx2)}
-.wallpaper-card.active{border-color:var(--blue)}
-.wallpaper-card .wp-name{position:absolute;bottom:0;left:0;right:0;padding:6px 10px;background:linear-gradient(transparent,rgba(0,0,0,.6));color:#fff;font-size:11px;font-weight:500;z-index:1}
 
 /* ═══════════════════════════════════════════════════════════ */
 /* ── REFRESH RATE ────────────────────────────────────────── */
@@ -1187,6 +1363,8 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 .about-rename-row{display:flex;align-items:center;gap:8px;width:100%;max-width:320px}
 .about-rename-input{flex:1;height:40px;background:var(--sbg);border:0;border-radius:12px;padding:0 14px;font-size:14px;color:var(--tx);outline:0;font-family:inherit}
 .about-rename-input:focus{box-shadow:0 0 0 2px var(--blue)}
+.tec-prueba{width:100%;height:40px;background:var(--sbg);border:0;border-radius:12px;padding:0 14px;font-size:14px;color:var(--tx);outline:0;font-family:inherit}
+.tec-prueba:focus{box-shadow:0 0 0 2px var(--blue)}
 
 /* ═══════════════════════════════════════════════════════════ */
 /* ── SALUD DIGITAL ───────────────────────────────────────── */
@@ -1458,17 +1636,27 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 /* ═══════════════════════════════════════════════════════════ */
 /* ── CUENTAS ─────────────────────────────────────────────── */
 /* ═══════════════════════════════════════════════════════════ */
-.acc-hero{background:var(--card);border-radius:25px;padding:28px 24px;margin-bottom:16px;display:flex;align-items:center;gap:18px}
-.acc-avatar-big,.acc-avatar-big-ph{width:72px;height:72px;border-radius:50%;flex-shrink:0;object-fit:cover}
-.acc-avatar-big-ph{background:linear-gradient(135deg,var(--blue),#5856d6);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:#fff}
+.acc-anadir{width:100%;border:0;background:0;font:inherit;color:var(--blue);cursor:pointer;text-align:left}
+.acc-anadir .sys-user-av-ph{font-size:20px;font-weight:500;color:var(--blue)!important}
+.acc-anadir:hover{background:var(--hov)}
+/* Cabecera sin tarjeta, centrada: la foto es lo que identifica la cuenta y
+   manda en la vista; la cámara solo aparece al pasar por encima. */
+.acc-hero{display:flex;flex-direction:column;align-items:center;gap:12px;padding:8px 0 20px;text-align:center}
+.acc-foto{position:relative;padding:0;border:0;background:0;border-radius:50%;cursor:pointer}
+.acc-foto:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.acc-foto-cambiar{position:absolute;inset:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);color:#fff;opacity:0;transition:opacity .15s}
+.acc-foto-cambiar svg{width:26px;height:26px}
+.acc-foto:is(:hover,:focus-visible) .acc-foto-cambiar{opacity:1}
+.acc-avatar-big,.acc-avatar-big-ph{width:112px;height:112px;border-radius:50%;flex-shrink:0;object-fit:cover;display:block}
+.acc-avatar-big-ph{background:var(--blue);display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:700;color:#fff}
 .acc-hero-info{display:flex;flex-direction:column;gap:4px}
-.acc-hero-name{font-size:18px;font-weight:700;letter-spacing:-.2px}
+.acc-hero-name{font-size:22px;font-weight:700;letter-spacing:-.2px}
 .acc-hero-sub{font-size:13px;color:var(--tx2)}
 .sys-users-list{display:flex;flex-direction:column}
 .sys-user-item{display:flex;align-items:center;gap:12px;padding:13px 20px;position:relative}
 .sys-user-item:not(:last-child)::after{content:"";position:absolute;bottom:0;left:20px;right:20px;height:.5px;background:var(--div)}
 .sys-user-av,.sys-user-av-ph{width:36px;height:36px;border-radius:50%;flex-shrink:0;object-fit:cover}
-.sys-user-av-ph{background:linear-gradient(135deg,#5856d6,#af52de);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff}
+.sys-user-av-ph{background:var(--sbg);color:var(--tx2)!important;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff}
 .sys-user-name{font-size:14px;font-weight:500;display:block}
 .sys-user-id{font-size:12px;color:var(--tx2);display:block}
 
@@ -1576,8 +1764,6 @@ input[type="range"].bk-range::-moz-range-thumb{width:18px;height:18px;border:0;b
 }
 
 /* Direction-aware page transition: back slides in from the left */
-@keyframes pageEnterBack{from{opacity:.4;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
-#app.page-enter-back{animation:pageEnterBack .28s cubic-bezier(0.25,0.46,0.45,0.94)}
 
 /* Toggles are now real <button>s: reset chrome, keep the switch look, add focus ring */
 button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;appearance:none}
@@ -1588,18 +1774,6 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .routine-empty-title{font-size:15px;font-weight:600}
 .routine-empty-sub{font-size:12.5px;color:var(--tx2);max-width:320px;margin-bottom:10px}
 
-/* Interactive swipe-back bubble (Firefox/Chrome style) */
-.swipe-back-bubble{
-  position:fixed;left:0;top:50%;z-index:9999;pointer-events:none;
-  width:44px;height:44px;border-radius:50%;
-  background:var(--card);color:var(--tx);
-  box-shadow:0 2px 12px rgba(0,0,0,.25),0 0 0 .5px var(--div);
-  display:flex;align-items:center;justify-content:center;
-  opacity:0;transform:translateY(-50%) translateX(-46px) scale(.6);
-  will-change:transform,opacity;
-}
-.swipe-back-bubble.anim{transition:transform .25s cubic-bezier(.2,.8,.3,1),opacity .2s ease}
-.swipe-back-bubble.armed{background:var(--blue);color:#fff}
 
 /* Swipe preview: clipping frame pinned to the content area (so the card
    emerges from the sidebar's edge), card slides inside it */
@@ -1612,7 +1786,7 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
   transform:translateX(-104%);
   will-change:transform,opacity;
 }
-.swipe-preview.anim{transition:transform .25s cubic-bezier(.2,.8,.3,1),opacity .2s ease}
+.swipe-preview.anim{transition:transform .32s cubic-bezier(.22,1,.36,1),opacity .22s ease}
 
 /* Tinted-icons page: labeled slider rows (no floating dividers) */
 .ti-controls{display:flex;flex-direction:column;gap:18px;margin-top:6px}
@@ -1941,10 +2115,8 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .ed-wx-d i{font-style:normal}
 .ed-wx-d svg{width:1.4em;height:1.4em}
 
-.wp-grid-panel [data-wp-more][hidden]{display:none}
 
 /* Escritorio: vista previa del dock y selector segmentado */
-.dock-preview{position:relative;height:170px;padding:0;display:flex;align-items:flex-end;justify-content:center;background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 38%,var(--card)),color-mix(in srgb,var(--blue) 8%,var(--card)) 70%)}
 .dock-desks{position:absolute;top:14px;left:0;right:0;display:flex;gap:6px;justify-content:center}
 .dock-desks b{width:22px;height:5px;border-radius:999px;background:var(--tx);opacity:.22;transition:opacity .15s}
 .dock-desks b.on{opacity:.7}
@@ -1958,25 +2130,69 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .page-foot{margin:-4px 8px 16px;font-size:12px;line-height:1.5;color:var(--tx2)}
 .dock-desk-name{position:absolute;top:28px;left:0;right:0;text-align:center;font-size:12px;font-weight:600;color:var(--tx);opacity:.6}
 .dock-bar i{display:grid;place-items:center;color:#fff;font-style:normal;font-weight:700;font-size:calc(var(--dock)*.42)}
-.desk-name-row[hidden]{display:none}
-.desk-name{width:min(52%,320px);min-height:38px;border:1px solid var(--div);border-radius:12px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13.5px;padding:6px 14px;transition:border-color .15s}
-.desk-name:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 22%,transparent)}
+/* Escritorio: vista previa con el fondo real, barra y dock a tamaño real */
+.esc-vista{position:relative;height:220px;border-radius:25px;overflow:hidden;margin-bottom:8px;display:flex;align-items:flex-end;justify-content:center;background:var(--ap-fondo,linear-gradient(160deg,color-mix(in srgb,var(--ap-acento) 38%,var(--card)),color-mix(in srgb,var(--ap-acento) 8%,var(--card)) 70%)) center/cover}
+.esc-vista.claro{color:#000}
+.esc-vista.oscuro{color:#fff}
+.esc-panel{position:absolute;top:0;left:0;right:0;height:34px;display:flex;align-items:center;justify-content:center;gap:12px;backdrop-filter:blur(14px) saturate(1.6)}
+.esc-vista.claro .esc-panel,.esc-vista.claro .dock-bar{background:rgba(255,255,255,.4);border-color:rgba(255,255,255,.5)}
+.esc-vista.oscuro .esc-panel,.esc-vista.oscuro .dock-bar{background:rgba(30,30,34,.45);border-color:rgba(255,255,255,.1)}
+.esc-panel .dock-desks,.esc-panel .dock-desk-name{position:static}
+.esc-panel .dock-desks b{background:currentColor}
+.esc-panel .dock-desk-name{color:inherit;opacity:.85}
+.esc-vista .dock-bar{margin-bottom:16px;backdrop-filter:blur(14px) saturate(1.6);transition:gap .1s,padding .1s}
+.dock-bar i.con-icono{background:none;box-shadow:none}
+.dock-bar i.con-icono img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+.esc-cab{align-items:center;row-gap:10px}
+.esc .bk-slider-row+.ap-cab{margin-top:18px}
+.esc-escritorios{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:16px}
+.esc-escritorio{display:flex;flex-direction:column;gap:6px}
+.esc-escritorio[hidden]{display:none}
+.esc-nombre{width:100%;min-height:32px;border:1px solid transparent;border-radius:10px;background:0;color:var(--tx);font:inherit;font-size:13px;font-weight:500;text-align:center;padding:4px 8px;transition:border-color .15s,background .15s}
+.esc-nombre:hover{background:var(--sbg)}
+.esc-nombre:focus{outline:0;border-color:var(--blue);background:var(--sbg)}
 
-/* Maqueta de la pantalla de bloqueo */
-.lock-preview{padding:20px;display:flex;justify-content:center}
-.lp-screen{position:relative;width:346px;max-width:100%;height:216px;border-radius:14px;overflow:hidden;background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 45%,var(--bg)),color-mix(in srgb,var(--blue) 12%,var(--bg)) 75%);color:#fff}
-.lp-clock{position:absolute;top:var(--clock-y,8%);left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:2px}
-.lp-time{font-size:var(--clock,29px);font-weight:300;line-height:1;letter-spacing:-.02em}
-.lp-date{font-size:9px;opacity:.75}
-.lp-date[hidden],.lp-media[hidden]{display:none}
-.lp-access{position:absolute;top:var(--access-y,36%);left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:3px}
-.lp-avatar{width:var(--avatar,26px);height:var(--avatar,26px);border-radius:50%;background:rgba(255,255,255,.28)}
-.lp-name{font-size:8px;font-weight:600}
-.lp-field{width:62px;height:9px;border-radius:999px;background:rgba(0,0,0,.35);margin-top:1px}
-.lp-power{position:absolute;left:8px;bottom:8px;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.3)}
-.lp-name[hidden],.lp-power[hidden]{display:none}
-.lp-media{position:absolute;top:var(--media-y,68%);left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:5px 12px 5px 6px;border-radius:999px;background:rgba(255,255,255,.16);font-size:9px}
-.lp-media i{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.5)}
+/* Pantalla de bloqueo de bookos-desktop. Escenario y esquinas de selección son
+   los del editor (.ed-stage, .ed-c); las medidas de cada pieza llegan en línea
+   en cqh desde lkMaqueta(), sacadas de bloqueo.rs. */
+.lk-portada{padding:20px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.lk-marco{width:min(100%,460px);cursor:pointer;border-radius:25px;transition:transform .12s}
+.lk-marco:hover{transform:scale(1.01)}
+.lk-stage{--ac:var(--blue);aspect-ratio:16/10;color:#fff;box-shadow:0 10px 28px rgba(0,0,0,.22)}
+.lk-portada .lk-stage{border-radius:16px;pointer-events:none}
+.lk-velo{position:absolute;inset:0;background:rgba(0,0,0,.22);pointer-events:none}
+.ed-stage:not(:has(.ed-bg)) .lk-velo{background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 45%,#111),#111 80%)}
+.lk-pieza{position:absolute;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;text-align:center;white-space:nowrap}
+/* El margen negativo compensa el relleno de .ed-el: la pieza empieza donde dice la configuración. */
+.lk-pieza.ed-el{padding:1.2cqh 2cqh;margin-top:-1.2cqh;cursor:grab}
+.lk-stage.dragging .lk-pieza{cursor:grabbing}
+.lk-pieza.ed-sel .ed-c[data-asa]{pointer-events:auto;cursor:nwse-resize}
+.lk-pieza.ed-sel .ed-c-tr[data-asa],.lk-pieza.ed-sel .ed-c-bl[data-asa]{cursor:nesw-resize}
+.lk-pieza.ed-sel .ed-c[data-asa]::after{content:"";position:absolute;inset:-12px}
+.lk-oculta{opacity:.35;outline:1.5px dashed rgba(255,255,255,.6);outline-offset:-1.5px}
+/* 1,3: el alto de línea de iced. Con 1,05 la fecha salía pegada a la hora y en el bloqueo real hay más aire. */
+.lk-hora{line-height:1.3;letter-spacing:-.01em}
+.lk-fecha{line-height:1.3;opacity:.75}
+.lk-foto{display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,255,255,.25) center/cover;font-weight:700}
+.lk-nombre{font-weight:600}
+.lk-campo{border-radius:999px;background:rgba(22,25,30,.82)}
+.lk-medios{flex-direction:row;justify-content:flex-start;box-sizing:border-box;border-radius:14px;background:color-mix(in srgb,var(--blue) 82%,#000)}
+.lk-medios.ed-el{margin-top:0}
+.lk-arte{flex:0 0 auto;border-radius:10px;background:rgba(255,255,255,.3)}
+.lk-pista{display:flex;flex-direction:column;align-items:flex-start;gap:.3em;font-weight:500}
+.lk-pista span{opacity:.75}
+.lk-energia{left:auto;transform:none}
+.lk-energia.ed-el{margin:0;padding:.6cqh}
+.lk-boton{display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(255,255,255,.18)}
+.lk-editor{margin-bottom:18px}
+.lk-estilos{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px}
+.lk-estilo{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 6px 8px;border:2px solid transparent;border-radius:14px;background:var(--sbg);color:var(--tx);font:inherit;cursor:pointer;transition:background .12s,border-color .12s}
+.lk-estilo:hover{background:var(--act)}
+.lk-estilo.on{border-color:var(--blue)}
+.lk-estilo:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.lk-estilo-muestra{font-size:34px;line-height:1.1}
+.lk-estilo-nombre{font-size:12px;color:var(--tx2)}
+.lk-grosor-a{font-size:16px;width:20px;text-align:center}
 /* Mismo aspecto que .bk-select; color-scheme hace que el icono del reloj de WebKit siga el tema */
 .bk-time{min-height:40px;padding:8px 14px;border:1px solid var(--div);border-radius:12px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13.5px;font-weight:500;font-variant-numeric:tabular-nums;color-scheme:light dark;cursor:pointer;transition:border-color .15s}
 .bk-time:hover{border-color:color-mix(in srgb,var(--blue) 55%,var(--div))}
@@ -2005,4 +2221,205 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
    apagada, la fila del interruptor es la última y no lleva raya. */
 #dyn-block.dyn-off>.detail-item::after{display:none}
 #dyn-body .dyn-tabs{margin-top:14px}
-.wp-hero-name{text-transform:none}
+
+/* ── Pantallas: portada, escala con miniaturas y brillo ───────────────────
+   La estructura es la de macOS (equipo dibujado arriba, escala por
+   miniaturas, lo técnico en Avanzado); el dibujo es nuestro: ventanas con los
+   botones a la derecha como las pinta bookos-shell, el fondo real y el acento
+   del sistema. */
+.disp-hero{background:var(--card);border-radius:var(--r-card);padding:28px 20px 20px;margin-bottom:16px;display:flex;flex-direction:column;align-items:center}
+.disp-escena{position:relative;max-width:100%}
+.disp-equipo{position:absolute;display:flex;flex-direction:column;align-items:center;background:none;border:0;padding:0;cursor:pointer;font:inherit}
+.disp-equipo[tabindex="-1"]{cursor:default}
+.disp-equipo:focus-visible{outline:none}
+.disp-equipo.sel .disp-marco,.disp-equipo:focus-visible .disp-marco{outline:2px solid var(--blue);outline-offset:3px}
+/* Sin fondo legible se ve el acento: una pantalla negra parece apagada. */
+.disp-marco{position:relative;display:block;box-sizing:border-box;border:4px solid #161618;border-radius:10px;overflow:hidden;background:linear-gradient(135deg,color-mix(in srgb,var(--blue) 75%,#000),color-mix(in srgb,var(--blue) 20%,#000))}
+.portatil .disp-marco{border-bottom-width:6px;border-radius:10px 10px 3px 3px}
+.disp-fondo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.disp-base{position:relative;display:block;width:112%;height:7px;margin-top:-1px;border-radius:1px 1px 8px 8px;background:linear-gradient(#d4d4d8,#9c9ca3)}
+.disp-base::after{content:"";position:absolute;top:0;left:50%;width:16%;height:3px;transform:translateX(-50%);border-radius:0 0 4px 4px;background:#8a8a90}
+.disp-pie{position:relative;display:block;width:10%;height:12px;background:#8e8e93}
+.disp-pie::after{content:"";position:absolute;bottom:-4px;left:50%;width:320%;height:4px;transform:translateX(-50%);border-radius:2px;background:#8e8e93}
+.disp-nombre{margin-top:16px;font-size:17px;font-weight:600;color:var(--tx)}
+.disp-detalle{margin-top:2px;font-size:12px;color:var(--tx2)}
+.disp-apagadas{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:14px}
+.disp-apagada{border:1px dashed var(--div);border-radius:var(--r-chip);background:none;padding:6px 10px;font:inherit;font-size:12px;color:var(--tx2);cursor:pointer}
+.disp-apagada.sel{border-color:var(--blue);color:var(--tx)}
+
+.disp-escalas-card{background:var(--card);border-radius:var(--r-card);padding:20px 16px 14px;margin-bottom:16px}
+.disp-escalas{display:flex;justify-content:space-between;gap:8px}
+.disp-escala{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:8px;background:none;border:0;padding:4px 0;font:inherit;font-size:12px;color:var(--tx2);cursor:pointer}
+.disp-escala:focus-visible{outline:none}
+.disp-ficha{position:relative;width:88px;height:58px;border-radius:var(--r-chip);overflow:hidden;background:color-mix(in srgb,var(--blue) 35%,var(--card));box-shadow:0 0 0 1px var(--div);transition:box-shadow .15s}
+.disp-ficha img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.disp-escala:hover .disp-ficha{box-shadow:0 0 0 1px var(--div),0 2px 8px rgba(0,0,0,.18)}
+.disp-escala.on .disp-ficha,.disp-escala:focus-visible .disp-ficha{box-shadow:0 0 0 2px var(--blue)}
+.disp-escala.on .disp-escala-nombre{color:var(--tx);font-weight:600}
+.disp-escala-nombre{min-height:1.3em;text-align:center;white-space:nowrap}
+/* --e es la escala relativa a la mayor de la fila: la ventana ocupa lo mismo
+   en todas y lo que cambia es cuánto cabe dentro, que es lo que se elige. */
+.disp-ventana{position:absolute;top:8px;left:8px;right:8px;bottom:-6px;display:flex;flex-direction:column;border-radius:calc(var(--e)*8px) calc(var(--e)*8px) 0 0;background:var(--card);color:var(--tx);box-shadow:0 1px 5px rgba(0,0,0,.28);text-align:left}
+.disp-barra{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:calc(var(--e)*5px);height:calc(var(--e)*14px);padding:0 calc(var(--e)*6px);color:color-mix(in srgb,var(--tx) 55%,transparent)}
+.disp-barra i{position:relative;display:block;width:calc(var(--e)*6px);height:calc(var(--e)*6px)}
+.disp-barra .min::before{content:"";position:absolute;left:0;right:0;top:50%;border-top:1px solid currentColor}
+.disp-barra .max{box-sizing:border-box;border:1px solid currentColor;border-radius:1px}
+.disp-barra .cerrar::before,.disp-barra .cerrar::after{content:"";position:absolute;left:-15%;right:-15%;top:50%;border-top:1px solid currentColor;transform:rotate(45deg)}
+.disp-barra .cerrar::after{transform:rotate(-45deg)}
+.disp-texto{overflow:hidden;padding:0 calc(var(--e)*6px);font-size:calc(var(--e)*9px);line-height:1.25}
+.disp-escalas-pie{margin-top:10px;text-align:center;font-size:12px;color:var(--tx2);font-variant-numeric:tabular-nums}
+
+.disp-brillo{gap:16px}
+.disp-brillo-ctl{display:flex;align-items:center;gap:10px;width:min(62%,380px);color:var(--tx2)}
+.disp-brillo-ctl input{flex:1}
+.disp-valor{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--tx2);font-variant-numeric:tabular-nums}
+@media(max-width:600px){.disp-ficha{width:64px;height:44px}.disp-escala-nombre{font-size:11px}}
+
+/* Touchpad y ratón: demostración en bucle de la fila activa. Mismas
+   duraciones para el dedo y su efecto, que tienen que leerse como uno. */
+.tp-vista{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;--k:1.5;--dir:1}
+.tp-vista.natural{--dir:-1}
+.tp-pad,.tp-pantalla{position:relative;height:170px;border-radius:var(--r-card);background:var(--card);overflow:hidden}
+.tp-pad::before{content:'';position:absolute;inset:28px 22%;border:2px solid color-mix(in srgb,var(--tx2) 45%,transparent);border-radius:14px}
+.tp-dedo{position:absolute;left:50%;top:50%;width:14px;height:14px;margin:-7px;border-radius:50%;background:var(--blue);opacity:0}
+.tp-pantalla{background:color-mix(in srgb,var(--blue) 14%,var(--card))}
+.tp-doc{position:absolute;left:18%;right:18%;top:14px;display:flex;flex-direction:column;gap:9px;padding:14px;border-radius:12px;background:var(--card)}
+.tp-doc span{height:6px;border-radius:3px;background:var(--tx2);opacity:.35}
+.tp-doc span:nth-child(3n+1){width:60%;background:var(--blue);opacity:.7}
+.tp-boton{position:absolute;right:22%;bottom:18px;width:44px;height:16px;border-radius:8px;background:var(--sbg);opacity:0}
+.tp-cursor{position:absolute;left:50%;top:50%;width:12px;height:16px;background:var(--tx);clip-path:polygon(0 0,0 100%,30% 72%,52% 100%,66% 94%,45% 66%,85% 66%)}
+/* Velocidad: el mismo gesto del dedo, el cursor recorre --k veces más. */
+.tp-vista[data-demo=velocidad] .tp-dedo:first-child{opacity:1;animation:tp-dedo 2.4s ease-in-out infinite}
+.tp-vista[data-demo=velocidad] .tp-cursor{animation:tp-cursor 2.4s ease-in-out infinite}
+@keyframes tp-dedo{0%,100%{transform:translate(-18px,8px)}50%{transform:translate(18px,-8px)}}
+@keyframes tp-cursor{0%,100%{transform:translate(calc(-18px*var(--k)),calc(8px*var(--k)))}50%{transform:translate(calc(18px*var(--k)),calc(-8px*var(--k)))}}
+/* Toque: un toque ligero pulsa el botón; sin él hay que hundir el touchpad. */
+.tp-vista[data-demo=toque] .tp-boton{opacity:1;animation:tp-boton 1.6s infinite}
+.tp-vista[data-demo=toque] .tp-cursor{left:auto;top:auto;right:calc(22% + 14px);bottom:12px}
+.tp-vista[data-demo=toque] .tp-dedo:first-child{animation:tp-toque 1.6s infinite}
+.tp-vista[data-demo=toque].sin-toque .tp-pad::before{animation:tp-hundir 1.6s infinite}
+@keyframes tp-toque{0%,30%,60%,100%{opacity:0;transform:scale(1.6)}40%,48%{opacity:1;transform:scale(1)}}
+@keyframes tp-boton{0%,38%,62%,100%{background:var(--sbg)}42%,56%{background:var(--blue)}}
+@keyframes tp-hundir{0%,36%,60%,100%{transform:none}42%,52%{transform:scale(.96)}}
+/* Scroll: dos dedos suben; con el natural el contenido sigue a los dedos. */
+.tp-vista[data-demo=scroll] .tp-cursor{opacity:0}
+.tp-vista[data-demo=scroll] .tp-dedo:nth-child(-n+2){opacity:1;animation:tp-dos 2.4s ease-in-out infinite}
+.tp-vista[data-demo=scroll] .tp-dedo:nth-child(1){margin-left:-17px}
+.tp-vista[data-demo=scroll] .tp-dedo:nth-child(2){margin-left:3px}
+.tp-vista[data-demo=scroll] .tp-doc{animation:tp-doc 2.4s ease-in-out infinite}
+@keyframes tp-dos{0%,15%{transform:translateY(22px);opacity:0}25%{opacity:1}70%{transform:translateY(-22px);opacity:1}80%,100%{transform:translateY(-22px);opacity:0}}
+@keyframes tp-doc{0%,25%{transform:none}70%,100%{transform:translateY(calc(28px*var(--dir)))}}
+@media (prefers-reduced-motion:reduce){.tp-vista *,.tp-vista ::before{animation:none!important}}
+@media (max-width:640px){.tp-pad{display:none}.tp-vista{grid-template-columns:1fr}}
+
+/* Huella y contraseña: huellas en fila como fichas, el registro sustituye a
+   la fila y el anillo se llena con las pasadas que pide el lector. */
+.fp-intro{margin:0 4px 14px;line-height:1.45}
+.fp-dedos{display:flex;flex-wrap:wrap;justify-content:center;gap:28px;padding:8px 0 20px}
+.fp-dedo{display:flex;flex-direction:column;align-items:center;gap:8px;width:110px;padding:0;border:0;background:0;font:inherit;color:var(--tx);cursor:pointer}
+.fp-dedo i{width:56px;height:56px;border-radius:50%;transition:transform .15s;display:flex;align-items:center;justify-content:center;background:var(--sbg);color:var(--blue);font-size:28px;font-style:normal}
+.fp-dedo svg{width:30px;height:30px}
+.fp-anadir i{color:var(--tx2)}
+.fp-dedo span{font-size:13px;text-align:center}
+.fp-dedo:is(:hover,:focus-visible) i{transform:scale(1.06)}
+.fp-dedo:focus-visible{outline:0}
+.fp-dedo:focus-visible i{box-shadow:0 0 0 3px var(--blue)}
+.fp-registro{display:flex;flex-direction:column;align-items:center;gap:14px;padding:8px 0 22px;text-align:center}
+.fp-registro[hidden],.fp-dedos[hidden]{display:none}
+.fp-anillo{--p:0%;width:104px;height:104px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:conic-gradient(var(--blue) var(--p),var(--sbg) 0)}
+.fp-anillo i{width:90px;height:90px;border-radius:50%;background:var(--bg);color:var(--blue);display:flex;align-items:center;justify-content:center}
+.fp-anillo svg{width:46px;height:46px}
+.fp-anillo.fp-mal{animation:fp-mal .35s}
+@keyframes fp-mal{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+@media (prefers-reduced-motion:reduce){.fp-anillo.fp-mal{animation:none}}
+
+/* Administración general: reloj en vivo con el idioma y la zona puestos. */
+.gen-vista{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;height:200px;border-radius:25px;margin-bottom:8px;background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 30%,var(--card)),color-mix(in srgb,var(--blue) 6%,var(--card)) 70%)}
+.gen-hora{font-size:64px;font-weight:300;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.gen-fecha{font-size:15px;color:var(--tx2)}
+.gen-chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center}
+.gen-chips span{padding:4px 12px;border-radius:var(--r-chip);background:color-mix(in srgb,var(--card) 70%,transparent);font-size:12px;color:var(--tx)}
+.gen-chips span:empty{display:none}
+/* Touchpad: pestañas y demos de los gestos del compositor. Mismo ciclo de
+   2,6 s que las demás: el dedo se mueve de 22 % a 62 % y el efecto, igual. */
+.tp-pestanas{margin-bottom:12px}
+.tp-pestanas .bk-seg-btn{flex:1}
+.detail-card[hidden]{display:none}
+.tp-otra{position:absolute;left:18%;right:18%;top:14px;height:126px;border-radius:12px;background:var(--card);opacity:0}
+.tp-rejilla{position:absolute;inset:30px 24%;display:grid;grid-template-columns:repeat(4,1fr);align-content:center;gap:10px;opacity:0}
+.tp-rejilla i{aspect-ratio:1;border-radius:8px;background:var(--blue);opacity:.75}
+.tp-rejilla i:nth-child(even){opacity:.4}
+.tp-vista:is([data-demo=exponer],[data-demo=vista],[data-demo=escritorio],[data-demo=despejar],[data-demo=launchpad]) .tp-cursor{opacity:0}
+.tp-vista .tp-dedo:nth-child(1){--x:-27px}.tp-vista .tp-dedo:nth-child(2){--x:-9px}
+.tp-vista .tp-dedo:nth-child(3){--x:9px}.tp-vista .tp-dedo:nth-child(4){--x:27px}
+.tp-vista[data-demo=exponer] .tp-dedo:nth-child(1){--x:-18px}.tp-vista[data-demo=exponer] .tp-dedo:nth-child(2){--x:0px}
+.tp-vista[data-demo=exponer] .tp-dedo:nth-child(3){--x:18px}.tp-vista[data-demo=exponer] .tp-dedo:nth-child(4){display:none}
+.tp-vista:is([data-demo=exponer],[data-demo=vista]) .tp-dedo{animation:tp-g-arriba 2.6s ease-in-out infinite}
+.tp-vista[data-demo=despejar] .tp-dedo{animation:tp-g-abajo 2.6s ease-in-out infinite}
+.tp-vista[data-demo=escritorio] .tp-dedo{animation:tp-g-lado 2.6s ease-in-out infinite}
+.tp-vista[data-demo=launchpad] .tp-dedo{animation:tp-g-junta 2.6s ease-in-out infinite}
+@keyframes tp-g-arriba{0%,12%{transform:translate(var(--x),24px);opacity:0}22%{transform:translate(var(--x),24px);opacity:1}62%{transform:translate(var(--x),-24px);opacity:1}72%,100%{transform:translate(var(--x),-24px);opacity:0}}
+@keyframes tp-g-abajo{0%,12%{transform:translate(var(--x),-24px);opacity:0}22%{transform:translate(var(--x),-24px);opacity:1}62%{transform:translate(var(--x),24px);opacity:1}72%,100%{transform:translate(var(--x),24px);opacity:0}}
+@keyframes tp-g-lado{0%,12%{transform:translate(calc(var(--x) + 26px),0);opacity:0}22%{transform:translate(calc(var(--x) + 26px),0);opacity:1}62%{transform:translate(calc(var(--x) - 26px),0);opacity:1}72%,100%{transform:translate(calc(var(--x) - 26px),0);opacity:0}}
+@keyframes tp-g-junta{0%,12%{transform:translate(calc(var(--x) * 1.6),0);opacity:0}22%{transform:translate(calc(var(--x) * 1.6),0);opacity:1}62%{transform:translate(calc(var(--x) * .35),0);opacity:1}72%,100%{transform:translate(calc(var(--x) * .35),0);opacity:0}}
+/* Ventanas: la de siempre y otra que entra; en la exposición, una al lado de
+   la otra en pequeño. */
+.tp-vista[data-demo=exponer] .tp-doc{animation:tp-p-exp-doc 2.6s ease-in-out infinite}
+.tp-vista[data-demo=exponer] .tp-otra{animation:tp-p-exp-otra 2.6s ease-in-out infinite}
+/* Vista de escritorios: como en el compositor, baja una franja de cristal
+   con las miniaturas de los escritorios y las ventanas del actual se reparten
+   debajo. Si fuera igual que la exposición no se distinguían los dos gestos. */
+.tp-franja{position:absolute;left:0;right:0;top:0;height:46px;display:flex;justify-content:center;align-items:center;gap:10px;background:color-mix(in srgb,var(--card) 80%,transparent);opacity:0;transform:translateY(-100%)}
+.tp-franja i{width:48px;height:30px;border-radius:6px;background:var(--bg);opacity:.8}
+.tp-franja i:first-child{box-shadow:0 0 0 2px var(--blue)}
+.tp-vista[data-demo=vista] .tp-franja{animation:tp-p-vis-franja 2.6s ease-in-out infinite}
+.tp-vista[data-demo=vista] .tp-doc{animation:tp-p-vis-doc 2.6s ease-in-out infinite}
+.tp-vista[data-demo=vista] .tp-otra{animation:tp-p-vis-otra 2.6s ease-in-out infinite}
+@keyframes tp-p-vis-franja{0%,22%,100%{transform:translateY(-100%);opacity:0}62%,90%{transform:none;opacity:1}}
+@keyframes tp-p-vis-doc{0%,22%,100%{transform:none}62%,90%{transform:translate(-34%,48px) scale(.4)}}
+@keyframes tp-p-vis-otra{0%,22%,100%{transform:none;opacity:0}62%,90%{transform:translate(34%,48px) scale(.4);opacity:1}}
+/* Origen arriba y misma bajada: el documento es más alto que la otra
+   ventana y con origen al centro quedaban a alturas distintas. */
+.tp-vista:is([data-demo=exponer],[data-demo=vista]) :is(.tp-doc,.tp-otra){transform-origin:50% 0}
+@keyframes tp-p-exp-doc{0%,22%,100%{transform:none}62%,90%{transform:translate(-36%,30px) scale(.48)}}
+@keyframes tp-p-exp-otra{0%,22%,100%{transform:none;opacity:0}62%,90%{transform:translate(36%,30px) scale(.48);opacity:1}}
+.tp-vista[data-demo=escritorio] .tp-doc{animation:tp-p-esc-doc 2.6s ease-in-out infinite}
+.tp-vista[data-demo=escritorio] .tp-otra{animation:tp-p-esc-otra 2.6s ease-in-out infinite}
+@keyframes tp-p-esc-doc{0%,22%,100%{transform:none}62%,90%{transform:translateX(-135%)}}
+@keyframes tp-p-esc-otra{0%,22%,100%{transform:translateX(135%);opacity:1}62%,90%{transform:none;opacity:1}}
+.tp-vista[data-demo=despejar] .tp-doc{animation:tp-p-desp 2.6s ease-in-out infinite}
+@keyframes tp-p-desp{0%,22%,100%{transform:none}62%,90%{transform:translateY(-140%)}}
+.tp-vista[data-demo=launchpad] .tp-doc{animation:tp-p-lp-doc 2.6s ease-in-out infinite}
+.tp-vista[data-demo=launchpad] .tp-rejilla{animation:tp-p-lp 2.6s ease-in-out infinite}
+@keyframes tp-p-lp-doc{0%,22%,100%{transform:none;opacity:1}62%,90%{transform:scale(.9);opacity:0}}
+@keyframes tp-p-lp{0%,22%,100%{transform:scale(.9);opacity:0}62%,90%{transform:none;opacity:1}}
+/* Selector numérico con flechas (pasos de volumen y brillo). Una cápsula con
+   el número y su unidad a la izquierda y las dos flechas apiladas a la derecha;
+   se puede escribir el número, usar ↑↓ o mantener pulsada una flecha. */
+.bk-stepper{display:inline-flex;align-items:center;gap:2px;height:38px;padding:3px 3px 3px 12px;border-radius:var(--r-control);background:var(--sbg);flex-shrink:0;transition:box-shadow .12s}
+.bk-stepper:focus-within{box-shadow:0 0 0 2px var(--blue)}
+.bk-stepper-num{width:2.4ch;padding:0;border:0;background:0;outline:0;color:var(--tx);font:inherit;font-size:14px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;-moz-appearance:textfield;appearance:textfield}
+.bk-stepper-num::-webkit-inner-spin-button,.bk-stepper-num::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.bk-stepper-u{color:var(--tx2);font-size:13px;margin-right:6px}
+.bk-stepper-flechas{display:flex;flex-direction:column;gap:1px;width:30px;height:32px}
+.bk-stepper-btn{flex:1;display:grid;place-items:center;padding:0;border:0;background:0;color:var(--tx2);cursor:pointer;transition:background .12s,color .12s}
+.bk-stepper-btn:first-child{border-radius:calc(var(--r-control) - 3px) calc(var(--r-control) - 3px) 3px 3px}
+.bk-stepper-btn:last-child{border-radius:3px 3px calc(var(--r-control) - 3px) calc(var(--r-control) - 3px)}
+.bk-stepper-btn:hover:not(:disabled){background:var(--hov);color:var(--tx)}
+.bk-stepper-btn:active:not(:disabled){background:var(--act)}
+.bk-stepper-btn:disabled{opacity:.3;cursor:default}
+.bk-stepper-btn:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+
+/* Iconos de Lucide dentro de texto: se alinean con la línea base en vez de
+   quedar elevados, y los avisos van en naranja de estado. */
+.ico-t{vertical-align:-.17em}
+.ico-aviso{color:var(--orange)}
+.app-def-glyph{color:var(--tx2)}
+.ed-wi svg{width:1.6em;height:1.6em}
+.ed-wm-art svg{width:1.4em;height:1.4em}
+.ed-wm-ctl u{display:grid;place-items:center}
+.ed-wm-ctl u svg{width:100%;height:100%}
+.ed-wn-h svg{vertical-align:-.1em}
+.dyn-strip-check svg{display:block}
+.back-btn svg{display:block}
+.search-clear svg{display:block}

@@ -83,15 +83,22 @@ function renderHomeLanding(){
 applyCachedPalette();
 
 document.addEventListener('DOMContentLoaded',async()=>{
-    document.getElementById('wp-add-fab')?.remove();
     startSystemEvents().catch(console.error);
     const sb=document.getElementById('sb'),app=document.getElementById('app'),mc=document.getElementById('mc');
     // Apply translations to static index.html elements
     document.documentElement.lang=getLang();
+    const preferenciaIdioma=localStorage.getItem('bookos_lang');
+    tauriInvoke('set_bookos_setting',{key:'AppLanguage',value:preferenciaIdioma&&preferenciaIdioma!=='auto'?getLang():'auto'})
+        .catch(e=>console.error('No se pudo guardar el idioma para los avisos del sistema',e));
     document.title=t('settings')+' BookOS';
     const _hdr=document.querySelector('.header-title');if(_hdr)_hdr.textContent=t('settings');
     const _sIn=document.getElementById('search-in');if(_sIn)_sIn.placeholder=t('search_placeholder');
     const _noR=document.getElementById('no-res');if(_noR)_noR.textContent=t('no_results');
+    for(const [id,clave] of [['sidebar-toggle','toggle_sidebar'],['minimize','minimize'],['maximize','maximize'],['close','close'],['search-x','clear_search']]){
+        const boton=document.getElementById(id);
+        if(boton){boton.setAttribute('aria-label',t(clave));boton.title=t(clave);}
+    }
+    if(_sIn)_sIn.setAttribute('aria-label',t('search'));
     // ── Instant first paint ──
     // Never block the sidebar on backend shell spawns. Apply the last-known
     // theme + user from localStorage synchronously (no flash, no await), paint
@@ -104,12 +111,25 @@ document.addEventListener('DOMContentLoaded',async()=>{
     try{userInfo=JSON.parse(localStorage.getItem('__user_info__')||'null');}catch{}
     if(sb)sb.innerHTML=renderHome(userInfo);
     // Todo "volver al inicio" pasa por aquí: vaciar #app dejaba el panel en blanco.
-    const pintarInicio=()=>{app.innerHTML=renderHomeLanding();rellenarInicio(app);};
-    if(app)pintarInicio();
+    // Foto del inicio ya relleno, tomada al salir de él: volver lo pinta igual
+    // que se dejó y los datos se refrescan encima sin cambiar de golpe los
+    // subtítulos genéricos por los reales.
+    let _fotoInicio='';
+    const pintarInicio=()=>{app.innerHTML=_fotoInicio||renderHomeLanding();rellenarInicio(app);};
+    if(app){pintarInicio();app.querySelector('.home-landing')?.classList.add('arranque');}
 
     // ── Backend corrections (non-blocking) ──
-    tauriInvoke('get_current_theme').then(j=>{try{const th=JSON.parse(j);if(typeof th.is_dark!=='boolean')return;_applyTheme(th.is_dark);localStorage.setItem('__theme_dark__',th.is_dark?'1':'0');}catch(e){}}).catch(()=>{});
-    tauriInvoke('get_user_info').then(j=>{try{const ui=JSON.parse(j);if(JSON.stringify(ui)!==JSON.stringify(userInfo)){userInfo=ui;if(sb)sb.innerHTML=renderHome(ui);window.updateHomeBudsRow?.();}localStorage.setItem('__user_info__',j);}catch(e){}}).catch(()=>{});
+    // Se relee al volver a la ventana y tras guardar el tema: el automático lo
+    // cambia el compositor a su hora y la app, que solo lo leía al arrancar,
+    // se quedaba con el color de entonces.
+    window.refrescarTema=()=>tauriInvoke('get_current_theme').then(j=>{try{const th=JSON.parse(j);if(typeof th.is_dark!=='boolean')return;_applyTheme(th.is_dark);localStorage.setItem('__theme_dark__',th.is_dark?'1':'0');}catch(e){}}).catch(()=>{});
+    window.refrescarTema();
+    window.addEventListener('focus',window.refrescarTema);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)window.refrescarTema();});
+    // Expuesta para que Cuentas repinte el sidebar tras cambiar foto o nombre;
+    // antes solo se leía al arrancar y la tarjeta se quedaba con el dato viejo.
+    window.refrescarUsuario=()=>tauriInvoke('get_user_info').then(j=>{try{const ui=JSON.parse(j);if(JSON.stringify(ui)!==JSON.stringify(userInfo)){userInfo=ui;if(sb)sb.innerHTML=renderHome(ui);window.updateHomeBudsRow?.();}localStorage.setItem('__user_info__',j);}catch(e){}}).catch(()=>{});
+    window.refrescarUsuario();
     // Re-apply hardware settings saved from previous session (battery limit, perf mode)
     tauriInvoke('restore_startup_settings').catch(()=>{});
     // Corrige la paleta en caché con la que hay de verdad en disco (puede
@@ -147,16 +167,17 @@ document.addEventListener('DOMContentLoaded',async()=>{
         seguridad:'renderSeguridad',fondos:'renderFondos',aplicaciones:'renderAplicaciones',
         dispositivos:'renderDispositivos',
         teclado:'renderTeclado',
+        huella:'renderHuella',
         touchpadmouse:'renderTouchpadMouse',
         modos:'renderModos',
         avanzadas:'renderAvanzadas',
         accesibilidad:'renderAccesibilidad',
-        inicio:'renderPantallaInicio',
-        sddmeditor:'renderSddmEditor'
+        inicio:'renderPantallaInicio'
     };
     // Páginas directas / aliases usados por los widgets del panel (BookOS-Widgets)
     pages.wifi='renderWifiPage';          // subpágina Wi-Fi
     pages.bluetooth='renderBTPage';       // subpágina Bluetooth
+    pages.buds='renderBuds';              // la isla de los auriculares (bookos-budsd)
     const pageAliases={red:'conexiones',brillo:'pantalla',volumen:'sonido'};
     Object.entries(pageAliases).forEach(([a,t])=>{ if(!pages[a]) pages[a]=pages[t]; });
     // Resolve+invoke a page renderer, loading the renderers module on first use.
@@ -171,10 +192,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // ── Navigation ──
     const _navHistory=[];
     function clearPageIntervals(){
-        // El botón vive en body, fuera de #app: limpiar la página no lo quita.
-        // También se ejecuta al reabrir la ventana mediante resetToHome().
-        document.getElementById('wp-add-fab')?.remove();
-        document.getElementById('bk-popover')?.remove();   // el menú emergente también vive en body
+        // El menú emergente vive en body, fuera de #app: limpiar la página no
+        // lo quita. También se ejecuta al reabrir la ventana con resetToHome().
+        document.getElementById('bk-popover')?.remove();
         (window._pageCleanups||[]).splice(0).forEach(fn=>fn());
         if(window._pageIntervals){window._pageIntervals.forEach(clearInterval);window._pageIntervals=[];}
     }
@@ -229,10 +249,13 @@ document.addEventListener('DOMContentLoaded',async()=>{
     }
     function _playTransition(back){
         app.classList.remove('page-enter','page-enter-back','no-anim');
+        // Tras un gesto la vista previa ya hizo de transición: un fundido
+        // encima se veía como un parpadeo al soltar.
+        if(window._trasGesto){window._trasGesto=false;return;}
         void app.offsetWidth;
         app.classList.add(back?'page-enter-back':'page-enter');
     }
-    const _PADRES={wifi:'conexiones',bluetooth:'conexiones',sddmeditor:'bloqueo'};
+    const _PADRES={wifi:'conexiones',bluetooth:'conexiones'};
     function openPage(id){
         if(!app)return;
         _navegando=true;
@@ -243,6 +266,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
         _desdeFoto=false;   // un salto nuevo sí enseña su esqueleto
         const curId=sb.querySelector('.item.active-item')?.dataset?.page;
         _rememberScroll(curId);
+        if(!curId&&app.querySelector('.home-landing')){
+            _fotoInicio=app.innerHTML.replace(' arranque','');
+        }
         // Skip push if navigating to same page; cap depth at 15
         if(curId!==id){
             _navHistory.push(curId||null);
@@ -419,6 +445,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
     window.isStale=(epoch)=>(window._navEpoch||0)!==epoch;
     // Navigate to --page startup arg if provided (e.g. launched from battery applet)
     try{const sp=await tauriInvoke('get_startup_page');if(sp&&pages[sp])openPage(sp);}catch(e){}
+    // Y si nos lanzó el navegador para compartir un enlace (--share-url).
+    try{const u=await tauriInvoke('get_startup_share');if(u)_loadPages().then(m=>m.abrirHojaCompartir(u));}catch(e){}
 
 
     // Open the Buds page from the Home shortcut; ensure pages.js (which owns
@@ -475,6 +503,17 @@ document.addEventListener('DOMContentLoaded',async()=>{
             row.style.display='';
             const nm=row.querySelector('.home-buds-name');
             if(nm)nm.textContent=dev.name||'Buds';
+            // La batería sale del canal de Samsung; sin él (otros auriculares,
+            // o aún conectando) basta con decir que están conectados.
+            let bat=t('buds_connected');
+            try{
+                const s=JSON.parse(await tauriInvoke('buds_get_status'));
+                if(s?.connected&&(s.battery_l||s.battery_r)){
+                    bat=`${t('buds_left')} ${s.battery_l} % · ${t('buds_right')} ${s.battery_r} %`+(s.battery_case?` · ${t('buds_case')} ${s.battery_case} %`:'');
+                }
+            }catch{}
+            const sub=row.querySelector('.home-buds-bat');
+            if(sub)sub.textContent=bat;
         }else{
             row.style.display='none';
         }
@@ -504,8 +543,9 @@ document.addEventListener('DOMContentLoaded',async()=>{
 
     // ── Search ──
     const sIn=document.getElementById('search-in'),sX=document.getElementById('search-x'),noR=document.getElementById('no-res');
-    // Prefetch pages.js on first focus so window._tr is ready for sub-results.
-    sIn?.addEventListener('focus',()=>{_loadPages();},{once:true});
+    // Si se escribe mientras llega el módulo, la búsqueda debe repintarse con
+    // sus traducciones; de lo contrario conserva resultados en castellano.
+    sIn?.addEventListener('focus',()=>{_loadPages().then(()=>filter(sIn.value)).catch(e=>console.error('No se pudieron cargar las traducciones de búsqueda',e));},{once:true});
     sIn?.addEventListener('input',()=>{const v=sIn.value.length>0;if(sX)sX.style.visibility=v?'visible':'hidden';filter(sIn.value);});
     sIn?.addEventListener('keydown',e=>{if(e.key==='Escape'){sIn.value='';if(sX)sX.style.visibility='hidden';filter('');}});
     sX?.addEventListener('click',()=>{sIn.value='';if(sX)sX.style.visibility='hidden';filter('');sIn.focus();});
@@ -645,13 +685,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
     {
         const THRESHOLD=300;
         let acc=0,endT=null,active=false,dir=0;   // dir: -1 back, +1 forward
+        let eje=null,sx=0,sy=0,finTramo=null;
         let cooldownUntil=0;                       // swallow touchpad momentum after a gesture ends
-        // Arrow bubble (progress indicator)
-        const bub=document.createElement('div');
-        bub.className='swipe-back-bubble';
-        const ARROW_BACK='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
-        const ARROW_FWD='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>';
-        document.body.appendChild(bub);
         // Preview card inside a clipping frame pinned to the content area, so
         // the card emerges from the sidebar's edge instead of crossing over it.
         const clip=document.createElement('div');
@@ -663,7 +698,11 @@ document.addEventListener('DOMContentLoaded',async()=>{
         function targetPage(){
             if(dir<0){
                 const prev=_navHistory[_navHistory.length-1];
-                return typeof prev==='string'?{snapshot:_pageSnaps[prev],scroll:_scrollMem[prev]||0}:prev?{snapshot:prev.snapshot,scroll:prev.scroll}:null;
+                // `null` en el historial es el inicio, que no se guarda como
+                // foto: se pinta al vuelo. Sin esto el gesto acababa en el
+                // inicio sin haberlo enseñado.
+                if(!prev)return{snapshot:_fotoInicio||renderHomeLanding(),scroll:0};
+                return typeof prev==='string'?{snapshot:_pageSnaps[prev],scroll:_scrollMem[prev]||0}:{snapshot:prev.snapshot,scroll:prev.scroll};
             }
             const next=_fwdHistory[_fwdHistory.length-1];
             return next?{snapshot:_pageSnaps[next],scroll:_scrollMem[next]||0}:null;
@@ -679,48 +718,74 @@ document.addEventListener('DOMContentLoaded',async()=>{
             card.innerHTML=`<div>${target.snapshot}</div>`;
             card.scrollTop=target.scroll;
         }
+        // Un pintado por fotograma: el touchpad manda eventos más deprisa que
+        // la pantalla y aplicar cada uno a la vez hacía que la tarjeta temblara.
+        let pendiente=null,raf=0;
+        function pintarLuego(p){
+            pendiente=p;
+            if(!raf)raf=requestAnimationFrame(()=>{raf=0;if(pendiente!==null)paint(pendiente);pendiente=null;});
+        }
+        // Resistencia al final del recorrido en vez de un tope seco.
+        const suave=x=>x<1?x:1+Math.log1p(x-1)*.15;
         function paint(p){
             const side=dir<0?1:-1;   // back: things come from the left
-            bub.innerHTML=dir<0?ARROW_BACK:ARROW_FWD;
-            bub.style.opacity=Math.min(1,p*1.6);
-            // Anchor the bubble to the content area's edges, not the window's,
-            // so it doesn't land on top of the sidebar when it's open.
-            const aL=areaRect?areaRect.left:0;
-            const aR=areaRect?(window.innerWidth-areaRect.right):0;
-            bub.style.left=dir<0?aL+'px':'auto';
-            bub.style.right=dir<0?'auto':aR+'px';
-            bub.style.transform=`translateY(-50%) translateX(${side*(-46+p*62)}px) scale(${0.6+p*0.4})`;
-            bub.classList.toggle('armed',p>=1);
             // Preview slides in over the page; page parallaxes away
-            card.style.transform=`translateX(${side*(-104+p*104)}%)`;
-            if(detailView)detailView.style.transform=`translateX(${side*p*42}px)`;
+            const q=Math.min(suave(p),1.06);
+            card.style.transform=`translateX(${side*(-104+q*104)}%)`;
+            if(detailView)detailView.style.transform=`translateX(${side*q*28}px)`;
         }
         function reset(fire){
             const p=Math.min(1,Math.abs(acc)/THRESHOLD);
-            const commit=fire&&p>=1;
+            // Sin la burbuja que avisaba de «armado», la referencia es la
+            // vista previa: pasada la mitad se suelta y se completa, como en
+            // macOS. Pedir el recorrido entero obligaba a gestos larguísimos.
+            const commit=fire&&p>=.5;
+            const dir2=dir;
+            cancelAnimationFrame(raf);raf=0;pendiente=null;
             acc=0;active=false;          // dir stays set until the exit paint below
             // Inertia after lifting the fingers must not start a new gesture
             cooldownUntil=Date.now()+(commit?800:450);
-            bub.classList.add('anim');card.classList.add('anim');
-            if(detailView){detailView.style.transition='transform .25s cubic-bezier(.2,.8,.3,1)';detailView.style.transform='';}
+            card.classList.add('anim');
+            if(detailView){detailView.style.transition='transform .32s cubic-bezier(.22,1,.36,1)';detailView.style.transform='';}
             if(commit){
                 // Preview finishes sliding to cover the page, then the real
                 // render happens underneath it before it fades away.
                 card.style.transform='translateX(0)';
-                bub.style.opacity='0';
-                if(dir<0)window.goBackExt?.();else window.goForward?.();
-                setTimeout(()=>{card.style.opacity='0';},180);
-                setTimeout(()=>{clip.style.display='none';card.style.opacity='';card.innerHTML='';},420);
+                // Se navega cuando la tarjeta ya cubre la página: renderizar
+                // a mitad del deslizamiento metía un tirón en la animación.
+                setTimeout(()=>{
+                    window._trasGesto=true;
+                    if(dir2<0)window.goBackExt?.();else window.goForward?.();
+                    requestAnimationFrame(()=>{card.style.opacity='0';});
+                    setTimeout(()=>{clip.style.display='none';card.style.opacity='';card.innerHTML='';},260);
+                },300);
             }else{
                 paint(0);
                 setTimeout(()=>{clip.style.display='none';card.innerHTML='';},260);
             }
             dir=0;
-            setTimeout(()=>{bub.classList.remove('anim','armed');card.classList.remove('anim');if(detailView)detailView.style.transition='';},260);
+            setTimeout(()=>{card.classList.remove('anim');if(detailView)detailView.style.transition='';},commit?620:340);
         }
         document.addEventListener('wheel',e=>{
             if(Date.now()<cooldownUntil)return;    // momentum tail: ignore entirely
-            if(Math.abs(e.deltaX)<=Math.abs(e.deltaY)){if(active)reset(false);return;}
+            // Al levantar los dedos WebKitGTK manda un último evento con los
+            // dos deltas a 0. Antes caía en «más vertical que horizontal» y
+            // cancelaba justo el gesto que había que completar: es el fin.
+            if(e.deltaX===0&&e.deltaY===0){eje=null;sx=sy=0;if(active){clearTimeout(endT);reset(true);}return;}
+            // El eje de cada tramo (de poner los dedos a levantarlos) se
+            // decide con lo acumulado, no con un evento suelto: un scroll
+            // vertical trae de vez en cuando uno con más X que Y —sobre todo
+            // el primero tras una pausa, como al volver de una captura— y
+            // eso bastaba para arrancar el gesto y bloquear el eje en X.
+            clearTimeout(finTramo);
+            finTramo=setTimeout(()=>{eje=null;sx=sy=0;},200);
+            if(eje==='y')return;
+            if(!eje){
+                sx+=e.deltaX;sy+=e.deltaY;
+                if(Math.abs(sy)>=8&&Math.abs(sy)>=Math.abs(sx)){eje='y';return;}
+                if(Math.abs(sx)<16||Math.abs(sx)<2*Math.abs(sy))return;
+                eje='x';
+            }
             let el=e.target instanceof Element?e.target:null;
             while(el&&el!==document.body){
                 if(el.scrollWidth>el.clientWidth+5){const ox=getComputedStyle(el).overflowX;if(ox==='auto'||ox==='scroll')return;}
@@ -731,18 +796,21 @@ document.addEventListener('DOMContentLoaded',async()=>{
                 // sidebar, which stays untouched and fully visible.
                 if(!(e.target instanceof Element)||!detailView||!detailView.contains(e.target))return;
                 // Direction decided once, at gesture start, and locked
-                const newDir=e.deltaX<0?-1:1;
-                if(newDir<0&&!_navHistory.length)return;
+                const newDir=sx<0?-1:1;
+                // Sin historial, atrás sigue llevando al inicio si hay una
+                // página abierta, igual que Escape.
+                if(newDir<0&&!_navHistory.length&&!app?.querySelector('.detail-header'))return;
                 if(newDir>0&&!_fwdHistory.length)return;
-                dir=newDir;acc=0;active=true;
-                bub.classList.remove('anim');card.classList.remove('anim');
+                // Lo acumulado mientras se decidía el eje cuenta como recorrido.
+                dir=newDir;acc=sx-e.deltaX;active=true;
+                card.classList.remove('anim');
                 beginPreview();
             }
             acc+=e.deltaX;
             // Locked direction: pulling the other way only reduces progress
             if(dir<0&&acc>0)acc=0;
             if(dir>0&&acc<0)acc=0;
-            paint(Math.min(1,Math.abs(acc)/THRESHOLD));
+            pintarLuego(Math.abs(acc)/THRESHOLD);
             clearTimeout(endT);
             endT=setTimeout(()=>reset(true),140);
         },{passive:true});
@@ -851,40 +919,10 @@ document.addEventListener('DOMContentLoaded',async()=>{
             // Otra instancia pide una página: llega como evento, no preguntando
             // cada 2 s como antes (medido: 30 llamadas por minuto en reposo).
             listenFn('navigate',e=>{ const p=e?.payload; if(p&&pages[p])openPage(p); });
+            // El navegador de BookOS pide compartir un enlace con la app abierta.
+            listenFn('compartir-url',e=>{ const u=e?.payload; if(u)_loadPages().then(m=>m.abrirHojaCompartir(u)); });
         }
     }
-
-    // Buds battery watcher: notify when low (<20%) once per session, plus
-    // refresh tray-level info every 2 min while connected.
-    // Note: no document.hidden guard on the buds watchers — they exist
-    // precisely for when the app sits hidden in the tray.
-    const _budsLowFired={l:false,r:false,c:false};
-    setInterval(async()=>{
-        try{
-            const st=JSON.parse(await tauriInvoke('buds_get_status'));
-            if(!st||!st.connected) return;
-            const l=st.battery_l|0, r=st.battery_r|0, ca=st.battery_case|0;
-            const isLow=(l>0&&l<=20)||(r>0&&r<=20);
-            if(isLow){
-                const key=(l<=20?'l':'')+(r<=20?'r':'');
-                if(!_budsLowFired[key]){
-                    _budsLowFired[key]=true;
-                    const lang=localStorage.getItem('bookos_lang')||'es';
-                    await tauriInvoke('buds_notify_battery',{left:l,right:r,case:ca,low:true,lang}).catch(()=>{});
-                }
-            } else {
-                // Reset trigger when batteries recover
-                _budsLowFired.l=false;_budsLowFired.r=false;
-            }
-        }catch(e){}
-    },120000);
-
-    // Buds auto-reconnect: every 15s ask backend to reconnect any saved buds
-    // marked with auto_reconnect=true if they're in range. Cheap no-op when already connected.
-    setInterval(async()=>{
-        if(!localStorage.getItem('buds_last_mac'))return;
-        try{await tauriInvoke('buds_try_auto_reconnect');}catch(e){}
-    },15000);
 
     // Buds audio-aware switch: every 5s check if PC is playing audio. If yes + buds
     // not on PC → connect (steal from phone). If silent ~30s + buds on PC → disconnect

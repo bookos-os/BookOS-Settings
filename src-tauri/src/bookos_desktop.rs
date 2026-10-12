@@ -138,7 +138,166 @@ pub async fn bookos_get_outputs() -> Result<String, String> {
     let conn = zbus::Connection::session().await.map_err(|e| e.to_string())?;
     let p = proxy(&conn).await?;
     let salidas: Vec<Salida> = p.call("GetOutputs", &()).await.map_err(|e| e.to_string())?;
-    serde_json::to_string(&salidas).map_err(|e| e.to_string())
+    let pnp = std::fs::read_to_string("/usr/share/hwdata/pnp.ids").unwrap_or_default();
+    let json: Vec<serde_json::Value> = salidas
+        .iter()
+        .map(|s| {
+            let mut v = serde_json::to_value(s).map_err(|e| e.to_string())?;
+            let (nombre, detalle) = nombre_legible(s, &pnp);
+            v["nombre"] = nombre.into();
+            v["detalle"] = detalle.into();
+            // La portada de Pantallas dibuja un portátil o un monitor, y solo
+            // el panel interno tiene brillo que mover.
+            v["integrada"] = es_integrada(&conector_legible(&s.conector)).into();
+            Ok(v)
+        })
+        .collect::<Result<_, String>>()?;
+    serde_json::to_string(&json).map_err(|e| e.to_string())
+}
+
+/// Cómo se le llama a una pantalla en la interfaz, y la línea de debajo.
+///
+/// El EDID trae el fabricante como un código PNP de tres letras y el modelo en
+/// un descriptor que muchos paneles de portátil no rellenan; entonces el
+/// compositor manda el código de producto y salía «SDC 4189». El código se
+/// traduce con `pnp.ids` de hwdata, que es la misma tabla que usan GNOME y KDE
+/// y ya está instalada; el panel interno se llama por lo que es.
+fn nombre_legible(s: &Salida, pnp: &str) -> (String, String) {
+    let fabricante = pnp
+        .lines()
+        .find_map(|l| l.strip_prefix(s.fabricante.as_str())?.strip_prefix('\t'))
+        .map(sin_razon_social)
+        .unwrap_or_else(|| s.fabricante.clone());
+    let conector = conector_legible(&s.conector);
+    // Sin descriptor de nombre el compositor manda el código de producto en
+    // hexadecimal, que no le dice nada a nadie.
+    let modelo = (!s.modelo.is_empty() && !s.modelo.chars().all(|c| c.is_ascii_hexdigit()))
+        .then_some(s.modelo.as_str());
+    let integrada = es_integrada(&conector);
+    let nombre = match (integrada, modelo) {
+        (true, _) => "Pantalla integrada".to_string(),
+        // Muchos monitores ya llevan la marca en el nombre: «DELL U2720Q».
+        (false, Some(m)) if m.to_lowercase().starts_with(&fabricante.to_lowercase()) => m.into(),
+        (false, Some(m)) if !fabricante.is_empty() => format!("{fabricante} {m}"),
+        (false, Some(m)) => m.into(),
+        (false, None) if !fabricante.is_empty() => format!("Monitor {fabricante}"),
+        (false, None) => conector.clone(),
+    };
+    let pulgadas = (s.mm_ancho > 0 && s.mm_alto > 0).then(|| {
+        let mm = (s.mm_ancho as f64).hypot(s.mm_alto as f64);
+        format!("{:.1}″", mm / 25.4).replace('.', ",")
+    });
+    let detalle = [
+        integrada.then_some(fabricante.clone()).filter(|f| !f.is_empty()),
+        pulgadas,
+        Some(conector),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    (nombre, detalle)
+}
+
+fn es_integrada(conector: &str) -> bool {
+    ["eDP", "LVDS", "DSI"].iter().any(|p| conector.starts_with(p))
+}
+
+/// «Samsung Display Corp.» → «Samsung Display». La razón social alarga el
+/// nombre sin distinguir nada.
+fn sin_razon_social(nombre: &str) -> String {
+    const COLAS: &[&str] = &[
+        " Electric Company", " Corporation", " Co., Ltd.", " Co., Ltd", " Co.,Ltd.", " Ltd.",
+        " Ltd", " Inc.", " Inc", " Corp.", " Corp", " LLC", " GmbH", ",",
+    ];
+    let mut n = nombre.trim();
+    while let Some(cola) = COLAS.iter().find(|c| n.ends_with(*c)) {
+        n = n[..n.len() - cola.len()].trim_end();
+    }
+    n.to_string()
+}
+
+/// El nombre del conector como lo escribe el kernel. El compositor manda el
+/// `Debug` del tipo de `drm` —«EmbeddedDisplayPort-1»—, que no es como se
+/// llama en ningún otro sitio.
+fn conector_legible(conector: &str) -> String {
+    let (tipo, numero) = conector.rsplit_once('-').unwrap_or((conector, ""));
+    let tipo = match tipo {
+        "EmbeddedDisplayPort" => "eDP",
+        "DisplayPort" => "DP",
+        "HDMIA" => "HDMI-A",
+        "HDMIB" => "HDMI-B",
+        "DVII" => "DVI-I",
+        "DVID" => "DVI-D",
+        "DVIA" => "DVI-A",
+        "VGA" => "VGA",
+        "LVDS" => "LVDS",
+        "DSI" => "DSI",
+        "USB" => "USB",
+        otro => otro,
+    };
+    if numero.is_empty() {
+        tipo.to_string()
+    } else {
+        format!("{tipo}-{numero}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn salida(conector: &str, fabricante: &str, modelo: &str, mm: (u32, u32)) -> Salida {
+        Salida {
+            id: String::new(),
+            conector: conector.into(),
+            fabricante: fabricante.into(),
+            modelo: modelo.into(),
+            serie: String::new(),
+            mm_ancho: mm.0,
+            mm_alto: mm.1,
+            activa: true,
+            modos: Vec::new(),
+            escala: 1.0,
+            escalas: Vec::new(),
+            x: 0,
+            y: 0,
+            transformacion: "normal".into(),
+            vrr_capaz: false,
+            vrr: false,
+            principal: true,
+            logico_ancho: 0,
+            logico_alto: 0,
+        }
+    }
+
+    const PNP: &str = "SDC\tSamsung Display Corp.\nDEL\tDell Inc.\nGSM\tLG Electronics\n";
+
+    /// El panel de este portátil: sin descriptor de nombre, salía «SDC 4189».
+    #[test]
+    fn el_panel_interno_se_llama_por_lo_que_es() {
+        let s = salida("EmbeddedDisplayPort-1", "SDC", "4189", (300, 190));
+        assert_eq!(
+            nombre_legible(&s, PNP),
+            ("Pantalla integrada".into(), "Samsung Display · 14,0″ · eDP-1".into())
+        );
+    }
+
+    #[test]
+    fn un_monitor_con_nombre_no_repite_la_marca() {
+        let s = salida("DisplayPort-2", "DEL", "DELL U2720Q", (600, 340));
+        assert_eq!(nombre_legible(&s, PNP).0, "DELL U2720Q");
+        let s = salida("HDMIA-1", "GSM", "27GL850", (0, 0));
+        assert_eq!(nombre_legible(&s, PNP), ("LG Electronics 27GL850".into(), "HDMI-A-1".into()));
+    }
+
+    #[test]
+    fn sin_nombre_ni_tabla_queda_algo_legible() {
+        let s = salida("DisplayPort-1", "DEL", "A0B1", (0, 0));
+        assert_eq!(nombre_legible(&s, PNP).0, "Monitor Dell");
+        let s = salida("DisplayPort-1", "XYZ", "A0B1", (0, 0));
+        assert_eq!(nombre_legible(&s, "").0, "Monitor XYZ");
+    }
 }
 
 /// Aplica una configuración. Devuelve `{"ok":bool,"error":string}`.

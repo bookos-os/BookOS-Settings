@@ -1,7 +1,7 @@
 import * as desktop from './pages/desktop.js';
 import{setupWallpaperPreviews}from'./pages/wallpaper-previews.js';
 import{
-    tauriInvoke,getAssetUrl,t,
+    tauriInvoke,getAssetUrl,elegirRuta,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,invalidateHwCache,
     esc,addInterval,addSystemListener,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
     renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,
@@ -10,16 +10,14 @@ import{
     popoverSelect,themeColor,setupToggle,setupSlider,wifiIcon,btIcon,chevron,lockIcon,
     appIconUrl,
 }from'./pages/_common.js';
+import{ico}from'./pages/iconos.js';
+import{getLang}from'./i18n.js';
 // Routines engine lives in its own light module (loaded by main.js at startup);
 // the page renderers below consume it for the Modos/automation UI.
 import{getRoutines,saveRoutines,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,executeRoutine,snapshotForRoutine,restoreSnapshot,_getSnap,_deleteSnap}from'./routines-engine.js';
 // Re-export shared helpers so existing importers of pages.js keep working.
 export{invalidateHwCache};
-// Editor de la pantalla de inicio: módulo aparte por tamaño y porque solo se
-// carga cuando el usuario entra en él.
-import{renderSddmEditor}from'./pages/sddm-editor.js';
-export{renderSddmEditor};
-import{installPaletteCss,previewPaletteCss,paletteToCss}from'./dynamic-color.js';
+import{installPaletteCss,previewPaletteCss,paletteToCss,syncPalette}from'./dynamic-color.js';
 export{getRoutines,saveRoutines,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,executeRoutine,snapshotForRoutine,restoreSnapshot};
 
 function parseServiceResult(raw){
@@ -302,7 +300,7 @@ function paintWifi(status){
                     ${wifiIcon(active.band,true)}
                     <div class="conn-net-info">
                         <span class="conn-net-name" style="color:var(--blue)">${esc(active.ssid)}</span>
-                        <span class="conn-net-sub">Conectado · ${esc(active.security||'Abierta')}</span>
+                        <span class="conn-net-sub">${_tr('Conectado')} · ${esc(active.security||_tr('Abierta'))}</span>
                     </div>
                     <button class="conn-gear-btn" id="detail-btn" data-ssid="${esc(active.ssid)}" data-sec="${esc(active.security||'')}" data-band="${esc(active.band||'')}">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--tx2)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -378,29 +376,35 @@ function paintBT(status){
                     <span class="conn-bt-name">${esc(d.name)}</span>
                     <span class="conn-bt-sub">${d.connected?'Conectado':'Desconectado'}</span>
                 </div>
-                <button class="conn-gear-btn conn-bt-action" data-mac="${esc(d.mac)}" data-c="${d.connected}" data-paired="${d.paired}">
+                ${d.connected?`<button class="conn-gear-btn conn-bt-action" data-mac="${esc(d.mac)}" data-c="${d.connected}" data-paired="${d.paired}">
                     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--tx2)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                </button>
+                </button>`:''}
             </div>`).join('');
         el.querySelectorAll('.conn-bt-action').forEach(b=>{
             b.addEventListener('click',async()=>{
-                // En los dispositivos de audio, el engranaje abre sus
-                // controles propios; no debe intentar conectar/desconectar.
+                // El engranaje siempre abre los detalles; conectar/desconectar
+                // vive dentro del diálogo y en la fila entera.
                 const device=devs.find(d=>d.mac===b.dataset.mac);
-                const name=(device?.name||'').toLowerCase();
-                const icon=(device?.icon||'').toLowerCase();
-                const isAudio=icon.includes('headset')||icon.includes('headphone')||
-                    icon.includes('audio')||name.includes('buds')||name.includes('airpods')||
-                    name.includes('headset')||name.includes('earphone')||name.includes('beats');
-                if(isAudio&&device){
+                if(device){
                     const mac=esc(device.mac||'—');
                     showDialog(esc(device.name||'Dispositivo Bluetooth'),
                         `<div style="display:flex;flex-direction:column;gap:10px">
-                            <div style="font-size:12px;color:var(--tx2)">MAC: <span style="color:var(--tx)">${mac}</span></div>
+                            <div style="font-size:12px;color:var(--tx2);display:flex;flex-direction:column;gap:4px">
+                                <span>Estado: <span style="color:var(--tx)">${device.connected?'Conectado':'Desconectado'}</span></span>
+                                <span>Vinculado: <span style="color:var(--tx)">${device.paired===true||device.paired==='true'?'Sí':'No'}</span></span>
+                                ${device.icon?`<span>Tipo: <span style="color:var(--tx)">${esc(device.icon)}</span></span>`:''}
+                                <span>MAC: <span style="color:var(--tx)">${mac}</span></span>
+                                <span id="bt-dialog-batt" hidden>Batería: <span style="color:var(--tx)"></span></span>
+                            </div>
                             <button class="bk-dbtn" id="bt-dialog-disconnect">${device.connected?'Desconectar':'Conectar'}</button>
                             <button class="bk-dbtn danger" id="bt-dialog-forget">Olvidar dispositivo</button>
                         </div>`,{confirmText:'Cerrar',onConfirm:()=>{}});
                     const ov=document.querySelector('.bk-overlay:last-of-type');
+                    if(device.connected)tauriInvoke('get_bt_device_battery',{mac:device.mac}).then(r=>{
+                        const pct=parseInt(JSON.parse(r).percentage);
+                        const el=ov?.querySelector('#bt-dialog-batt');
+                        if(pct&&el){el.querySelector('span').textContent=pct+' %';el.hidden=false;}
+                    }).catch(()=>{});
                     ov?.querySelector('#bt-dialog-disconnect')?.addEventListener('click',async()=>{
                         try{
                             if(device.connected)await tauriInvoke('disconnect_bluetooth',{mac:device.mac});
@@ -653,14 +657,24 @@ function _ckmark(){
 // ── Sonido ──────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderSonido(c){
-await desktop.sound(c); addSystemListener(()=>{if(c.querySelector('.audio-page :focus'))return;return desktop.sound(c);});
+await desktop.sound(c,'inicio'); addSystemListener(()=>{if(c.querySelector('.audio-page input:focus'))return;return desktop.sound(c);});
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// ── Batería (real-time, per-app, predictive) ─────────────────────────────
+// ── Batería ────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 
 // Calculate human-readable time string for charging/discharging
+// Estado de la batería con icono de Lucide (zap y check) en vez de un emoji o
+// un símbolo de texto: el emoji pinta lo que diga la fuente, siempre amarillo
+// y sin seguir el tema. Verde porque es estado, no una acción.
+const _ESTADOS_BATERIA={
+    'charging':`${ico('zap',{size:15,sw:2.2,cls:'bat-ico'})}Cargando`,
+    'discharging':'En uso',
+    'fully-charged':`${ico('check',{size:15,sw:2.2,cls:'bat-ico'})}Completa`,
+    'not charging':'No cargando',
+    'unknown':'',
+};
 function _batTimeText(bat, gb){
     const pct=parseInt(bat.percentage)||0;
     const erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
@@ -726,7 +740,7 @@ export async function renderBateria(c){
             ]);
             if(!bat)return;
             const pct=parseInt(bat.percentage)||0;
-            const states={'charging':'⚡ Cargando','discharging':'En uso','fully-charged':'✓ Completa','not charging':'No cargando','unknown':''};
+            const states=_ESTADOS_BATERIA;
             const effectiveLimit=bprot2?savedLimit2:100;
             // At the protection limit, "not charging" really means full
             if(bat.state==='not charging'&&pct>=effectiveLimit-1)bat.state='fully-charged';
@@ -749,7 +763,7 @@ export async function renderBateria(c){
                     if(lblEl)lblEl.textContent='';
                 }
             }
-            if(subEl)subEl.textContent=timeText?`${pct}% disponible`:(states[bat.state]||'Batería');
+            if(subEl)subEl.innerHTML=timeText?`${pct}% disponible`:(states[bat.state]||'Batería');
             if(fillEl){fillEl.style.width=pct+'%';}
             const erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
             const chargingLbl2=bprot2&&savedLimit2<100?`Cargando hasta el ${savedLimit2}%`:(bat.state==='charging'?'Cargando':'');
@@ -818,67 +832,28 @@ async function applyChargeLimit(limit){
     return JSON.parse(await tauriInvoke('set_charge_limit',{limit:Number(limit),password}));
 }
 
-// Two-phase render: phase 1 paints immediately with the cheap reads (status,
-// settings, history); the heavy statistics (CSV charts, app usage, thermal,
-// ML prediction — seconds of Python/CSV work) load in the background and the
-// page re-renders once they arrive. `heavy` carries phase-2 data on re-entry.
-async function _renderBateriaContent(c, heavy=null){
+async function _renderBateriaContent(c){
     let bat={percentage:'0',state:'unknown',time:'',energy_rate:'',energy_full:'',energy_full_design:''};
     let gb={perf_supported:false,charge_limit_supported:false,performance_mode:'balanced',charge_limit:''};
-    let hist=[];
-    let bprot=false,dimlow=false,showpct=true,psMode='balanced';
-    let appUsage=[];
+    let hist=[],perfiles=[],bajo=20;
+    let bprot=false,showpct=true;
     let savedChargeLimit=80;
-    let csvData={ok:false,rows:[]},adaptivePreds={ok:false,predictions:[]};
-    let adaptiveEnabled=false;
-    let thermalData={ok:false,rows:[]};
     let chargingInfo={ok:false};
     try{
-        const _heavyFetch=()=>Promise.all([
-            tauriInvoke('get_app_power_usage').then(JSON.parse).catch(()=>[]),
-            tauriInvoke('get_adaptive_predictions').then(JSON.parse).catch(()=>({ok:false,predictions:[]})),
-            tauriInvoke('get_thermal_csv_data').then(JSON.parse).catch(()=>({ok:false,rows:[]})),
-            tauriInvoke('predict_battery_runtime').then(JSON.parse).catch(()=>({ok:false})),
-        ]);
-        // CSV chart data is a cheap file read — fetch it in phase 1 so the
-        // chart paints immediately instead of waiting for the heavy stats.
-        const [settingsBatch, batRaw, gbRaw, histRaw, chgRaw, csvRaw] = await Promise.all([
-            tauriInvoke('get_settings_batch',{keys:['BatteryProtection','DimLowBattery','ShowBatteryPercent','PowerSaver','ChargeLimit','AdaptiveCharging']}).then(JSON.parse).catch(()=>({})),
-            tauriInvoke('get_battery_status').then(JSON.parse).catch(()=>({percentage:'0',state:'unknown',time:'',energy_rate:'',energy_full:'',energy_full_design:''})),
-            ci('check_hw_features').then(JSON.parse).catch(()=>({perf_supported:false,charge_limit_supported:false,performance_mode:'balanced',charge_limit:''})),
+        const [settingsBatch, batRaw, gbRaw, histRaw, chgRaw, perfRaw, accRaw] = await Promise.all([
+            tauriInvoke('get_settings_batch',{keys:['BatteryProtection','ShowBatteryPercent','ChargeLimit']}).then(JSON.parse).catch(()=>({})),
+            tauriInvoke('get_battery_status').then(JSON.parse).catch(()=>bat),
+            ci('check_hw_features').then(JSON.parse).catch(()=>gb),
             ci('get_battery_history').then(JSON.parse).catch(()=>[]),
             tauriInvoke('get_charging_info').then(JSON.parse).catch(()=>({ok:false})),
-            tauriInvoke('get_battery_csv_data').then(JSON.parse).catch(()=>({ok:false,rows:[]})),
+            tauriInvoke('get_power_profile_history').then(JSON.parse).catch(()=>[]),
+            tauriInvoke('get_power_actions').then(JSON.parse).catch(()=>({})),
         ]);
-        chargingInfo=chgRaw;
-        bat=batRaw; gb=gbRaw; hist=histRaw; csvData=csvRaw;
-        if(heavy){
-            const [appRaw, predsRaw, thermRaw, mlPredRaw]=heavy;
-            appUsage=appRaw; adaptivePreds=predsRaw; thermalData=thermRaw;
-            c.dataset.mlPred=JSON.stringify(mlPredRaw||{ok:false});
-        }else{
-            c.dataset.mlPred=JSON.stringify({ok:false});
-            // Load the heavy stats in the background and re-render in place when
-            // ready — unless the user already navigated away (epoch guard).
-            const _ep=window.navEpoch?window.navEpoch():0;
-            _heavyFetch().then(hv=>{
-                if(window.isStale&&window.isStale(_ep))return;
-                if(!document.getElementById('bat-stats-btn'))return;   // page swapped
-                const _scroller=document.querySelector('.detail-view')||c;
-                const _scroll=_scroller.scrollTop;
-                _renderBateriaContent(c,hv).then(()=>{_scroller.scrollTop=_scroll;});
-            }).catch(()=>{});
-        }
-        const s=settingsBatch;
-        bprot=(s.BatteryProtection??'false')==='true';
-        dimlow=(s.DimLowBattery??'false')==='true';
-        showpct=(s.ShowBatteryPercent??'true')!=='false';
-        psMode=s.PowerSaver??'balanced';
-        savedChargeLimit=Math.min(100,Math.max(50,parseInt(s.ChargeLimit)||80));
-        adaptiveEnabled=(s.AdaptiveCharging??'false')==='true';
-        if(adaptiveEnabled) bprot=false; // mutually exclusive — adaptive takes priority
-        // Keep _sc in sync with batch results
-        Object.entries(s).forEach(([k,v])=>{if(v!=null)primeSetting(k,v);});
+        bat=batRaw; gb=gbRaw; hist=histRaw; chargingInfo=chgRaw; perfiles=perfRaw; bajo=accRaw.bajo??20;
+        bprot=(settingsBatch.BatteryProtection??'false')==='true';
+        showpct=(settingsBatch.ShowBatteryPercent??'true')!=='false';
+        savedChargeLimit=Math.min(100,Math.max(50,parseInt(settingsBatch.ChargeLimit)||80));
+        Object.entries(settingsBatch).forEach(([k,v])=>{if(v!=null)primeSetting(k,v);});
     }catch(e){console.error('[Batería] Error:',e);}
 
     // Effective charge limit: prefer saved slider value (user's intent) over raw hardware value
@@ -892,7 +867,7 @@ async function _renderBateriaContent(c, heavy=null){
         tauriInvoke('set_charge_limit',{limit:savedChargeLimit}).catch(()=>{});
     }
 
-    const states={'charging':'⚡ Cargando','discharging':'En uso','fully-charged':'✓ Completa','not charging':'No cargando','unknown':''};
+    const states=_ESTADOS_BATERIA;
     const pct=parseInt(bat.percentage)||0;
     // At the protection limit, "not charging" really means full
     if(bat.state==='not charging'&&pct>=chargeLimit-1)bat.state='fully-charged';
@@ -929,55 +904,24 @@ async function _renderBateriaContent(c, heavy=null){
     h+=`<div class="bat-level-bar">${limitMarker}<div class="bat-level-fill ${fillColor}" style="width:${pct}%"></div></div>`;
     h+=`</div>`;
     let erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
-    const chargingLabel=bprot&&chargeLimit<100?`Cargando hasta el ${chargeLimit}%`:(isCharging?'Cargando':'');
-    // ML prediction line (when available and discharging)
-    let mlLine='';
-    try{
-        const ml=JSON.parse(c.dataset.mlPred||'{"ok":false}');
-        if(ml.ok && !isCharging && ml.minutes>0 && pct>(ml.target_level||20)){
-            const mins=Math.round(ml.minutes);
-            const mh=Math.floor(mins/60),mm=mins%60;
-            const text=mh>0?`${mh}h${mm>0?` ${mm}m`:''}`:`${mm}m`;
-            mlLine=`<span style="color:var(--blue)">IA: ${text} hasta ${ml.target_level}%</span>`;
-        }
-    }catch(e){}
-    const lineParts=[
-        chargingLabel,
-        erate>0?`Consumo: ${erate.toFixed(1)} W`:'',
-        mlLine,
-    ].filter(Boolean);
+    const chargingLabel=isCharging?(bprot&&chargeLimit<100?`Cargando hasta el ${chargeLimit}%`:'Cargando'):'';
+    const lineParts=[chargingLabel,erate>0?`Consumo: ${erate.toFixed(1)} W`:''].filter(Boolean);
     h+=`<div class="bat-full-info" style="color:var(--tx2)">${lineParts.join(' · ')}</div>`;
 
     // Ajustes ANTES del gráfico
     {
         const bprotLabel=bprot?(chargeLimit>=100?'Máxima':`Hasta el ${chargeLimit}%`):'';
-        const bprotDisabled=adaptiveEnabled;
         h+=renderCard([
-            renderRowItem('Ahorro de energía','Limita CPU y procesos en segundo plano',renderToggle('ps',psMode==='power-saver')),
-            renderRowItem('Carga adaptativa',`<span style="color:var(--${adaptiveEnabled?'blue':'tx2'})">${adaptiveEnabled?(chargeLimit<100?`Activa — límite ${chargeLimit}%`:'Activa — carga completa'):'Inactiva'}</span>`,renderToggle('adaptive-charging',adaptiveEnabled)),
-            renderRowItem('Protección de la batería',bprotDisabled?`<span style="color:var(--tx2);opacity:0.45">No disponible con carga adaptativa</span>`:(bprotLabel?`<span style="color:var(--blue)">${bprotLabel}</span>`:'Limita carga para alargar vida útil'),`<span style="opacity:${bprotDisabled?0.35:1};pointer-events:${bprotDisabled?'none':'auto'}">${renderToggle('bprot',bprot&&!bprotDisabled)}</span>`),
-            `<div id="bprot-limit-section"${(bprot&&!bprotDisabled)?'':' style="display:none"'} style="padding:2px 20px 12px">${renderSlider('cl',savedChargeLimit,50,100)}</div>`,
+            renderRowItem('Protección de la batería',bprotLabel?`<span style="color:var(--blue)">${bprotLabel}</span>`:'Limita carga para alargar vida útil',renderToggle('bprot',bprot)),
+            `<div id="bprot-limit-section"${bprot?'':' style="display:none"'} style="padding:2px 20px 12px">${renderSlider('cl',savedChargeLimit,50,100)}</div>`,
         ]);
     }
 
     // ── Stats for the popup (opened from the 3-dot header button) ───────────
     const _statRows=(()=>{
-        const _jsDayCSV2=(d)=>d===0?7:d;
-        const _todayCSV2=_jsDayCSV2(new Date().getDay());
-        const todayRows2=csvData.ok?csvData.rows.filter(r=>r.day===_todayCSV2):[];
         const healthColor=health>=80?'var(--green)':health>=60?'#ff9500':'var(--red)';
         const rows=[{label:_tr('Salud'),val:`${health}%`,color:healthColor}];
         rows.push({label:_tr('Nivel actual'),val:`${pct}%`});
-        if(todayRows2.length>1){
-            const levels=todayRows2.map(r=>r.level);
-            rows.push({label:_tr('Hoy'),val:`${Math.min(...levels)}%–${Math.max(...levels)}%`});
-            const dischCount=todayRows2.filter(r=>(r.state||'').toLowerCase()==='discharging').length;
-            const dischMin=Math.round(dischCount*0.5);
-            if(dischMin>0){
-                const dh=Math.floor(dischMin/60),dm=dischMin%60;
-                rows.push({label:_tr('En uso'),val:[dh>0?`${dh}h`:'',dm>0?`${dm}m`:''].filter(Boolean).join(' ')||'0m'});
-            }
-        }
         if(erate>0) rows.push({label:_tr('Consumo actual'),val:`${erate.toFixed(1)} W`});
         if(ef>0&&efd>0){
             rows.push({label:_tr('Capacidad'),val:`${Math.min(ef,efd).toFixed(0)} Wh`});
@@ -987,234 +931,105 @@ async function _renderBateriaContent(c, heavy=null){
     })();
     c.dataset.batStats=JSON.stringify(_statRows);
 
-    // Chart + app usage — combined block
     h+=`<div style="background:var(--card);border-radius:25px;overflow:hidden;margin-bottom:16px">`;
-    // Chart — prefer CSV (per-minute, normalized) over hourly history
     {
-        const _jsDayToCSV=(d)=>d===0?7:d;
-        const _todayCSV=_jsDayToCSV(new Date().getDay());
-        // Prefer timestamp filtering (new Android-style log format) — avoids
-        // mixing in week-old samples from the same weekday.
-        const _midnight=new Date();_midnight.setHours(0,0,0,0);
-        const _midnightTs=Math.floor(_midnight.getTime()/1000);
-        const _hasTs=csvData.ok&&csvData.rows.length>0&&(csvData.rows[csvData.rows.length-1].ts||0)>0;
-        const todayRows=csvData.ok?(_hasTs
-            ?csvData.rows.filter(r=>(r.ts||0)>=_midnightTs)
-            :csvData.rows.filter(r=>r.day===_todayCSV)):[];
-
-        const _r=document.documentElement;
-        const _dark=_r.classList.contains('dark-mode')||(!_r.classList.contains('light-mode')&&window.matchMedia('(prefers-color-scheme:dark)').matches);
-        const _c={
-            charge:'#30CF00',
-            discharge:_dark?'#5A5A5A':'#D0D0D0',
-            full:'#0a84ff',
-            powerSaver:_dark?'#4FDFFF':'#7BE7FF',
-            estimated:_dark?'#4A4A4A':'#CBCBCB',
-            tx:_dark?'#FFFFFF':'#000000',
-            label:_dark?'rgba(255,255,255,0.45)':'rgba(0,0,0,0.4)',
-            labelFaint:_dark?'rgba(255,255,255,0.25)':'rgba(0,0,0,0.25)',
-            line80:_dark?'rgba(255,255,255,0.18)':'rgba(0,0,0,0.13)',
-        };
-
-        // Prediction label (energy_rate based)
-        const erate2=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
-        const ef2=parseFloat((bat.energy_full||'0').split(' ')[0].replace(',','.'))||1;
-        let predLabel='';
-        if(erate2>0&&!isCharging){
-            const hoursLeft=ef2*(pct/100)/erate2;
-            const hInt=Math.floor(hoursLeft),mInt=Math.round((hoursLeft-hInt)*60);
-            predLabel=hInt>0?`~${hInt}h${mInt>0?` ${mInt}m`:''} restante`:`~${mInt}m restante`;
-        } else if(erate2>0&&isCharging&&pct<chargeLimit){
-            const remaining=ef2*((chargeLimit/100)-(pct/100));
-            const hoursToLimit=remaining/erate2;
-            const hInt=Math.floor(hoursToLimit),mInt=Math.round((hoursToLimit-hInt)*60);
-            predLabel=`~${hInt>0?`${hInt}h `:''} ${mInt>0?`${mInt}m`:''} hasta ${chargeLimit}%`;
-        }
-        const predColor=isCharging?_c.charge:'#8899FF';
-
-        const CHART_H=190;
-        // Helper: compute 80% reference line position within normalized range
-        const refLine=(minV,maxV)=>{
-            if(80<=minV||80>=maxV)return'';
-            const pos=Math.round((1-(80-minV)/(maxV-minV))*100);
-            // Label on the right only when far enough from top/bottom ticks —
-            // 18% keeps the 10px labels from overlapping the min/max % ticks
-            const labelRight=pos>18&&pos<82
-                ?`<div style="position:absolute;right:0;top:${pos}%;transform:translateY(-50%);font-size:10px;color:${_c.label}">80%</div>`:'';
-            // Line always stops at the 28px right gutter so it never strikes
-            // through the min/max % tick labels.
-            return`<div style="position:absolute;left:0;right:28px;top:${pos}%;height:1.5px;background:${_c.line80};pointer-events:none"></div>${labelRight}`;
-        };
-
-        if(todayRows.length>0){
-            // ── CSV chart (per-minute, normalized, wider bars) ──
-            // Bar count adapts to the available width so the chart looks right
-            // both maximized and windowed (≈7px per bar, clamped).
-            const _chartW=(c&&c.clientWidth)||600;
-            const maxBars=Math.max(48,Math.min(160,Math.floor(_chartW/7)));
-            const step=Math.max(1,Math.floor(todayRows.length/maxBars));
-            const sampled=todayRows.filter((_,i)=>i%step===0||i===todayRows.length-1);
-            const levels=sampled.map(r=>r.level);
-            const minL=Math.max(0,Math.min(...levels)-3);
-            const maxL=Math.min(100,Math.max(...levels));
-            const norm=(v)=>Math.max(3,Math.round(((v-minL)/(maxL-minL||1))*96));
-            let bars='';
-            sampled.forEach((r,i)=>{
-                const s=r.state.toLowerCase();
-                const isLast=i===sampled.length-1;
-                // With charge protection, "full" is the limit (e.g. 80%): plugged
-                // at/above the limit and not discharging counts as full.
-                const isFull=s==='full'||(r.level>=chargeLimit-1&&s!=='discharging');
-                const c=isFull?_c.full:s==='charging'?_c.charge:_c.discharge;
-                const hPct=norm(r.level);
-                const outline=isLast?`outline:2px solid ${c};outline-offset:2px;`:'';
-                const pW=r.power_uw?(r.power_uw/1e6).toFixed(1)+'W':'';
-                bars+=`<div class="bat-bar" style="flex:1;min-width:2px;max-width:7px;height:${hPct}%;background:${c};border-radius:3px 3px 1px 1px;${outline}" data-tip="${String(r.h).padStart(2,'0')}:${String(r.m).padStart(2,'0')} · ${r.level}%${r.state==='charging'?' ⚡':''}${pW?' · '+pW:''}"></div>`;
-            });
-            // x-axis: first, mid, last sample times
-            const tFmt=(r)=>`${String(r.h).padStart(2,'0')}:${String(r.m).padStart(2,'0')}`;
-            const midRow=sampled[Math.floor(sampled.length/2)];
-            const xLabels=`
-                <span style="position:absolute;left:0;font-size:10px;color:${_c.label}">${tFmt(sampled[0])}</span>
-                <span style="position:absolute;left:50%;transform:translateX(-50%);font-size:10px;color:${_c.label}">${tFmt(midRow)}</span>
-                <span style="position:absolute;right:28px;font-size:10px;color:${_c.label}">Ahora</span>`;
-            const tickTop=`<div style="position:absolute;right:0;top:0;font-size:10px;color:${_c.label}">${maxL}%</div>`;
-            const tickBot=`<div style="position:absolute;right:0;bottom:0;font-size:10px;color:${_c.labelFaint}">${minL}%</div>`;
-            h+=`<div class="bat-chart" style="background:transparent;border-radius:0;margin-bottom:0">
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-                    <span class="chart-title" style="color:${_c.tx}">Hoy · ${todayRows.length} registros</span>
-                </div>
-                <div style="position:relative;padding-right:28px">
-                    <div style="display:flex;align-items:flex-end;height:${CHART_H}px;gap:1.5px">${bars}</div>
-                    ${tickTop}${tickBot}${refLine(minL,maxL)}
-                </div>
-                <div style="position:relative;height:18px;margin-top:4px;padding-right:28px">${xLabels}</div>
-                <div class="bat-chart-legend" style="margin-top:6px">
-                    <span><span class="chart-legend-dot" style="background:${_c.discharge}"></span>${_tr("Nivel de la batería")}</span>
-                    <span><span class="chart-legend-dot" style="background:${_c.charge}"></span>${_tr("Cargando")}</span>
-                    <span><span class="chart-legend-dot" style="background:${_c.full}"></span>${_tr("Completa")}</span>
-                </div>
-            </div>`;
-        } else {
-            // ── History fallback (hourly buckets, normalized) ──
-            const HOURS=24, BUCKET=3600;
-            const nowTs=Math.floor(Date.now()/1000);
-            const buckets=Array.from({length:HOURS},(_,i)=>({
-                t:nowTs-(HOURS-1-i)*BUCKET, pSum:0, n:0, charging:0, powerSaver:0, known:false
-            }));
-            hist.forEach(r=>{
-                const age=(nowTs-r.t)/BUCKET;
-                const bi=Math.floor(HOURS-1-age);
-                if(bi>=0&&bi<HOURS){
-                    buckets[bi].pSum+=r.p; buckets[bi].n++;
-                    buckets[bi].known=true;
-                    if(r.s==='charging')buckets[bi].charging++;
-                    if(r.ps)buckets[bi].powerSaver++;
-                }
-            });
-            buckets[HOURS-1].pSum=pct; buckets[HOURS-1].n=1; buckets[HOURS-1].known=true;
-            if(bat.state==='charging') buckets[HOURS-1].charging=1;
-            if(psMode==='power-saver') buckets[HOURS-1].powerSaver=1;
-            const knownIdx=[];
-            for(let i=0;i<HOURS;i++)if(buckets[i].known)knownIdx.push(i);
-            if(knownIdx.length>=2){
-                for(let k=0;k<knownIdx.length-1;k++){
-                    const a=knownIdx[k],b=knownIdx[k+1];
-                    const va=buckets[a].pSum/buckets[a].n,vb=buckets[b].pSum/buckets[b].n;
-                    for(let i=a+1;i<b;i++){const t=(i-a)/(b-a);buckets[i].pSum=va+(vb-va)*t;buckets[i].n=1;}
-                }
-            } else if(knownIdx.length===1){
-                const ki=knownIdx[0],kv=buckets[ki].pSum/buckets[ki].n;
-                for(let i=0;i<HOURS;i++){if(!buckets[i].known){buckets[i].pSum=kv;buckets[i].n=1;}}
+        // Como en macOS: la ventana acaba en la próxima marca de 3 h del reloj,
+        // no en «ahora», para que la rejilla caiga en horas redondas y el
+        // hueco a la derecha diga cuánto falta para cerrar el tramo.
+        const BUCKET=15*60, COUNT=96, STEP=3*3600;
+        const nowTs=Math.floor(Date.now()/1000);
+        const end=new Date();
+        end.setHours(end.getHours()-end.getHours()%3+3,0,0,0);
+        const endTs=Math.floor(end.getTime()/1000);
+        const startTs=endTs-COUNT*BUCKET;
+        const slot=t=>Math.floor((t-startTs)/BUCKET);
+        // upower solo apunta cuando cambia el nivel o el estado. Con el
+        // cargador puesto y el nivel quieto (p. ej. en el límite del 80 %)
+        // pasa horas sin escribir, así que ese hueco se rellena con el último
+        // valor, salvo que el siguiente registro llegue más bajo: entonces se
+        // desenchufó y se suspendió por medio (19:41 80 % cargando → 08:37
+        // 74 % descargando, en este equipo). Descargando escribe cada 4–9 min (medido en este equipo); un
+        // hueco de más de 45 min con poca caída es suspensión y se deja vacío,
+        // igual que macOS. «unknown» con 0 % es arranque o apagado: corta el
+        // relleno y no es un nivel.
+        const GAP=45*60, AC=new Set(['charging','pending-charge','fully-charged','not charging']);
+        const recs=[...hist.filter(r=>r.t<nowTs&&r.t>=startTs-86400),{t:nowTs,p:pct,s:bat.state}];
+        const buckets=Array(COUNT).fill(null);
+        const put=(i,p,charging)=>{if(i>=0&&i<COUNT)buckets[i]={p,charging:charging||!!buckets[i]?.charging};};
+        recs.forEach((r,k)=>{
+            const prev=recs[k-1];
+            if(prev&&prev.s!=='unknown'&&r.s!=='unknown'&&((AC.has(prev.s)&&r.p>=prev.p-1)||r.t-prev.t<=GAP)){
+                for(let i=Math.max(0,slot(prev.t)+1);i<Math.min(COUNT,slot(r.t));i++)
+                    buckets[i]={p:prev.p,charging:prev.s==='charging'};
             }
-            const avgs=buckets.map(b=>b.n>0?Math.min(100,b.pSum/b.n):null);
-            const knownAvgs=avgs.filter(v=>v!==null);
-            const minA=knownAvgs.length?Math.max(0,Math.min(...knownAvgs)-3):0;
-            const maxA=knownAvgs.length?Math.min(100,Math.round(Math.max(...knownAvgs))):100;
-            const normH=(v)=>Math.max(3,Math.round(((v-minA)/(maxA-minA||1))*96));
-            let barDivs='';
-            buckets.forEach((b,i)=>{
-                const avg=avgs[i]??0;
-                const isChargingBar=b.charging>b.n*0.5;
-                const isPsBar=b.powerSaver>b.n*0.5;
-                const isCurrent=i===HOURS-1;
-                let color;
-                if(!b.known&&knownIdx.length<2) color=_c.estimated;
-                else if(isChargingBar||(isCurrent&&isCharging)) color=_c.charge;
-                else if(isPsBar||(isCurrent&&psMode==='power-saver')) color=_c.powerSaver;
-                else color=_c.discharge;
-                const d=new Date(b.t*1000);
-                const hh=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-                const outline=isCurrent?`outline:2px solid ${color};outline-offset:2px;`:'';
-                // La envoltura necesita altura propia: con align-items:flex-end
-                // del padre quedaba a altura automática y el height:% de la barra daba 0.
-                barDivs+=`<div style="flex:1;height:100%;display:flex;align-items:flex-end" title="${hh} — ${Math.round(avg)}%">
-                    <div style="height:${normH(avg)}%;background:${color};border-radius:5px 5px 2px 2px;${outline}transition:height .4s ease;width:100%"></div>
-                </div>`;
-            });
-            const tickTop=`<div style="position:absolute;right:0;top:0;font-size:10px;color:${_c.label}">${maxA}%</div>`;
-            const tickBot=`<div style="position:absolute;right:0;bottom:0;font-size:10px;color:${_c.labelFaint}">${minA}%</div>`;
-            const labelIndices=[0,4,8,12,16,20,HOURS-1];
-            const xLabels=labelIndices.map(hi=>{
-                const d=new Date(buckets[hi].t*1000);
-                const label=hi===HOURS-1?'Ahora':d.getHours().toString();
-                const xPct=(hi/(HOURS-1)*100).toFixed(1);
-                return`<span style="position:absolute;left:${xPct}%;transform:translateX(-50%);font-size:10px;color:${_c.label};white-space:nowrap">${label}</span>`;
-            }).join('');
-            h+=`<div class="bat-chart" style="background:transparent;border-radius:0;margin-bottom:0">
-                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-                    <span class="chart-title" style="color:${_c.tx}">${_tr("Hoy")}</span>
+            if(r.s!=='unknown')put(slot(r.t),r.p,r.s==='charging');
+        });
+        // Perfil vigente al final de cada cuarto de hora, que es el instante
+        // cuyo nivel pinta la barra. El registro va con hasta un minuto de
+        // retraso (lo anota el hilo de fondo), así que el valor en vivo cierra la lista.
+        const AHORRO=new Set(['low-power','quiet','power-saver']);
+        const marcas=[...perfiles.filter(m=>m.t<nowTs),{t:nowTs,p:gb.performance_mode}];
+        let m=0;
+        buckets.forEach((b,i)=>{
+            const t=Math.min(nowTs,startTs+(i+1)*BUCKET);
+            while(m+1<marcas.length&&marcas[m+1].t<=t)m++;
+            if(b)b.ahorro=marcas[m].t<=t&&AHORRO.has(marcas[m].p);
+        });
+        const fmtHour=t=>new Date(t*1000).toLocaleTimeString(getLang(),{hour:'2-digit',minute:'2-digit'});
+        const bars=buckets.map((b,i)=>{
+            if(!b)return'<div class="bat-history-slot"></div>';
+            const level=Math.max(0,Math.min(100,Math.round(b.p)));
+            // Batería baja manda sobre ahorro: es lo que más importa ver.
+            const tono=b.p<=bajo?'bajo':b.ahorro?'ahorro':'';
+            const notas=[b.charging&&_tr('Cargando'),tono==='bajo'&&_tr('Batería baja'),b.ahorro&&_tr('Ahorro de energía')].filter(Boolean);
+            return`<div class="bat-history-slot" title="${fmtHour(startTs+i*BUCKET)} — ${level} %${notas.length?' · '+notas.join(' · '):''}"><div class="bat-history-bar${tono?' '+tono:''}" style="height:${Math.max(level,1)}%"></div></div>`;
+        }).join('');
+        // Tramos de carga seguidos, no un punto por cuarto de hora.
+        const runs=[];
+        buckets.forEach((b,i)=>{
+            if(!b?.charging)return;
+            const last=runs[runs.length-1];
+            if(last&&last.to===i)last.to=i+1;else runs.push({from:i,to:i+1});
+        });
+        const tramo=(r,cls)=>`<div class="${cls}" style="left:${r.from/COUNT*100}%;width:${(r.to-r.from)/COUNT*100}%" title="${_tr('Cargando')} · ${fmtHour(startTs+r.from*BUCKET)}–${fmtHour(Math.min(nowTs,startTs+r.to*BUCKET))}"></div>`;
+        const charging=runs.map(r=>tramo(r,'bat-history-charging')).join('');
+        // La franja de abajo sola se pierde; la banda tras las barras deja ver
+        // de un vistazo qué parte de la subida fue con el cargador puesto.
+        const bandas=runs.map(r=>tramo(r,'bat-history-band')).join('');
+        const cols=COUNT*BUCKET/STEP;
+        const vlines=Array.from({length:cols+1},(_,i)=>`<i class="bat-history-vline${i===0||i===cols?' edge':''}" style="left:${i/cols*100}%"></i>`).join('');
+        const labels=Array.from({length:cols},(_,i)=>{
+            const d=new Date((startTs+i*STEP)*1000);
+            const day=d.getHours()===0?`<small>${d.toLocaleDateString(getLang(),{day:'numeric',month:'short'})}</small>`:'';
+            return`<span style="left:${i/cols*100}%">${d.getHours()}${day}</span>`;
+        }).join('');
+        const empty=buckets.some(Boolean)?'':`<span class="bat-history-empty">${_tr('Sin datos de las últimas 24 horas')}</span>`;
+        h+=`<div class="bat-chart bat-history">
+            <span class="chart-subtitle">${_tr('Últimas 24 horas')}</span>
+            <span class="chart-title">${_tr('Nivel de la batería')}</span>
+            <div class="bat-history-chart">
+                ${vlines}
+                <div class="bat-history-plot" role="img" aria-label="${_tr('Nivel de batería durante las últimas 24 horas, de 0 a 100 por ciento')}">
+                    ${bandas}
+                    <div class="bat-history-bars">${bars}</div>
+                    ${empty}
+                    <span class="bat-history-tick" style="top:0">100 %</span>
+                    <span class="bat-history-tick" style="top:50%">50 %</span>
+                    <span class="bat-history-tick" style="top:100%">0 %</span>
                 </div>
-                <div style="position:relative;height:${CHART_H}px;padding-right:30px">
-                    <div style="display:flex;align-items:flex-end;height:100%;gap:3px">${barDivs}</div>
-                    ${tickTop}${tickBot}${refLine(minA,maxA)}
-                </div>
-                <div style="position:relative;height:18px;margin-top:4px;padding-right:30px">${xLabels}</div>
-                <div class="bat-chart-legend" style="margin-top:6px">
-                    <span><span class="chart-legend-dot" style="background:${_c.discharge}"></span>${_tr("Nivel de la batería")}</span>
-                    <span><span class="chart-legend-dot" style="background:${_c.estimated}"></span>Nivel de batería estimado</span>
-                    <span><span class="chart-legend-dot" style="background:${_c.charge}"></span>${_tr("Cargando")}</span>
-                    <span><span class="chart-legend-dot" style="background:${_c.powerSaver}"></span>Ahorro de energía</span>
-                </div>
-            </div>`;
-        }
+                <div class="bat-history-charge-row">${charging}</div>
+                <div class="bat-history-hours">${labels}</div>
+            </div>
+            <div class="bat-chart-legend">${[
+                runs.length&&`<span><span class="bat-history-key"></span>${_tr('Cargando')}</span>`,
+                buckets.some(b=>b&&b.ahorro&&b.p>bajo)&&`<span><span class="bat-history-key ahorro"></span>${_tr('Ahorro de energía')}</span>`,
+                buckets.some(b=>b&&b.p<=bajo)&&`<span><span class="bat-history-key bajo"></span>${_tr('Batería baja')} (≤ ${Math.round(bajo)} %)</span>`,
+            ].filter(Boolean).join('')}</div>
+        </div>`;
     }
 
-    // Per-app power usage — icon + name + % right-aligned
-    {
-        const allApps=appUsage.filter(a=>(parseFloat(a.cpu)||0)>0||(parseFloat(a.mem)||0)>0);
-        const userApps=allApps.filter(a=>!a.is_system);
-        // ||0 en cada item para que NaN no contamine la suma (NaN||1 = 1 → porcentajes rotos)
-        const totalCpuAll=allApps.reduce((s,a)=>s+(parseFloat(a.cpu)||0),0)||1;
-        if(allApps.length){
-            const mkAppRow=(a)=>{
-                const cpu=parseFloat(a.cpu)||0;
-                const sharePct=Math.min(100,cpu/totalCpuAll*100);
-                const _ic=appIconUrl(a.id,a.icon);
-                const iconHtml=_ic?`<img src="${_ic}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
-                const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${_ic?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
-                const rightLabel=`${sharePct.toFixed(1).replace('.',',')}%`;
-                return`<div class="bat-app-item" style="padding:12px 20px">
-                    <div class="bat-app-icon-wrap" style="width:32px;height:32px;flex-shrink:0">${iconHtml}${fallbackHtml}</div>
-                    <span class="bat-app-name" style="flex:1;padding:0 12px;font-size:14px">${esc(a.name)}</span>
-                    <span style="font-size:14px;font-weight:500;color:var(--tx2);min-width:52px;text-align:right">${rightLabel}</span>
-                </div>`;
-            };
-            const totalSharePct=Math.min(100,userApps.slice(0,6).reduce((s,a)=>s+(parseFloat(a.cpu)||0)/totalCpuAll*100,0));
-            const top=userApps.slice(0,6);
-            h+=`<div style="border-top:1px solid var(--div);padding:10px 20px 4px;font-size:13px;font-weight:600;color:var(--tx2)">Uso de la batería: ${totalSharePct.toFixed(0)}%</div>`;
-            if(top.length){
-                h+=top.map(mkAppRow).join('');
-                h+=`<div style="padding:12px;text-align:center;border-top:1px solid var(--div)"><span id="bat-sys-toggle" style="font-size:13px;font-weight:500;color:var(--blue);cursor:pointer">Ver detalles</span></div>`;
-            } else {
-                h+=`<div style="padding:14px 20px;color:var(--tx2);font-size:13px">Sin actividad significativa</div>`;
-            }
-        }
-    }
-    h+=`</div>`; // close chart+apps combined card
+    h+=`</div>`;
 
-    // ── USB-C charging + adaptive-charging predictions → moved into the stats
-    // popup (header 3-dot button). We build the HTML here and stash it. ─────────
     let _usbcHtml='';
     if(chargingInfo.ok && (chargingInfo.charging || chargingInfo.ac_online)){
         const pW=(chargingInfo.power_uw/1e6).toFixed(1);
@@ -1235,31 +1050,6 @@ async function _renderBateriaContent(c, heavy=null){
         _usbcHtml=`<div class="bat-pop-section-title">${_tr('Carga USB-C')}</div><div class="bat-stat-pop">${rows}</div>`;
     }
     c.dataset.batUsbc=_usbcHtml;
-
-    let _predHtml='';
-    {
-        const days=[_tr('Lun'),_tr('Mar'),_tr('Mié'),_tr('Jue'),_tr('Vie'),_tr('Sáb'),_tr('Dom')];
-        const jsDayToCSV=(d)=>d===0?7:d;
-        const todayCSV=jsDayToCSV(new Date().getDay());
-        if(adaptivePreds.ok&&adaptivePreds.predictions.length>0){
-            const predsMap=new Map(adaptivePreds.predictions.map(p=>[p.day,p]));
-            let predRows='';
-            for(let d=1;d<=7;d++){
-                const p=predsMap.get(d);
-                const isToday=d===todayCSV;
-                const time=p?`${String(p.hour).padStart(2,'0')}:${String(p.minute).padStart(2,'0')}`:`<span style="color:var(--tx2)">${_tr('Sin datos')}</span>`;
-                const samples=p?`<span class="bat-pred-samples">${p.samples} ${_tr('datos')}</span>`:'';
-                predRows+=`<div class="bat-pred-row${isToday?' today':''}">
-                    <span class="bat-pred-day">${days[d-1]}${isToday?` <span class="bat-pred-today">${_tr('hoy')}</span>`:''}</span>
-                    <span class="bat-pred-time">${time} ${samples}</span>
-                </div>`;
-            }
-            _predHtml=`<div class="bat-pop-section-title">${_tr('Hora predicha de desconexión')}</div><div class="bat-pred-list">${predRows}</div>`;
-        } else if(csvData.ok){
-            _predHtml=`<div class="bat-pop-section-title">${_tr('Hora predicha de desconexión')}</div><div class="bat-pop-empty">${_tr('Necesita más datos para predecir patrones.')}</div>`;
-        }
-    }
-    c.dataset.batPred=_predHtml;
 
     // Performance mode — shown when power-profiles-daemon is available (generic Linux)
     if(gb.perf_supported){
@@ -1282,62 +1072,7 @@ async function _renderBateriaContent(c, heavy=null){
         renderEnergyAdvanced(c);
     });
 
-    // System process toggle (same mkAppRow as above)
-    {
-        let showingSys=false;
-        const allApps2=appUsage.filter(a=>(parseFloat(a.cpu)||0)>0||(parseFloat(a.mem)||0)>0);
-        const userApps2=allApps2.filter(a=>!a.is_system);
-        const totalCpuAll2=allApps2.reduce((s,a)=>s+(parseFloat(a.cpu)||0),0)||1;
-        const mkAppRow2=(a)=>{
-            const cpu=parseFloat(a.cpu)||0;
-            const sharePct2=Math.min(100,cpu/totalCpuAll2*100);
-            const _ic=appIconUrl(a.id,a.icon);
-                const iconHtml=_ic?`<img src="${_ic}" width="32" height="32" style="border-radius:10px;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:'';
-            const fallbackHtml=`<span class="bat-app-icon-fallback" style="width:32px;height:32px;font-size:11px;${_ic?'display:none':''}">${a.name.slice(0,2).toUpperCase()}</span>`;
-            const rightLabel=`${sharePct2.toFixed(1).replace('.',',')}%`;
-            return`<div class="bat-app-item" style="padding:12px 20px">
-                <div class="bat-app-icon-wrap" style="width:32px;height:32px;flex-shrink:0">${iconHtml}${fallbackHtml}</div>
-                <span class="bat-app-name" style="flex:1;padding:0 12px;font-size:14px">${esc(a.name)}</span>
-                <span style="font-size:14px;font-weight:500;color:var(--tx2);min-width:52px;text-align:right">${rightLabel}</span>
-            </div>`;
-        };
-        document.getElementById('bat-sys-toggle')?.addEventListener('click',function(){
-            showingSys=!showingSys;
-            this.textContent=showingSys?'Ver menos':'Ver detalles';
-            const card=document.getElementById('bat-app-list');
-            if(card){
-                const list=showingSys?allApps2:userApps2;
-                const items=list.slice(0,6).map(mkAppRow2).join('');
-                // keep the "Ver detalles" footer row
-                const footer=card.querySelector('[style*="text-align:center"]');
-                card.innerHTML=items+(footer?footer.outerHTML:`<div style="padding:12px;text-align:center;border-top:1px solid var(--div)"><span id="bat-sys-toggle" style="font-size:13px;font-weight:500;color:var(--blue);cursor:pointer">${showingSys?'Ver menos':'Ver detalles'}</span></div>`);
-                document.getElementById('bat-sys-toggle')?.addEventListener('click',arguments.callee);
-            }
-        });
-    }
-
-    setupToggle('ps',async a=>{
-        const m=a?'power-saver':'balanced';
-        const modoTermico=a?'silencioso':'optimizado';
-        setSetting('PowerSaver',m);
-        let ok=false;
-        try{await tauriInvoke('set_performance_mode',{mode:m});_icInvalidate('check_hw_features');ok=true;}catch(e){}
-        try{await tauriInvoke('aplicar_perfil_termico',{modo:modoTermico});}catch(e){}
-        // Real background throttling: powersave governor + renice + ionice idle on bg tasks
-        try{await tauriInvoke('set_background_throttle',{enable:a});}catch(e){}
-        toast(a?'Ahorro activado · procesos en segundo plano limitados':'Rendimiento normal', ok?'✓':'⚠');
-    });
     setupToggle('bprot',async a=>{
-        if(a){
-            // Disable adaptive charging if active (mutually exclusive)
-            const adaptiveToggle=document.querySelector('[data-toggle="adaptive-charging"]');
-            if(adaptiveToggle?.classList.contains('on')){
-                adaptiveToggle.classList.remove('on');
-                adaptiveToggle.setAttribute('aria-checked','false');
-                setSetting('AdaptiveCharging','false');
-                await invokeWithAuth('set_adaptive_charging',{enabled:false});
-            }
-        }
         const section=document.getElementById('bprot-limit-section');
         if(section)section.style.display=a?'':'none';
         const currentLimit=parseInt(document.getElementById('cl')?.value)||80;
@@ -1367,11 +1102,9 @@ async function _renderBateriaContent(c, heavy=null){
     });
     // Se registran al abrir el diálogo ⋮ (ver abajo): los interruptores viven allí.
     const _setupPopToggles=()=>{
-    setupToggle('dim-low',async a=>{dimlow=a;setSetting('DimLowBattery',a?'true':'false');toast(a?'Atenuación automática activada':'Atenuación automática desactivada');});
     setupToggle('show-pct',async a=>{
         showpct=a;
         setSetting('ShowBatteryPercent',a?'true':'false');
-        // Notify applet via IPC state so it reacts immediately
         const curProfile=document.querySelector('.perf-mode-card.active')?.dataset?.mode||'balanced';
         const savedLim=parseInt(await getSetting('ChargeLimit','80').catch(()=>'80'))||80;
         const state=JSON.stringify({power_profile:curProfile,charge_limit:savedLim,show_percent:a,source:'settings',ts:Date.now()});
@@ -1414,81 +1147,6 @@ async function _renderBateriaContent(c, heavy=null){
         });
     }
 
-    setupToggle('adaptive-charging',async a=>{
-        const toggle=document.querySelector('[data-toggle="adaptive-charging"]');
-        const restoreOff=()=>{
-            toggle?.classList.remove('active');
-            toggle?.setAttribute('aria-checked','false');
-            setSetting('AdaptiveCharging','false');
-        };
-        if(a){
-            // Disable battery protection if active (mutually exclusive)
-            const bprotToggle=document.querySelector('[data-toggle="bprot"]');
-            if(bprotToggle?.classList.contains('active')){
-                bprotToggle.classList.remove('active');
-                bprotToggle.setAttribute('aria-checked','false');
-                const section=document.getElementById('bprot-limit-section');
-                if(section)section.style.display='none';
-                setSetting('BatteryProtection','false');
-                try{await applyChargeLimit(100);}catch(e){}
-            }
-            // Pre-emptively turn off until user confirms — setupToggle already
-            // flipped it on optimistically.
-            toggle?.classList.remove('active');
-            showDialog(
-                'Activar carga adaptativa',
-                `<p style="margin:0 0 10px">La carga adaptativa aprende cuándo usas el equipo y detiene la carga antes de que llegue al 100%, completándola justo a tiempo.</p><p style="margin:0;font-size:12px;opacity:0.6">Para obtener mejores predicciones, deja el equipo enchufado durante la noche.</p>`,
-                {
-                    confirmText:t('activate'),
-                    onConfirm:async()=>{
-                        toggle?.classList.add('active');
-                        toggle?.setAttribute('aria-checked','true');
-                        setSetting('AdaptiveCharging','true');
-                        const r=await invokeWithAuth('set_adaptive_charging',{enabled:true});
-                        if(!r||!r.ok){restoreOff();return;}
-                        toast('Carga adaptativa activada','🔋');
-                    },
-                    onCancel:()=>{restoreOff();}
-                }
-            );
-        } else {
-            setSetting('AdaptiveCharging','false');
-            const r=await invokeWithAuth('set_adaptive_charging',{enabled:false});
-            if(r&&r.ok)toast('Carga adaptativa desactivada');
-            else if(r===null){
-                // user cancelled auth — restore on
-                toggle?.classList.add('active');
-                toggle?.setAttribute('aria-checked','true');
-                setSetting('AdaptiveCharging','true');
-            }
-        }
-    });
-    // ── Chart bar tooltip ────────────────────────────────────────────────
-    // Single shared tip + delegated listeners bound ONCE. Per-bar listeners
-    // died on every chart re-render (the bar under the cursor got replaced,
-    // so mouseleave never fired and the tip stayed stuck), and each render
-    // appended yet another tip div.
-    {
-        let tip=document.querySelector('.bat-bar-tip');
-        if(!tip){
-            tip=document.createElement('div');
-            tip.className='bat-bar-tip';
-            document.body.appendChild(tip);
-            document.addEventListener('mouseover',e=>{
-                const bar=e.target instanceof Element?e.target.closest('.bat-bar'):null;
-                if(!bar||!document.contains(bar)){tip.style.display='none';return;}
-                tip.textContent=bar.dataset.tip||'';
-                tip.style.display='block';
-                const r=bar.getBoundingClientRect();
-                tip.style.left=Math.max(4,r.left+r.width/2-tip.offsetWidth/2)+'px';
-                tip.style.top=(r.top-tip.offsetHeight-6)+'px';
-            });
-            // Cursor leaving the window also hides it
-            document.documentElement.addEventListener('mouseleave',()=>{tip.style.display='none';});
-        }
-        tip.style.display='none';   // re-render: start hidden
-    }
-
     // ── Stats popup (opened from the header 3-dot button) ───────────────────
     document.getElementById('bat-stats-btn')?.addEventListener('click',()=>{
         let rows=[];
@@ -1498,11 +1156,10 @@ async function _renderBateriaContent(c, heavy=null){
         ).join('')||`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr('Sin datos disponibles')}</span></div>`;
         const optRow=(label,id,on)=>`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr(label)}</span>${renderToggle(id,on)}</div>`;
         const optsSection=`<div class="bat-pop-section-title">${_tr('Opciones')}</div><div class="bat-stat-pop">${
-            optRow('Atenuar pantalla automáticamente','dim-low',dimlow)}${optRow('Mostrar porcentaje batería','show-pct',showpct)}</div>`;
+            optRow('Mostrar porcentaje batería','show-pct',showpct)}</div>`;
         const statsSection=`<div class="bat-pop-section-title">${_tr('Estado')}</div><div class="bat-stat-pop">${statsRows}</div>`;
         const usbc=c.dataset.batUsbc||'';
-        const pred=c.dataset.batPred||'';
-        const body=`<div class="bat-pop">${optsSection}${statsSection}${usbc}${pred}</div>`;
+        const body=`<div class="bat-pop">${optsSection}${statsSection}${usbc}</div>`;
         showDialog(_tr('Más opciones'), body,
             {confirmText:null,cancelText:_tr('Cerrar'),onCancel:()=>{}});
         _setupPopToggles();
@@ -1513,15 +1170,7 @@ async function _renderBateriaContent(c, heavy=null){
 // ── Notificaciones ─────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
 export async function renderNotificaciones(c){
-    const enabled=(await getSetting('UpdateNotifications','true'))!=='false';
-    let dnd;
-    try{dnd=JSON.parse(await tauriInvoke('get_dnd_status'));if(dnd.ok===false)throw new Error(dnd.error);}catch(e){dnd={error:String(e)};}
-    c.innerHTML=renderHeader('Notificaciones')+renderCard([
-        renderRowItem('Avisos de actualizaciones','',renderToggle('native-updates',enabled)),
-        dnd.error?renderInfoItem('No molestar no disponible',esc(dnd.error)):renderRowItem('No molestar','Silenciar avisos del escritorio',renderToggle('native-dnd',dnd.dnd_active)),
-        renderInfoItem('El historial de notificaciones está en la campana del panel.')]);
-    setupToggle('native-updates',active=>setSetting('UpdateNotifications',String(active)));
-    setupToggle('native-dnd',async enable=>{const result=JSON.parse(await tauriInvoke('toggle_dnd',{enable}));if(result.ok===false)throw new Error(result.error);});
+return desktop.notifications(c);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1549,12 +1198,7 @@ return desktop.appearance(c,()=>renderTintedIcons(c));
 // Selecting a preview loads that variant into the sliders; editing recolours
 // only that variant. (Visual mock — persisted locally.)
 export async function renderTintedIcons(c){
-    // s = slider value. LEFT (s low) = strong/saturated, RIGHT (s high) = white-ish.
-    const _tintColor=(h,s)=>{
-        const sat=Math.round(90-(s/100)*55);           // s0→90% (strong) … s100→35% (washed)
-        const light=Math.round(42+(s/100)*38);         // s0→42% (deep) … s100→80% (light)
-        return `hsl(${h},${sat}%,${light}%)`;
-    };
+    const _tintColor=desktop.tinte;
     const termGlyph=`<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
     // Per-variant defaults (fall back to the fixed icon colours' rough hue).
     const get=(k,d)=>parseInt(localStorage.getItem(k)||String(d),10);
@@ -1994,6 +1638,7 @@ async function promptAuth(opts={}){
             </div>
         </div>`;
         document.body.appendChild(d);
+        window.translateDOM(d);
         window._sudoModal=d;
 
         let fpAbort=null;        // controller for in-flight verify_fingerprint
@@ -2205,7 +1850,7 @@ async function _doCheckUpdates(c){
         .replace(/\\n/g,'<br>');
     // Botón fijo al changelog online de BookOS (el backend valida el dominio).
     const _changelogUrl='https://bookos.es/changelog';
-    const _changelogP = `<button class="release-changelog-link" id="rel-changelog">${_tr('Ver el registro de cambios')} ↗</button>`;
+    const _changelogP = `<button class="release-changelog-link" id="rel-changelog">${_tr('Ver el registro de cambios')} ${ico('arrow-up-right',{size:14,cls:'ico-t'})}</button>`;
     const _releaseCard = release.available ? `
         <div class="bookos-release-card">
             <div class="release-hero" style="background-image:url('${_bannerBg}')">
@@ -2386,7 +2031,7 @@ function _startUpdatePolling(c,bar,text,progressWrap,sysInfo){
                 clearInterval(poll);
                 if(p.ok){
                     if(bar){bar.classList.remove('indeterminate');bar.style.width='100%';}
-                    if(text) text.textContent='✓ Completado';
+                    if(text) text.innerHTML=`${ico('check',{size:14,cls:'ico-t'})} ${_tr('Completado')}`;
                     toast('Sistema actualizado correctamente','🎉');
                     setTimeout(()=>renderActualizacion(c),1500);
                 }else{
@@ -2481,16 +2126,9 @@ export async function renderGeneral(c){
         tauriInvoke('list_timezones').then(JSON.parse).catch(()=>[])
     ]);}catch(e){}
     
-    // Inline SVG flags (no emoji — render consistently across fonts/platforms).
-    const _FLAGS={
-        es:`<svg class="lang-flag" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" rx="2" fill="#c60b1e"/><rect y="3.5" width="20" height="7" fill="#ffc400"/></svg>`,
-        us:`<svg class="lang-flag" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" rx="2" fill="#fff"/><g fill="#b22234"><rect width="20" height="2"/><rect y="4" width="20" height="2"/><rect y="8" width="20" height="2"/><rect y="12" width="20" height="2"/></g><rect width="9" height="8" fill="#3c3b6e"/></svg>`,
-        fr:`<svg class="lang-flag" width="20" height="14" viewBox="0 0 20 14" aria-hidden="true"><rect width="20" height="14" rx="2" fill="#fff"/><rect width="6.67" height="14" fill="#0055a4"/><rect x="13.33" width="6.67" height="14" fill="#ef4135"/></svg>`
-    };
     // «es_MX.UTF-8» → «Español (México)», cada idioma escrito en su propio
     // idioma, que es como lo busca quien no entiende el actual. Antes solo
     // había nombre para tres y el resto salía como el código crudo.
-    const flagOf={es_ES:'es',en_US:'us',fr_FR:'fr'};
     const prettyLocale=l=>{
         const tag=String(l).split('.')[0].replace('_','-');
         try{
@@ -2498,11 +2136,10 @@ export async function renderGeneral(c){
             return n&&n!==tag?n.charAt(0).toLocaleUpperCase(tag)+n.slice(1):l;
         }catch{return l;}
     };
-    // HTML seguro: bandera (si la hay) + nombre escapado.
+    // HTML seguro: nombre escapado.
     const getLangName = l => {
         if(!l) return '';
-        const f=_FLAGS[flagOf[String(l).split('.')[0]]];
-        return `<span class="lang-label">${f||''}<span>${esc(prettyLocale(l))}</span></span>`;
+        return `<span class="lang-label"><span>${esc(prettyLocale(l))}</span></span>`;
     };
 
     const _curAppLang=(localStorage.getItem('bookos_lang')||'auto');
@@ -2512,6 +2149,8 @@ export async function renderGeneral(c){
     const pick=(id,label)=>`<button type="button" class="bk-select" id="${id}" aria-haspopup="listbox"><span>${label}</span></button>`;
     const link=(id,title,sub)=>`<div class="detail-item detail-item-row gen-link" id="${id}" role="button" tabindex="0"><div class="detail-texts"><span class="dt">${_tr(title)}</span>${sub?`<span class="ds">${_tr(sub)}</span>`:''}</div>${chevron()}</div>`;
     c.innerHTML=renderHeader(t('hdr_general'))
+    + `<div class="gen-vista" aria-hidden="true"><span class="gen-hora" id="gen-hora"></span><span class="gen-fecha" id="gen-fecha"></span>
+        <span class="gen-chips"><span id="gen-zona"></span><span>${esc(prettyLocale(loc.locale))}</span><span>${esc((loc.keymap||'').split(',')[0].toUpperCase())}</span></span></div>`
     + renderSection(_tr('Idioma y región')) + renderCard([
         renderRowItem(t('label_app_lang'),'',pick('pick-applang',esc(_appLangOpts.find(o=>o[0]===_curAppLang)?.[1]||'Automático'))),
         renderRowItem(t('label_system_lang'),'Se aplica al volver a iniciar sesión',pick('pick-lang',getLangName(loc.locale)||'—')),
@@ -2541,11 +2180,30 @@ export async function renderGeneral(c){
         link('open-printers','Impresoras y escáneres','Añadir y configurar impresoras'),
     ]);
 
+    // La cabecera enseña cómo se ven la hora y la fecha con el idioma y la
+    // zona que hay puestos: es lo que cambian casi todas las filas de abajo.
+    let zona=dt.timezone||undefined;
+    const reloj=()=>{
+        const tag=String(loc.locale||'es_ES').split('.')[0].replace('_','-'),ahora=new Date();
+        let o={timeZone:zona};
+        try{new Intl.DateTimeFormat(tag,o);}catch{o={};}
+        document.getElementById('gen-hora').textContent=ahora.toLocaleTimeString(tag,{...o,hour:'2-digit',minute:'2-digit'});
+        const f=ahora.toLocaleDateString(tag,{...o,weekday:'long',day:'numeric',month:'long',year:'numeric'});
+        document.getElementById('gen-fecha').textContent=f.charAt(0).toLocaleUpperCase(tag)+f.slice(1);
+        document.getElementById('gen-zona').textContent=(zona||'').split('/').pop().replace(/_/g,' ')||_tr('Sin zona');
+    };
+    reloj();
+    // Cada 10 s y no cada minuto exacto: basta para que el cambio de minuto
+    // no se note tarde y no hace falta alinear el temporizador.
+    addInterval(reloj,10000);
     const menu=(btnId,title,options,current,onSelect)=>{
         const btn=document.getElementById(btnId);
         btn?.addEventListener('click',()=>popoverSelect(btn.closest('.detail-item'),{title,options,current,onSelect}));
     };
-    menu('pick-applang',t('label_app_lang'),_appLangOpts.map(([val,label])=>({val,label:esc(label)})),_curAppLang,v=>{
+    menu('pick-applang',t('label_app_lang'),_appLangOpts.map(([val,label])=>({val,label:esc(label)})),_curAppLang,async v=>{
+        try{
+            await tauriInvoke('set_bookos_setting',{key:'AppLanguage',value:v});
+        }catch(e){toast(String(e),'❌');return;}
         if(v==='auto')localStorage.removeItem('bookos_lang');else localStorage.setItem('bookos_lang',v);
         toast(t('tst_app_lang_changed'),'🌐');
         // Recargar para que todas las páginas salgan en el idioma nuevo.
@@ -2593,7 +2251,7 @@ export async function renderGeneral(c){
             if(!r.ok){toast(_tr('No se pudo cambiar'),'❌');return;}
             tzRes.querySelector('.active')?.classList.remove('active');
             b.classList.add('active');
-            document.getElementById('tz-cur').textContent=tz;
+            document.getElementById('tz-cur').textContent=tz;zona=tz;reloj();
             tzList.hidden=true;tzBtn.setAttribute('aria-expanded','false');
             toast(_tr('Zona horaria actualizada'),'🌍');
         }catch(e){toast(_tr('No se pudo cambiar'),'❌');}
@@ -2640,21 +2298,18 @@ export async function renderCuentas(c){
                 <span class="sys-user-name">${esc(us.display_name||us.username)}</span>
                 <span class="sys-user-id">@${esc(us.username)}</span>
             </div>
-            <button class="btn btn-danger btn-sm sys-user-del" data-del="${esc(us.username)}" title="Eliminar cuenta">Eliminar</button>
+            <button class="btn btn-secondary btn-sm sys-user-del" data-del="${esc(us.username)}" title="Eliminar cuenta">Eliminar</button>
         </div>`;
     }).join('');
-    if(otherUsers.length===0){
-        userListHtml=`<div class="detail-item"><span class="ds" style="color:var(--tx2)">No hay otros usuarios en este equipo.</span></div>`;
-    }
 
     c.innerHTML=renderHeader(t('hdr_accounts')) + `
         <div class="acc-hero">
-            <div style="position:relative;cursor:pointer;flex-shrink:0" id="acc-avatar-btn" title="${_tr('Cambiar foto')}">
+            <button type="button" class="acc-foto" id="acc-avatar-btn" title="${_tr('Cambiar foto')}" aria-label="${_tr('Cambiar foto')}">
                 ${av}
-                <div style="position:absolute;right:-2px;bottom:-2px;width:26px;height:26px;border-radius:50%;background:var(--blue);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.25);border:2px solid var(--card)">
+                <span class="acc-foto-cambiar">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                </div>
-            </div>
+                </span>
+            </button>
             <div class="acc-hero-info">
                 <span class="acc-hero-name" id="acc-hero-name">${esc(currentUser.display_name || u.username)}</span>
                 <span class="acc-hero-sub">${_tr('Administrador de BookOS')} · @${esc(u.username)}</span>
@@ -2668,9 +2323,14 @@ export async function renderCuentas(c){
         `<div class="detail-item detail-item-row" style="cursor:pointer" id="acc-edit-hn">
             <div class="detail-texts"><span class="dt">${_tr('Nombre del equipo')}</span><span class="ds" id="acc-hn-cur">${esc(u.hostname||'—')}</span></div>
             ${chevron()}
+        </div>`,
+        // Fila entera pulsable con flecha, como las dos de arriba: un botón
+        // «Cambiar» suelto rompía la columna derecha de la tarjeta.
+        `<div class="detail-item detail-item-row" style="cursor:pointer" id="acc-change-pw">
+            <div class="detail-texts"><span class="dt">${_tr('Contraseña')}</span></div>
+            ${chevron()}
         </div>`
     ]) + renderSection(t('sec_security')) + renderCard([
-        renderRowItem('Contraseña','Cambia la contraseña de tu cuenta',`<button class="btn btn-secondary btn-sm" id="acc-change-pw">Cambiar</button>`),
         renderRowItem(
             'Inicio de sesión automático',
             autoLogin.enabled
@@ -2678,10 +2338,9 @@ export async function renderCuentas(c){
                 : 'Omite la pantalla de inicio de sesión al encender',
             renderToggle('autologin', autoLogin.enabled)
         ),
-    ]) + renderSection(t('sec_other_users')) + `<div class="detail-card"><div class="sys-users-list">${userListHtml}</div></div>`
-      + `<div style="display:flex;justify-content:flex-end;margin:12px 4px 0">
-            <button class="btn btn-primary btn-sm" id="acc-create-user">+ Crear cuenta nueva</button>
-         </div>`;
+    ]) + renderSection(t('sec_other_users')) + `<div class="detail-card"><div class="sys-users-list">${userListHtml}
+            <button type="button" class="sys-user-item acc-anadir" id="acc-create-user"><span class="sys-user-av-ph">+</span><span class="sys-user-name">${_tr('Añadir usuario…')}</span></button>
+        </div></div>`;
 
     // Diálogo de edición de texto (One UI-style, mismo overlay que showDialog)
     const promptText=(title,val)=>new Promise(res=>{
@@ -2761,13 +2420,13 @@ export async function renderCuentas(c){
                 const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
                 const data=Array.from(new Uint8Array(await blob.arrayBuffer()));
                 const r=JSON.parse(await tauriInvoke('set_avatar_data',{data}));
-                if(r.ok){closeDlg();toast(_tr('Foto actualizada'));renderCuentas(c);}
+                if(r.ok){closeDlg();toast(_tr('Foto actualizada'));window.refrescarUsuario?.();renderCuentas(c);}
                 else toast(_tr('Error al aplicar'),'❌');
             }catch(e){
                 // Canvas tainted u otro fallo del recorte → copiar la imagen tal cual
                 try{
                     const r2=JSON.parse(await tauriInvoke('set_avatar',{sourcePath:path}));
-                    if(r2.ok!==false){closeDlg();toast(_tr('Foto actualizada'));renderCuentas(c);return;}
+                    if(r2.ok!==false){closeDlg();toast(_tr('Foto actualizada'));window.refrescarUsuario?.();renderCuentas(c);return;}
                 }catch(e2){}
                 toast(_tr('Error al aplicar'),'❌');
             }
@@ -2775,8 +2434,7 @@ export async function renderCuentas(c){
     };
     document.getElementById('acc-avatar-btn')?.addEventListener('click',async()=>{
         try{
-            const {open}=window.__TAURI__.dialog;
-            const file=await open({multiple:false,filters:[{name:'Imágenes',extensions:['png','jpg','jpeg','webp']}]});
+            const file=await elegirRuta('open',{multiple:false,filters:[{name:t('images'),extensions:['png','jpg','jpeg','webp']}]});
             if(!file)return;
             avatarCropDialog(file);
         }catch(e){toast(_tr('Error al seleccionar imagen'),'❌');}
@@ -2787,7 +2445,8 @@ export async function renderCuentas(c){
         if(v===null||v===''||v===u.display_name)return;
         const ok=await promptSudo('cambiar el nombre visible','chfn',['-f',v,u.username]);
         if(ok){
-            tauriInvoke('set_display_name',{name:v}).catch(()=>{});
+            await tauriInvoke('set_display_name',{name:v}).catch(()=>{});
+            window.refrescarUsuario?.();
             u.display_name=v;
             const ds=document.getElementById('acc-dn-cur');if(ds)ds.textContent=v;
             const hn=document.getElementById('acc-hero-name');if(hn)hn.textContent=v;
@@ -2902,9 +2561,9 @@ export async function renderCuentas(c){
 
         ov.querySelector('#new-av-pick').onclick=async()=>{
             try{
-                const result=await window.__TAURI__.dialog.open({
+                const result=await elegirRuta('open',{
                     multiple:false,
-                    filters:[{name:'Imágenes',extensions:['png','jpg','jpeg','webp']}]
+                    filters:[{name:t('images'),extensions:['png','jpg','jpeg','webp']}]
                 });
                 if(result){
                     avatarPath=result;
@@ -2947,45 +2606,117 @@ export async function renderCuentas(c){
         ov.querySelector('#new-fullname').focus();
     });
 
-    document.getElementById('acc-change-pw')?.addEventListener('click',()=>{
-        const ov=document.createElement('div');
-        ov.className='bk-overlay';
-        ov.innerHTML=`<div class="bk-dialog" style="min-width:320px">
-            <div class="bk-dialog-title">Cambiar contraseña</div>
-            <div style="padding:0 4px 12px;display:flex;flex-direction:column;gap:10px">
-                <div><label class="ds" style="display:block;margin-bottom:4px">Contraseña actual</label>
-                    <input type="password" id="pw-current" class="sel" placeholder="Contraseña actual" autocomplete="current-password"></div>
-                <div><label class="ds" style="display:block;margin-bottom:4px">Nueva contraseña</label>
-                    <input type="password" id="pw-new" class="sel" placeholder="Nueva contraseña" autocomplete="new-password"></div>
-                <div><label class="ds" style="display:block;margin-bottom:4px">Confirmar nueva</label>
-                    <input type="password" id="pw-confirm" class="sel" placeholder="Confirmar contraseña" autocomplete="new-password"></div>
-                <div id="pw-err" style="font-size:12px;color:var(--red,#e53935);display:none"></div>
-            </div>
-            <div class="bk-dialog-btns">
-                <button class="bk-dbtn cancel" id="pw-cancel">Cancelar</button>
-                <button class="bk-dbtn confirm" id="pw-ok">Cambiar</button>
-            </div>
-        </div>`;
-        document.body.appendChild(ov);
-        const close=()=>ov.remove();
-        ov.querySelector('#pw-cancel').onclick=close;
-        ov.querySelector('#pw-ok').onclick=async()=>{
-            const cur=ov.querySelector('#pw-current').value;
-            const nw=ov.querySelector('#pw-new').value;
-            const cf=ov.querySelector('#pw-confirm').value;
-            const err=ov.querySelector('#pw-err');
-            if(!cur||!nw){err.textContent='Rellena todos los campos';err.style.display='block';return;}
-            if(nw!==cf){err.textContent='Las contraseñas no coinciden';err.style.display='block';return;}
-            if(nw.length<8){err.textContent='La contraseña debe tener al menos 8 caracteres';err.style.display='block';return;}
-            try{
-                const result=JSON.parse(await tauriInvoke('change_password',{username:u.username,oldPwd:cur,newPwd:nw}));
-                if(!result.ok){err.textContent='Contraseña actual incorrecta';err.style.display='block';return;}
-                close();toast('Contraseña cambiada con éxito','🔑');
-            }catch(e){err.textContent='Error al cambiar contraseña';err.style.display='block';}
-        };
-        ov.addEventListener('click',e=>{if(e.target===ov)close();});
-        ov.querySelector('#pw-current').focus();
+    document.getElementById('acc-change-pw')?.addEventListener('click',()=>dialogoContrasena(u.username));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ── Huella y contraseña ────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════
+const NOMBRES_DEDO={'right-index-finger':'Índice derecho','left-index-finger':'Índice izquierdo','right-thumb':'Pulgar derecho','left-thumb':'Pulgar izquierdo',
+    'right-middle-finger':'Corazón derecho','left-middle-finger':'Corazón izquierdo','right-ring-finger':'Anular derecho','left-ring-finger':'Anular izquierdo',
+    'right-little-finger':'Meñique derecho','left-little-finger':'Meñique izquierdo'};
+// fingerprint de Lucide (BookOS-HIG), en línea para que tome el color del texto.
+const HUELLA_SVG=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>`;
+export async function renderHuella(c){
+    const titulo='Huella y contraseña';
+    c.innerHTML=renderHeader(titulo)+renderSkeleton(3);
+    const [u,fp,cfg]=await Promise.all([
+        tauriInvoke('get_user_info').then(JSON.parse).catch(()=>({username:''})),
+        tauriInvoke('list_fingerprints').then(JSON.parse).catch(()=>({available:false,fingers:[],stages:0})),
+        tauriInvoke('bookos_get_config').then(JSON.parse).catch(()=>null),
+    ]);
+    // El orden de DEDOS en main.rs: el siguiente libre es el que se registra.
+    const libre=Object.keys(NOMBRES_DEDO).find(f=>!fp.fingers.includes(f));
+    const dedo=f=>`<button type="button" class="fp-dedo" data-dedo="${f}" title="${esc(_tr('Borrar'))}"><i>${HUELLA_SVG}</i><span>${esc(_tr(NOMBRES_DEDO[f]))}</span></button>`;
+    const huellas=fp.available?`
+        <div class="fp-dedos" id="fp-dedos">
+            ${fp.fingers.map(dedo).join('')}
+            ${libre?`<button type="button" class="fp-dedo fp-anadir" id="fp-anadir"><i>+</i><span>${_tr('Añadir huella')}</span></button>`:''}
+        </div>
+        <div class="fp-registro" id="fp-registro" hidden>
+            <div class="fp-anillo" id="fp-anillo"><i>${HUELLA_SVG}</i></div>
+            <span class="dt" id="fp-estado"></span>
+        </div>`
+        :`<div class="detail-card">${renderInfoItem('No se encontró un lector de huellas','Si el equipo tiene uno, comprueba que fprintd está instalado.')}</div>`;
+    c.innerHTML=renderHeader(titulo)
+        +renderSection('Contraseña')+renderCard([
+            `<div class="detail-item detail-item-row" style="cursor:pointer" id="fp-pw" role="button" tabindex="0">
+                <div class="detail-texts"><span class="dt">${_tr('Tu cuenta tiene contraseña')}</span></div>${chevron()}
+            </div>`])
+        +renderSection('Huella')
+        +`<p class="ds fp-intro">${_tr('Desbloquea el equipo y autoriza cambios del sistema con tu huella. Se guarda en el lector y no sale del equipo.')}</p>`
+        +huellas
+        +(fp.available&&cfg?renderCard([renderRowItem('Desbloquear con huella','La contraseña sigue disponible en la pantalla de bloqueo',renderToggle('bloqueo_huella',!!cfg.bloqueo_huella)).replace('class="ds"','class="ds" data-custom="1"')]):'');
+    c.querySelector('#fp-pw').addEventListener('click',()=>dialogoContrasena(u.username));
+    setupToggle('bloqueo_huella',async v=>{await tauriInvoke('bookos_apply_config',{config:{bloqueo_huella:v}});toast(_tr('Guardado'));});
+    c.querySelectorAll('.fp-dedo[data-dedo]').forEach(b=>b.addEventListener('click',()=>{
+        const f=b.dataset.dedo;
+        showDialog(_tr('Borrar huella'),`${_tr('Se borrará la huella del')} ${esc(_tr(NOMBRES_DEDO[f]).toLowerCase())}.`,{confirmText:_tr('Borrar'),confirmClass:'danger',
+            onConfirm:async()=>{
+                try{await tauriInvoke('delete_fingerprint',{finger:f});renderHuella(c);}
+                catch(e){toast(String(e),'❌');}
+            }});
+    }));
+    c.querySelector('#fp-anadir')?.addEventListener('click',async()=>{
+        const panel=c.querySelector('#fp-registro'),anillo=c.querySelector('#fp-anillo'),estado=c.querySelector('#fp-estado');
+        c.querySelector('#fp-dedos').hidden=true;panel.hidden=false;
+        const total=fp.stages||10;
+        const pintar=(n,texto)=>{anillo.style.setProperty('--p',`${Math.min(n/total,1)*100}%`);estado.textContent=_tr(texto);};
+        pintar(0,'Apoya el dedo en el lector y levántalo');
+        const dejar=await window.__TAURI__.event.listen('fp-progress',ev=>{
+            const {stage,retry,done}=ev.payload;
+            if(done)pintar(total,'Huella registrada');
+            else if(retry){pintar(stage,'No se leyó bien: vuelve a apoyarlo');anillo.classList.remove('fp-mal');void anillo.offsetWidth;anillo.classList.add('fp-mal');}
+            else pintar(stage,'Levanta y apóyalo otra vez, moviéndolo un poco');
+        });
+        try{
+            const r=JSON.parse(await tauriInvoke('enroll_fingerprint',{finger:libre}));
+            toast(_tr(r.ok?'Huella registrada':'No se pudo registrar la huella'),r.ok?'✓':'❌');
+        }catch(e){toast(String(e),'❌');}
+        // Un momento con el anillo completo a la vista antes de volver a la lista.
+        finally{dejar();setTimeout(()=>renderHuella(c),900);}
     });
+}
+
+// Lo usan Cuentas y Huella y contraseña: un solo diálogo para la misma acción.
+function dialogoContrasena(username){
+    const ov=document.createElement('div');
+    ov.className='bk-overlay';
+    ov.innerHTML=`<div class="bk-dialog" style="min-width:320px">
+        <div class="bk-dialog-title">Cambiar contraseña</div>
+        <div style="padding:0 4px 12px;display:flex;flex-direction:column;gap:10px">
+            <div><label class="ds" style="display:block;margin-bottom:4px">Contraseña actual</label>
+                <input type="password" id="pw-current" class="sel" placeholder="Contraseña actual" autocomplete="current-password"></div>
+            <div><label class="ds" style="display:block;margin-bottom:4px">Nueva contraseña</label>
+                <input type="password" id="pw-new" class="sel" placeholder="Nueva contraseña" autocomplete="new-password"></div>
+            <div><label class="ds" style="display:block;margin-bottom:4px">Confirmar nueva</label>
+                <input type="password" id="pw-confirm" class="sel" placeholder="Confirmar contraseña" autocomplete="new-password"></div>
+            <div id="pw-err" style="font-size:12px;color:var(--red,#e53935);display:none"></div>
+        </div>
+        <div class="bk-dialog-btns">
+            <button class="bk-dbtn cancel" id="pw-cancel">Cancelar</button>
+            <button class="bk-dbtn confirm" id="pw-ok">Cambiar</button>
+        </div>
+    </div>`;
+    document.body.appendChild(ov);
+    const close=()=>ov.remove();
+    ov.querySelector('#pw-cancel').onclick=close;
+    ov.querySelector('#pw-ok').onclick=async()=>{
+        const cur=ov.querySelector('#pw-current').value;
+        const nw=ov.querySelector('#pw-new').value;
+        const cf=ov.querySelector('#pw-confirm').value;
+        const err=ov.querySelector('#pw-err');
+        if(!cur||!nw){err.textContent='Rellena todos los campos';err.style.display='block';return;}
+        if(nw!==cf){err.textContent='Las contraseñas no coinciden';err.style.display='block';return;}
+        if(nw.length<8){err.textContent='La contraseña debe tener al menos 8 caracteres';err.style.display='block';return;}
+        try{
+            const result=JSON.parse(await tauriInvoke('change_password',{username,oldPwd:cur,newPwd:nw}));
+            if(!result.ok){err.textContent='Contraseña actual incorrecta';err.style.display='block';return;}
+            close();toast('Contraseña cambiada con éxito','🔑');
+        }catch(e){err.textContent='Error al cambiar contraseña';err.style.display='block';}
+    };
+    ov.addEventListener('click',e=>{if(e.target===ov)close();});
+    ov.querySelector('#pw-current').focus();
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -3005,7 +2736,7 @@ export async function renderMantenimiento(c){
         b.onclick=async()=>{
             const origText=b.textContent;
             b.textContent='…';b.disabled=true;
-            try{await tauriInvoke('run_maintenance',{target});b.textContent='✓';toast('Limpieza completada','🧹');}
+            try{await tauriInvoke('run_maintenance',{target});b.innerHTML=ico('check',{size:15});toast('Limpieza completada','🧹');}
             catch(e){b.textContent='Error';toast('Error en limpieza','❌');}
             setTimeout(()=>{b.textContent=origText;b.disabled=false;},2000);
         };
@@ -3014,13 +2745,13 @@ export async function renderMantenimiento(c){
     
     document.getElementById('m-exp')?.addEventListener('click', async()=>{
         try {
-            const dest = await window.__TAURI__.dialog.save({defaultPath:'bookos_settings.json', filters:[{name:'JSON',extensions:['json']}]});
+            const dest = await elegirRuta('save',{defaultPath:'bookos_settings.json', filters:[{name:'JSON',extensions:['json']}]});
             if(dest) { await tauriInvoke('export_settings', {dest}); toast('Ajustes exportados a '+dest); }
         } catch(e){ toast('No se pudieron exportar los ajustes','❌'); }
     });
     document.getElementById('m-imp')?.addEventListener('click', async()=>{
         try {
-            const src = await window.__TAURI__.dialog.open({filters:[{name:'JSON',extensions:['json']}]});
+            const src = await elegirRuta('open',{filters:[{name:'JSON',extensions:['json']}]});
             if(src) { await tauriInvoke('import_settings', {src}); toast('Ajustes importados'); setTimeout(()=>location.reload(), 1500); }
         } catch(e){ toast('No se pudieron importar los ajustes','❌'); }
     });
@@ -3035,33 +2766,65 @@ function nombreFondo(path){
     const base=String(path).split('/').pop().replace(/\.[^.]+$/,'').replace(/[_-](dark|light|oscuro|claro)$/i,'').replace(/[_-]+/g,' ').trim();
     return base?base.charAt(0).toLocaleUpperCase()+base.slice(1):_tr('Fondo de pantalla');
 }
+const _esVideo=p=>/\.(mp4|webm|mkv|mov|m4v)$/i.test(p);
+const _ICONO_PAREJA=`<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>`;
+const _ICONO_VIDEO=`<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+// Se ven los primeros de «Tus fondos»; el resto con «Mostrar todos». Las
+// carpetas de imágenes pueden tener cientos y cada tarjeta es una miniatura.
+const _FONDOS_VISIBLES=11;
 export async function renderFondos(c){
     const pageEpoch=window._navEpoch;
     c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderSkeleton(2);
-    let current='';
-    try{current=JSON.parse(await tauriInvoke('get_current_wallpaper')).path||'';}catch(e){}
+    const [current,wallpapers]=await Promise.all([
+        tauriInvoke('get_current_wallpaper').then(r=>JSON.parse(r).path||'').catch(()=>''),
+        tauriInvoke('get_wallpapers').then(JSON.parse).catch(()=>null),
+    ]);
+    if(window._navEpoch!==pageEpoch)return;
+    if(!wallpapers){
+        c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderError('No se pudieron cargar los fondos de pantalla',{onRetry:()=>renderFondos(c)});
+        return;
+    }
+    // Las dos mitades de una pareja de BookOS son el mismo fondo: en tema
+    // oscuro el actual es `Dark/purple_dark.png` y la galería enseña
+    // `Light/purple.png`. Comparando rutas salía dos veces y ninguna marcada.
+    const _clave=p=>String(p).replace('/Dark/','/Light/').replace(/_dark(\.\w+)$/,'$1');
+    const _mismoFondo=(a,b)=>!!a&&!!b&&_clave(a)===_clave(b);
+    if(current&&!wallpapers.some(w=>_mismoFondo(w.path,current)))
+        wallpapers.unshift({name:nombreFondo(current),path:current,thumbnail:current,dark:'',origen:'usuario'});
+    const tipo=w=>w?.dark?'Claro y oscuro: cambia con el tema':_esVideo(w?.path||'')?'Vídeo':'Imagen';
+    const img=(path,extra='')=>`<img data-preview-path="${esc(path)}" class="wp-card-img${extra}" decoding="async" alt="" onerror="this.style.opacity='0'">`;
+    const tarjeta=w=>{
+        const on=_mismoFondo(w.path,current);
+        return `<button type="button" class="fnd-tarjeta${on?' active':''}" data-path="${esc(w.path)}" aria-pressed="${on}" aria-label="${esc(nombreFondo(w.path))}">
+            <span class="fnd-miniatura">${img(w.thumbnail||w.path)}${w.dark?img(w.dark,' fnd-oscura'):''}${w.dark?`<span class="fnd-insignia" title="${esc(_tr('Claro y oscuro'))}">${_ICONO_PAREJA}</span>`:_esVideo(w.path)?`<span class="fnd-insignia">${_ICONO_VIDEO}</span>`:''}</span>
+            <span class="fnd-nombre-tarjeta">${esc(nombreFondo(w.path))}</span>
+        </button>`;
+    };
+    const bookos=wallpapers.filter(w=>w.origen==='bookos'),tuyos=wallpapers.filter(w=>w.origen!=='bookos');
+    const seccion=(titulo,n,extra='')=>`<div class="fnd-seccion"><span>${_tr(titulo)}</span>${extra||(n?`<span class="fnd-cuenta">${n}</span>`:'')}</div>`;
+    const mas=tuyos.length>_FONDOS_VISIBLES?`<button type="button" class="fnd-mas" data-wp-more>${_tr('Mostrar todos')} (${tuyos.length})</button>`:'';
 
-    let wallpapers=[];
-    const currentWp={path:current,name:nombreFondo(current)};
-
-    const desktopPreview=()=>`        <div class="wp-desktop-screen" id="wp-screen">
-            <img data-preview-path="${esc(currentWp.path)}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
+    c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+`<div class="fnd-cab">
+        <div class="wp-desktop-screen fnd-vista" id="wp-screen" aria-hidden="true">
+            <img data-preview-path="${esc(current)}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
+            <span class="fnd-panel"></span><span class="fnd-dock"><i></i><i></i><i></i><i></i><i></i></span>
         </div>
-`;
-
-    let h=renderHeader(t('hdr_wallpaper_style'));
-    // The current name and controls are cheap; previews are created on demand.
-    h += `<div class="wp-hero-card">
-        <div id="wp-preview-host"></div>
-        <button class="wp-change-btn" id="btn-change-wp">${_tr("Cambiar fondo de pantalla")}</button>
-        <div id="wp-grid" class="wp-grid-panel" style="display:none"></div>
-    </div>`;
-
-    // ── Paleta de colores dinámica de BookOS (Material-You-like) ──
-    // Antes vivía en Temas; tiene más sentido aquí porque la paleta sale
-    // del fondo de pantalla, no del tema claro/oscuro. Elegir NO aplica:
-    // solo repinta las maquetas de arriba. Solo se guarda con "Aplicar".
-    h += `<div class="theme-block dyn-off" id="dyn-block">
+        <div class="theme-block fnd-info">
+            <span class="fnd-nombre" id="fnd-nombre">${esc(nombreFondo(current))}</span>
+            <span class="ds" id="fnd-tipo">${_tr(tipo(wallpapers.find(w=>_mismoFondo(w.path,current))))}</span>
+            <button type="button" class="btn btn-secondary fnd-anadir" data-wp-add>${SVGI.plus}<span>${_tr('Añadir fondo…')}</span></button>
+        </div>
+    </div>
+    <div id="wp-grid">
+        ${bookos.length?seccion('Fondos de BookOS',bookos.length)+`<div class="wallpaper-grid">${bookos.map(tarjeta).join('')}</div>`:''}
+        ${seccion('Tus fondos',tuyos.length,mas)}
+        <div class="wallpaper-grid" id="fnd-tuyos">
+            <button type="button" class="fnd-anadir-tarjeta" data-wp-add>${SVGI.plus.replace(/width="16" height="16"/,'width="22" height="22"')}<span>${_tr('Añadir…')}</span></button>
+            ${tuyos.slice(0,_FONDOS_VISIBLES).map(tarjeta).join('')}
+        </div>
+    </div>
+    ${renderSection('Paleta de colores')}
+    <div class="theme-block dyn-off" id="dyn-block">
         <div class="dyn-mockups" id="dyn-mockups"></div>
         ${renderRowItem('Paleta dinámica de BookOS','Tiñe las apps y el acento del escritorio con los colores de tu fondo',renderToggle('dyncolor',false))}
         <div id="dyn-body" style="display:none">
@@ -3076,141 +2839,57 @@ export async function renderFondos(c){
             <button class="dyn-apply" id="dyn-apply" disabled>${_tr('Aplicar')}</button>
         </div>
     </div>`;
+    const updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
+    const grid=c.querySelector('#wp-grid');
 
-
-    if(window._navEpoch!==pageEpoch)return;
-    c.innerHTML=h;
-
-    // La vista previa con el fondo va desde el principio: antes solo salía al
-    // abrir la galería y la tarjeta enseñaba nada más que el nombre del archivo.
-    c.querySelector('#wp-preview-host').innerHTML=desktopPreview();
-    let updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
-
-    const pageGrid=c.querySelector('#wp-grid');
-
-    // Drop any leftover FAB from a previous render of this page.
-    document.getElementById('wp-add-fab')?.remove();
-
-    // Add new wallpapers from disk → copy into ~/.local/share/wallpapers.
-    const _addWallpapers=async()=>{
+    // Añadir copia a ~/.local/share/wallpapers y vuelve a pintar la página.
+    const anadir=async()=>{
         try{
-            const {open}=window.__TAURI__.dialog;
-            const sel=await open({multiple:true,filters:[{name:'Imágenes',extensions:['png','jpg','jpeg','webp']}]});
+            const sel=await elegirRuta('open',{multiple:true,filters:[{name:_tr('Imágenes y vídeos'),extensions:['png','jpg','jpeg','webp','mp4','webm','mkv','mov','m4v']}]});
             if(!sel)return;
             const paths=Array.isArray(sel)?sel:[sel];
             if(!paths.length)return;
             const res=JSON.parse(await tauriInvoke('add_wallpapers',{paths}));
-            if(res.ok){
-                toast(res.added>1?`${res.added} fondos añadidos`:'Fondo añadido','🖼️');
-                if(!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
-                await renderFondos(c); // re-render so new wallpapers appear
-                document.getElementById('btn-change-wp')?.click(); // keep grid open
-            }else{toast('Error al añadir fondo','❌');}
+            if(!res.ok){toast('Error al añadir fondo','❌');return;}
+            toast(res.added>1?`${res.added} fondos añadidos`:'Fondo añadido','🖼️');
+            if(grid.isConnected&&window._navEpoch===pageEpoch)await renderFondos(c);
         }catch(e){toast('Error al añadir fondo','❌');}
     };
-
-    // The "+" FAB must stay fixed to the viewport, but #app's page-enter/fadeIn
-    // animation makes it a containing block for position:fixed (FAB would scroll
-    // with content). So we mount the FAB on document.body and auto-remove it when
-    // the wallpaper grid leaves the DOM (page navigation).
-    const _mountFab=()=>{
-        if(!pageGrid.isConnected||window._navEpoch!==pageEpoch||pageGrid.style.display==='none')return;
-        if(document.getElementById('wp-add-fab'))return;
-        const fab=document.createElement('button');
-        fab.id='wp-add-fab';fab.className='wp-add-fab';
-        fab.title=_tr('Añadir fondo de pantalla');
-        fab.setAttribute('aria-label',_tr('Añadir fondo de pantalla'));
-        fab.innerHTML=SVGI.plus;
-        fab.addEventListener('click',_addWallpapers);
-        document.body.appendChild(fab);
-        // El router reemplaza los hijos de #app, que está dentro de
-        // .detail-view. Observar solo .detail-view no detectaba la salida.
-        const cleanup=()=>{fab.remove();obs.disconnect();};
-        const obs=new MutationObserver(()=>{
-            if(!pageGrid.isConnected)cleanup();
-        });
-        // La galería ahora vive dentro de la tarjeta, que no cambia al
-        // navegar: se observa el contenedor de la página. #app y no `c`: `c`
-        // es el Proxy de guardedContainer, observe() lo rechaza por no ser un
-        // Node, y la excepción dejaba la galería en «Cargando…» para siempre.
-        obs.observe(document.getElementById('app'),{childList:true});
-        (window._pageCleanups ||= []).push(cleanup);
-    };
-
-    // Las dos mitades de una pareja de BookOS son el mismo fondo: en tema
-    // oscuro el actual es `Dark/purple_dark.png` y la galería enseña
-    // `Light/purple.png`. Comparando rutas salía dos veces y ninguna marcada.
-    const _clave=p=>String(p).replace('/Dark/','/Light/').replace(/_dark(\.\w+)$/,'$1');
-    const _mismoFondo=(a,b)=>!!a&&!!b&&_clave(a)===_clave(b);
-    let loading=false,loaded=false,shown=0;
-    const appendCards=()=>{
-        const grid=pageGrid.querySelector('.wallpaper-grid');
-        const batch=wallpapers.slice(shown,shown+24);
-        grid.insertAdjacentHTML('beforeend',batch.map(w=>{
-            const active=_mismoFondo(w.path,currentWp.path);
-            return `<button type="button" class="wallpaper-card ${active?'active':''}" data-path="${esc(w.path)}" aria-pressed="${active}" aria-label="${esc(w.name)}"><img data-preview-path="${esc(w.thumbnail||w.path)}" class="wp-card-img" decoding="async" alt="" onerror="this.style.opacity='0'"><span class="wp-name">${esc(nombreFondo(w.path))}</span></button>`;
-        }).join(''));
-        shown+=batch.length;
-        pageGrid.querySelector('[data-wp-more]').hidden=shown>=wallpapers.length;
-        updatePreview?.observe(grid);
-    };
-    const openPicker=async()=>{
-        if(loading||!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
-        if(loaded){
-            const hidden=pageGrid.style.display==='none';
-            pageGrid.style.display=hidden?'block':'none';
-            if(hidden){_mountFab();pageGrid.scrollIntoView({behavior:'instant',block:'nearest'});}
-            else document.getElementById('wp-add-fab')?.remove();
-            return;
-        }
-        loading=true;
-        const button=c.querySelector('#btn-change-wp');
-        button.disabled=true;
-        pageGrid.style.display='block';
-        pageGrid.innerHTML=renderLoading();
-        _mountFab();
-        try{
-            wallpapers=JSON.parse(await tauriInvoke('get_wallpapers'));
-            if(!pageGrid.isConnected||window._navEpoch!==pageEpoch)return;
-            if(currentWp.path&&!wallpapers.some(w=>_mismoFondo(w.path,currentWp.path)))wallpapers.unshift(currentWp);
-            pageGrid.innerHTML=`<div class="wallpaper-grid"></div><button type="button" class="wp-change-btn" data-wp-more>${_tr('Mostrar más')}</button>`;
-            if(!wallpapers.length)pageGrid.querySelector('.wallpaper-grid').textContent=_tr('No se encontraron fondos de pantalla');
-            updatePreview?.observe(pageGrid);
-            appendCards();
-            c.querySelector('#dyn-mockups')?.dispatchEvent(new Event('wp-preview-opened'));
-            loaded=true;
-            pageGrid.scrollIntoView({behavior:'instant',block:'nearest'});
-        }catch(e){
-            pageGrid.innerHTML=renderError('No se pudieron cargar los fondos de pantalla',{onRetry:openPicker});
-        }finally{loading=false;button.disabled=false;}
-    };
-    c.querySelector('#btn-change-wp').addEventListener('click',openPicker);
-    pageGrid.addEventListener('click',e=>{
-        if(e.target.closest('[data-wp-more]'))appendCards();
-    });
-    // Apply the BookOS accent so it takes effect live.
-    let applyingWallpaper=false;
-    pageGrid.addEventListener('click',async e=>{
-        const card=e.target.closest('.wallpaper-card');
-        if(!card)return;
-        if(applyingWallpaper||card.classList.contains('active'))return;
-        applyingWallpaper=true;
+    let aplicando=false;
+    const aplicar=async card=>{
+        if(aplicando||card.classList.contains('active'))return;
+        aplicando=true;
         try{parseServiceResult(await tauriInvoke('set_wallpaper',{path:card.dataset.path}));}
         catch(e){toast('Error al aplicar fondo','❌');return;}
-        finally{applyingWallpaper=false;}
+        finally{aplicando=false;}
         if(!card.isConnected)return;
         _dynSeedsCache={wallpaper:'',seeds:[]}; // el fondo cambió: la caché de semillas ya no vale
-        pageGrid.querySelectorAll('.wallpaper-card').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-pressed','false');});
-        card.classList.add('active');
-        card.setAttribute('aria-pressed','true');
-        // Update preview immediately
-        const previewImg=document.getElementById('wp-screen-img');
-        currentWp.path=card.dataset.path;
-        updatePreview(previewImg,card.dataset.path);
+        grid.querySelectorAll('.fnd-tarjeta').forEach(x=>{const on=x===card;x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on));});
+        const w=wallpapers.find(x=>x.path===card.dataset.path);
+        c.querySelector('#fnd-nombre').textContent=nombreFondo(card.dataset.path);
+        c.querySelector('#fnd-tipo').textContent=_tr(tipo(w));
+        updatePreview(document.getElementById('wp-screen-img'),card.dataset.path);
+        c.querySelector('#dyn-body')?.dispatchEvent(new CustomEvent('wallpaper-changed',{detail:{path:card.dataset.path}}));
         toast('Fondo de pantalla aplicado','🖼️');
+    };
+    c.querySelectorAll('[data-wp-add]').forEach(b=>b.addEventListener('click',anadir));
+    grid.addEventListener('click',e=>{
+        const card=e.target.closest('.fnd-tarjeta');
+        if(card){aplicar(card);return;}
+        const masBtn=e.target.closest('[data-wp-more]');
+        if(masBtn){
+            const lista=c.querySelector('#fnd-tuyos');
+            lista.insertAdjacentHTML('beforeend',tuyos.slice(_FONDOS_VISIBLES).map(tarjeta).join(''));
+            updatePreview.observe(lista);
+            masBtn.remove();
+        }
     });
 
-    setupDynamicColor(currentWp.path);
+    setupDynamicColor(current);
+    // Las maquetas de la paleta esperaban a que se abriera la galería, que
+    // antes iba plegada. Ahora la galería está siempre: se pintan ya. Después
+    // de setupDynamicColor, que es quien escucha el evento.
+    c.querySelector('#dyn-mockups')?.dispatchEvent(new Event('wp-preview-opened'));
 }
 // ── Paleta de colores ────────────────────────────────────────────────────
 // Dos pasos, como en Android: se elige un color (del fondo o de la lista
@@ -3248,7 +2927,7 @@ function _dynStrip(p,seed,active){
     const bands=[band('primary',7),band('tertiary',5),band('secondary',3),band('neutral',6)];
     return `<button class="dyn-strip${active?' on':''}" data-seed="${seed}">
         ${bands.map(c=>`<i style="background:${c}"></i>`).join('')}
-        <span class="dyn-strip-check">✓</span>
+        <span class="dyn-strip-check">${ico('check',{size:14,sw:3})}</span>
     </button>`;
 }
 
@@ -3323,6 +3002,10 @@ async function setupDynamicColor(current){
     let tab='wall';
     let sel={seed:'',style:'vibrant'};  // elección en curso (aún sin aplicar)
     let applied={seed:'',style:''};     // lo que está puesto de verdad
+    // La hoja que está puesta, tal cual está en disco. No se recalcula desde
+    // `applied`: si el generador ha cambiado desde que se aplicó, recalcularla
+    // da otros colores y la app cambiaba de color solo con abrir la página.
+    let appliedCss='';
     let previewCache={};                // "seed|style" → paleta, para no repetir IPC
 
     const block=body.closest('#dyn-block');
@@ -3357,7 +3040,9 @@ async function setupDynamicColor(current){
         // Previsualización de verdad: tiñe Ajustes entero mientras se elige,
         // no solo las maquetas de arriba. Nada se escribe a disco aquí, así
         // que otras apps de BookOS no se enteran hasta que se pulse "Aplicar".
-        if(cur)previewPaletteCss(paletteToCss(cur));
+        const elegido=sel.seed!==applied.seed||sel.style!==applied.style;
+        if(elegido&&cur)previewPaletteCss(paletteToCss(cur));
+        else if(!elegido)previewPaletteCss(appliedCss);
 
         // Antes esto era un cuadro pálido casi vacío con tres puntos diminutos
         // flotando en medio — apenas se notaba la diferencia entre estilos. La
@@ -3394,7 +3079,7 @@ async function setupDynamicColor(current){
         // ImageMagick por completo.
         if(_dynSeedsCache.seeds.length&&_dynSeedsCache.wallpaper===current){
             seeds=_dynSeedsCache.seeds;
-            if(!seeds.includes(sel.seed))sel.seed=seeds[0];
+            if(!sel.seed)sel.seed=seeds[0];
             return true;
         }
         stripsEl.innerHTML=`<span class="dyn-hint">${_tr('Leyendo el fondo de pantalla…')}</span>`;
@@ -3406,13 +3091,31 @@ async function setupDynamicColor(current){
             }
             seeds=r.seeds;
             _dynSeedsCache={wallpaper:r.wallpaper||current,seeds};
-            if(!seeds.includes(sel.seed))sel.seed=seeds[0];
+            // La semilla aplicada puede no estar entre las de este fondo (se
+            // eligió con otro, o de los colores básicos). Antes se cambiaba por
+            // la primera del fondo y `repaint` la previsualizaba en toda la
+            // app: con un fondo oscuro era #111111 y Ajustes entero se volvía
+            // gris solo con abrir la página. Solo se propone la primera si no
+            // hay nada aplicado.
+            if(!sel.seed)sel.seed=seeds[0];
             return true;
         }catch(e){
             stripsEl.innerHTML=`<span class="dyn-hint">${_tr('No se pudo leer el fondo de pantalla')}</span>`;
             return false;
         }
     };
+
+    body.addEventListener('wallpaper-changed',async e=>{
+        current=e.detail.path;
+        const st=await syncPalette();
+        if(!st||!body.isConnected)return;
+        applied={seed:st.seed||'',style:st.style||'vibrant'};
+        appliedCss=st.enabled?(st.css||''):'';
+        sel={...applied};
+        tab='wall';
+        document.querySelectorAll('.dyn-tab').forEach(b=>b.classList.toggle('on',b.dataset.tab==='wall'));
+        if(st.enabled&&await loadSeeds())await repaint();
+    });
 
     // Los iconos son ~8k SVG reescritos: se tocan solo al aplicar, y solo si el
     // interruptor lo pide.
@@ -3430,7 +3133,8 @@ async function setupDynamicColor(current){
         try{
             const r=JSON.parse(await tauriInvoke('dynamic_color_apply',{seed:sel.seed,style:sel.style}));
             if(r.ok){
-                installPaletteCss(paletteToCss(r.palette));
+                appliedCss=paletteToCss(r.palette);
+                installPaletteCss(appliedCss);
                 applied={seed:sel.seed,style:sel.style};
                 applyIcons(sel.seed);
                 toast(_tr('Paleta aplicada'));
@@ -3453,6 +3157,7 @@ async function setupDynamicColor(current){
     if(st){
         sel={seed:st.seed||'',style:st.style||'vibrant'};
         applied={seed:st.seed||'',style:st.style||''};
+        appliedCss=st.enabled?(st.css||''):'';
         const tg=document.querySelector('[data-toggle="dyncolor"]');
         if(tg&&st.enabled){tg.classList.add('active');tg.setAttribute('aria-checked','true');}
         const ti=document.querySelector('[data-toggle="dyniconos"]');
@@ -3464,14 +3169,7 @@ async function setupDynamicColor(current){
     // Deshace la previsualización si se sale de la página (o se apaga el
     // interruptor) sin pulsar "Aplicar": vuelve a lo que estaba puesto de
     // verdad, no a los colores por defecto de la app.
-    const revertPreview=async()=>{
-        if(applied.seed){
-            const p=await preview(applied.seed,applied.style);
-            installPaletteCss(p?paletteToCss(p):'');
-        }else{
-            installPaletteCss('');
-        }
-    };
+    const revertPreview=()=>installPaletteCss(appliedCss);
 
     setupToggle('dyncolor',async on=>{
         show(on);
@@ -3479,14 +3177,19 @@ async function setupDynamicColor(current){
         // el mismo fondo, solo que para el escritorio. Ahora va con la paleta.
         await setSetting('ColorPalette',on?'true':'false');
         if(on){
-            if(await loadSeeds())await repaint();
+            // Primero el backend, que reescribe la hoja en disco; luego se lee
+            // para que `appliedCss` sea esa y no la de antes de encender.
             try{await tauriInvoke('dynamic_color_set_enabled',{enabled:true});}catch(e){}
+            const st=await syncPalette();
+            appliedCss=st?.enabled?(st.css||''):'';
+            if(await loadSeeds())await repaint();
             try{parseServiceResult(await tauriInvoke('sync_desktop_accent'));}
             catch(e){toast('No se pudo cambiar el acento del escritorio','❌');}
         }else{
             try{await tauriInvoke('dynamic_color_set_enabled',{enabled:false});}catch(e){}
             installPaletteCss('');
             applied={seed:'',style:''};
+            appliedCss='';
             toast(_tr('Paleta de colores desactivada'));
         }
     });
@@ -3579,13 +3282,13 @@ const RB_ACTIONS=[
     {type:'dnd',           svg:SVGI.bellOff,  label:'No molestar',        valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Notificaciones'},
 ];
 
-function rbTriggerLabel(t){const d=RB_TRIGGERS.find(x=>x.type===t.type);return d?(d.label+(t.value?' — '+t.value:'')):t.type;}
+function rbTriggerLabel(t){const d=RB_TRIGGERS.find(x=>x.type===t.type);return d?(_tr(d.label)+(t.value?' — '+t.value:'')):t.type;}
 function rbActionLabel(a){
     const d=RB_ACTIONS.find(x=>x.type===a.type);
     if(!d)return a.type;
-    if(d.valueType==='range')return d.label+' — '+a.value+'%';
-    if(d.valueType==='select'||d.valueType==='toggle_val'){const o=(d.options||[]).find(x=>x[0]===a.value);return d.label+' — '+(o?o[1]:a.value);}
-    return d.label;
+    if(d.valueType==='range')return _tr(d.label)+' — '+a.value+'%';
+    if(d.valueType==='select'||d.valueType==='toggle_val'){const o=(d.options||[]).find(x=>x[0]===a.value);return _tr(d.label)+' — '+(o?_tr(o[1]):a.value);}
+    return _tr(d.label);
 }
 
 function renderRoutinesList(routines){
@@ -3602,10 +3305,10 @@ function renderRoutinesList(routines){
                 <div class="routine-item-info">
                     <span class="routine-item-name">${esc(r.name||'Rutina')}</span>
                     <span class="routine-item-desc">${esc(
-                        (r.triggers[0]?rbTriggerLabel(r.triggers[0]):'Sin disparador')
+                        (r.triggers[0]?rbTriggerLabel(r.triggers[0]):_tr('Sin disparador'))
                         +' → '
-                        +(r.actions[0]?rbActionLabel(r.actions[0]):'Sin acción')
-                        +(r.actions.length>1?' +'+( r.actions.length-1)+' más':'')
+                        +(r.actions[0]?rbActionLabel(r.actions[0]):_tr('Sin acción'))
+                        +(r.actions.length>1?' +'+( r.actions.length-1)+' '+_tr('más'):'')
                     )}</span>
                 </div>
                 <div class="routine-item-actions">
@@ -3959,15 +3662,15 @@ export async function renderAplicaciones(c){
 
     // Per-role metadata: fallback glyph + label.
     const roleMeta={
-        browser:{glyph:'🌐',label:_tr('Navegador web')},
-        email:{glyph:'✉️',label:_tr('Cliente de correo')},
-        filemanager:{glyph:'📁',label:_tr('Gestor de archivos')},
-        image:{glyph:'🖼️',label:_tr('Imágenes')},
-        video:{glyph:'🎬',label:_tr('Vídeo')},
-        audio:{glyph:'🎵',label:_tr('Audio')},
-        pdf:{glyph:'📄',label:_tr('Documentos PDF')},
-        text:{glyph:'📝',label:_tr('Archivos de texto')},
-        archive:{glyph:'🗜️',label:_tr('Archivos comprimidos')},
+        browser:{glyph:ico('globe',{size:22}),label:_tr('Navegador web')},
+        email:{glyph:ico('mail',{size:22}),label:_tr('Cliente de correo')},
+        filemanager:{glyph:ico('folder',{size:22}),label:_tr('Gestor de archivos')},
+        image:{glyph:ico('image',{size:22}),label:_tr('Imágenes')},
+        video:{glyph:ico('film',{size:22}),label:_tr('Vídeo')},
+        audio:{glyph:ico('music',{size:22}),label:_tr('Audio')},
+        pdf:{glyph:ico('file-text',{size:22}),label:_tr('Documentos PDF')},
+        text:{glyph:ico('notepad-text',{size:22}),label:_tr('Archivos de texto')},
+        archive:{glyph:ico('archive',{size:22}),label:_tr('Archivos comprimidos')},
     };
     const order=['browser','email','filemanager','image','video','audio','pdf','text','archive'];
 
@@ -3976,7 +3679,10 @@ export async function renderAplicaciones(c){
     const appIconHtml=(cur,glyph)=>{
         const ic=appIconUrl(cur&&cur.id,cur&&cur.icon);
         if(ic){
-            return `<img src="${ic}" class="app-def-img" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'app-def-glyph',textContent:'${glyph}'}))">`;
+            // Si el icono real no carga, se enseña el glifo de Lucide que va
+            // escondido detrás (un atributo onerror no puede llevar un SVG
+            // dentro sin escapes).
+            return `<img src="${ic}" class="app-def-img" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><div class="app-def-glyph" hidden>${glyph}</div>`;
         }
         return `<div class="app-def-glyph">${glyph}</div>`;
     };
@@ -4102,29 +3808,6 @@ const _BUDS_ANC_MODES = [
     {idx:3, label:'Adaptativo'},
 ];
 
-// ── Connection popup modal (Samsung-style) ──
-function _showBudsConnectModal(name, phase){
-    let m=document.getElementById('buds-conn-modal');
-    if(!m){
-        m=document.createElement('div');
-        m.id='buds-conn-modal';
-        m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s ease';
-        document.body.appendChild(m);
-    }
-    const icon = phase==='ok'
-        ? '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>'
-        : phase==='fail'
-        ? '<svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
-        : `<div style="width:52px;height:52px;border:4px solid var(--brd);border-top-color:var(--blue);border-radius:50%;animation:spin 1s linear infinite"></div>`;
-    const label = phase==='ok'?'Conectado':phase==='fail'?'No se pudo conectar':'Conectando...';
-    m.innerHTML=`<div style="background:var(--card);border-radius:20px;padding:28px 32px;min-width:260px;display:flex;flex-direction:column;align-items:center;gap:14px;box-shadow:0 12px 40px rgba(0,0,0,.3)">
-        ${icon}
-        <div style="font-size:16px;font-weight:600;color:var(--tx);text-align:center">${esc(name)}</div>
-        <div style="font-size:13px;color:var(--tx2)">${label}</div>
-    </div>`;
-    if(phase==='ok'||phase==='fail'){setTimeout(()=>m.remove(),1200);}
-}
-
 // ── Buds: Administrar conexiones submenu ───────────────────────────────
 async function _renderBudsConn(c, device){
     if(window.pushSubNav) window.pushSubNav(()=>_renderBudsDetail(c,device));
@@ -4244,6 +3927,8 @@ async function _renderBudsDetail(c, device){
     // Try SPP connection to get real buds status
     let status = {connected:false,battery_l:0,battery_r:0,battery_case:0,anc_mode:0,eq_preset:2,eq_enabled:true,wearing_l:false,wearing_r:false,touchpad_locked:false,model:'',error:null};
     let sppConnected = false;
+    // El motivo real que da bookos-budsd cuando no abre el canal de control.
+    let sppError = '';
     let gbcAvail = false;
     let gbcDev = null;
     if(device.connected){
@@ -4255,11 +3940,19 @@ async function _renderBudsDetail(c, device){
         }catch(e){}
 
         if(!alreadyAlive){
-            _showBudsConnectModal(device.name||'Buds','connecting');
+            // Sin modal: tapaba la página mientras conectaba y luego avisaba
+            // «No se pudo conectar» encima. Si falla, el motivo ya sale en la
+            // propia página (sppError, más abajo), donde se puede reintentar.
             try{
                 const r = JSON.parse(await tauriInvoke('buds_connect',{mac:device.mac}));
                 if(r.connected){status=r;sppConnected=true;localStorage.setItem('buds_last_mac',device.mac);}
-            }catch(e){console.warn('[Buds] SPP connect failed:',e);}
+            }catch(e){
+                sppError=String(e);console.warn('[Buds] SPP connect failed:',e);
+                // El error crudo de D-Bus («The name is not activatable») no
+                // le dice nada a nadie: lo que pasa es que el servicio no está.
+                if(/not activatable|ServiceUnknown|was not provided/i.test(sppError))
+                    sppError=_tr('El servicio de los auriculares (bookos-budsd) no está en marcha.');
+            }
 
             if(!sppConnected){
                 try{gbcAvail=await tauriInvoke('gbc_is_available');}catch(e){}
@@ -4275,7 +3968,6 @@ async function _renderBudsDetail(c, device){
                     }
                 }
             }
-            _showBudsConnectModal(device.name||'Buds', (sppConnected||gbcAvail)?'ok':'fail');
         }
     }
 
@@ -4316,9 +4008,9 @@ async function _renderBudsDetail(c, device){
     }[_model];
     // Available case colours per model (swatch value → label).
     const _CASE_COLORS={
-        '4pro':[['white','White'],['black','Black']],
-        '3pro':[['white','White'],['silver','Silver']],
-        '2pro':[['white','White'],['black','Black'],['purple','Purple']],
+        '4pro':[['white','Blanco'],['black','Negro']],
+        '3pro':[['white','Blanco'],['silver','Plateado']],
+        '2pro':[['white','Blanco'],['black','Negro'],['purple','Morado']],
     }[_model];
     let _caseColor=await getSetting('buds_case_color_'+device.mac,_CASE_COLORS[0][0]);
     if(!_CASE_COLORS.some(c=>c[0]===_caseColor))_caseColor=_CASE_COLORS[0][0];
@@ -4351,12 +4043,16 @@ async function _renderBudsDetail(c, device){
     };
 
     // Circular battery ring — icon inside, "Label %" below
-    function _battRing(pct,label,icon){
+    // `guardada`: el valor es el último conocido del estuche, no uno leído
+    // ahora (con los dos auriculares fuera no informa). Se pinta apagado.
+    function _battRing(pct,label,icon,guardada=false){
         const r=30,c=2*Math.PI*r;
+        // 0 es «no se sabe»: el estuche lo da así con los Buds fuera, y un
+        // «Estuche 0%» con anillo vacío parecía un estuche descargado.
         const p=Math.max(0,Math.min(100,pct||0));
         const off=c*(1-p/100);
         const col=p>50?'#4cd964':p>20?'#ffcc00':p>10?'#ff9500':'#ff3b30';
-        return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;min-width:86px">
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;min-width:86px${guardada&&p?';opacity:.55':''}"${guardada&&p?` title="${esc(_tr('Último valor conocido'))}"`:''}>
             <div style="position:relative;width:70px;height:70px">
                 <svg width="70" height="70" viewBox="0 0 70 70">
                     <circle cx="35" cy="35" r="${r}" fill="none" stroke="rgba(128,128,128,.18)" stroke-width="4"/>
@@ -4365,7 +4061,7 @@ async function _renderBudsDetail(c, device){
                 </svg>
                 <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--tx)">${icon||''}</span>
             </div>
-            <span style="font-size:12.5px;color:var(--tx);font-weight:500">${esc(label)} ${p}%</span>
+            <span style="font-size:12.5px;color:var(--tx);font-weight:500">${esc(_tr(label))} ${p?p+'%':'—'}</span>
         </div>`;
     }
 
@@ -4384,8 +4080,8 @@ async function _renderBudsDetail(c, device){
         return `<div class="buds-anc-stepper" data-active-i="${aIdx}" data-n="${n}" style="padding:20px 18px 18px;position:relative">
             <div class="anc-inner" style="position:relative">
                 <div class="anc-track" style="position:absolute;top:8.5px;left:${slot/2}%;right:${slot/2}%;height:3px;background:rgba(128,128,128,.25);border-radius:2px;z-index:0"></div>
-                <div class="anc-beam" style="position:absolute;top:8.5px;left:${slot/2}%;height:3px;background:var(--blue);border-radius:2px;z-index:1;pointer-events:none;width:0;transform:translateZ(0);will-change:width"></div>
-                <div class="anc-thumb-halo" style="position:absolute;top:-5px;left:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle,rgba(10,132,255,.35) 0%,rgba(10,132,255,0) 70%);z-index:2;pointer-events:none;filter:blur(2px);transform:translate3d(0,0,0);will-change:transform"></div>
+                <div class="anc-beam" style="position:absolute;top:8.5px;left:${slot/2}%;height:3px;background:var(--blue);border-radius:2px;z-index:1;pointer-events:none;width:0;transform-origin:0 50%;transform:scaleX(0);will-change:transform"></div>
+                <div class="anc-thumb-halo" style="position:absolute;top:-5px;left:0;width:30px;height:30px;margin-left:-15px;border-radius:50%;background:radial-gradient(circle,rgba(10,132,255,.35) 0%,rgba(10,132,255,0) 70%);z-index:2;pointer-events:none;transform:translate3d(0,0,0);will-change:transform"></div>
                 <div class="anc-thumb" style="position:absolute;top:3px;left:0;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--blue);box-shadow:0 2px 6px rgba(10,132,255,.5),0 0 0 4px rgba(10,132,255,.18);z-index:4;pointer-events:none;transform:translate3d(0,0,0);will-change:transform"></div>
                 <div class="anc-grid" style="display:grid;grid-template-columns:repeat(${n},1fr);position:relative;z-index:3">
                     ${_ancSteps.map((s,i)=>{const on=s.idx===active;return `<button class="buds-anc-node" data-anc="${s.idx}" data-i="${i}" style="background:none;border:none;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:12px;position:relative">
@@ -4411,7 +4107,7 @@ async function _renderBudsDetail(c, device){
         const beam=card.querySelector('.anc-beam');
         if(thumb){thumb.style.transform=`translate3d(${xPx}px,0,0)`;}
         if(halo){halo.style.transform=`translate3d(${xPx}px,0,0)`;}
-        if(beam){beam.style.width=`${slotPx*i}px`;}
+        if(beam){beam.style.width=`${slotPx*(n-1)}px`;beam.style.transform=`scaleX(${i/(n-1)})`;}
     }
 
     // Samsung-style row: icon + (title+blue subtitle) + chevron
@@ -4465,8 +4161,17 @@ async function _renderBudsDetail(c, device){
     h+=`<div id="buds-rings" style="display:flex;justify-content:center;gap:22px;padding:0 16px 18px">
         ${_battRing(battL,'Izda',_ICO.earbudL)}
         ${_battRing(battR,'Dcha',_ICO.earbudR)}
-        ${_battRing(battCase,'Estuche',_ICO.case)}
+        ${_battRing(battCase,'Estuche',_ICO.case,status.battery_case_guardada)}
     </div>`;
+
+    // Sin canal de control no hay batería por auricular, ANC ni ecualizador:
+    // se dice por qué en vez de enseñar los controles como si funcionaran.
+    if(device.connected&&!sppConnected&&!gbcAvail&&sppError){
+        h+=`<div class="detail-card" style="margin:0 16px 10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px">
+            <span style="font-size:13px;color:var(--tx2);line-height:1.4">${esc(sppError)}</span>
+            <button class="btn btn-secondary btn-sm" id="buds-retry">${_tr('Reintentar')}</button>
+        </div>`;
+    }
 
     // Case colour picker (per-model, persisted per-device).
     const _swColor={white:'#e8e8ea',black:'#2a2a2c',silver:'#c4c8cc',purple:'#7d6fc7'};
@@ -4482,11 +4187,11 @@ async function _renderBudsDetail(c, device){
     // ANC card: stepper + auto-ambient toggle
     h+=`<div class="detail-card" style="padding:0;margin:0 16px 10px;overflow:hidden">
         ${_ancStepper(status.anc_mode)}
-        <div style="height:1px;background:var(--brd);margin:0 18px"></div>
+        ${gbcAvail?`<div style="height:1px;background:var(--brd);margin:0 18px"></div>
         <div style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px">
             <span style="font-size:14px;color:var(--tx)">Cambio automático a sonido ambiente</span>
             ${renderToggle('buds-auto-ambient',autoAmbient)}
-        </div>
+        </div>`:''}
     </div>`;
 
     // Settings groups (Samsung style rows)
@@ -4498,17 +4203,15 @@ async function _renderBudsDetail(c, device){
         {row:_sRow('Calidad y efectos de sonido',eqSubtitle,'buds-row-eq',_ICO.eq),
          expand:_sExpand('buds-eq-list',eqOpts,eqCur)},
         _sRow('Controles de auriculares','','buds-row-touch',_ICO.touch),
-        _sRow('Controles de voz','','buds-row-voice',_ICO.voice),
     ]);
+    // Sin «Controles de voz», «Funciones avanzadas», «Accesibilidad» ni
+    // «Diagnóstico»: solo decían «Próximamente». «Buscar» y el cambio
+    // automático a ambiente solo existen con Galaxy Buds Client; el canal
+    // propio (bookos-budsd) no los tiene.
     h+=_sCard([
         _sRow('Administrar conexiones','','buds-row-conn',_ICO.conn),
-        _sRow('Funciones avanzadas','','buds-row-adv',_ICO.adv),
-    ]);
-    h+=_sCard([_sRow('Accesibilidad','','buds-row-a11y',_ICO.a11y)]);
-    h+=_sCard([
         _sRow('Adaptar a tus oídos','','buds-row-fit',_ICO.eq),
-        _sRow('Buscar mis auriculares','','buds-row-find',_ICO.find),
-        _sRow('Diagnóstico','','buds-row-diag',_ICO.diag),
+        ...(gbcAvail?[_sRow('Buscar mis auriculares','','buds-row-find',_ICO.find)]:[]),
     ]);
     h+=_sCard([_sRow('Acerca de los auriculares','','buds-row-about',_ICO.about)]);
 
@@ -4528,6 +4231,10 @@ async function _renderBudsDetail(c, device){
     });
 
     // BT connect/disconnect button — master poll picks up transition + re-renders
+    document.getElementById('buds-retry')?.addEventListener('click',()=>{
+        window.clearPageIntervals?.();
+        _renderBudsDetail(c,device);
+    });
     document.getElementById('buds-conn-btn')?.addEventListener('click',async()=>{
         const btn=document.getElementById('buds-conn-btn');
         btn.disabled=true;btn.textContent=device.connected?'Desconectando...':'Conectando...';
@@ -4562,9 +4269,8 @@ async function _renderBudsDetail(c, device){
         const slotPx=w/n;
         const fromX=slotPx*(curI+0.5);
         const toX=slotPx*(newI+0.5);
-        const fromW=slotPx*curI, toW=slotPx*newI;
         const dist=Math.abs(newI-curI);
-        const dur=Math.min(420, 320+dist*30);
+        const dur=Math.min(570, 470+dist*30);
         const spring='cubic-bezier(.3,.3,.2,.9)';
         const nodes=card.querySelectorAll('.buds-anc-node');
         const thumb=card.querySelector('.anc-thumb');
@@ -4582,27 +4288,30 @@ async function _renderBudsDetail(c, device){
             const d=newNode.querySelector('.anc-dot'); if(d) d.style.background='transparent';
         }
 
-        // thumb — pure transform, GPU composited
-        if(thumb){
-            thumb.animate([
-                {transform:`translate3d(${fromX}px,0,0) scale(1,1)`},
-                {transform:`translate3d(${(fromX+toX)/2}px,0,0) scale(${1+0.2*Math.min(dist,2)},.82)`, offset:0.55},
-                {transform:`translate3d(${toX}px,0,0) scale(1,1)`}
-            ],{duration:dur, easing:spring, fill:'forwards'});
-        }
-        if(halo){
-            halo.animate([
-                {transform:`translate3d(${fromX}px,0,0) scale(1)`, opacity:.85},
-                {transform:`translate3d(${(fromX+toX)/2}px,0,0) scale(1.35)`, opacity:1, offset:0.55},
-                {transform:`translate3d(${toX}px,0,0) scale(1)`, opacity:.85}
-            ],{duration:dur, easing:spring, fill:'forwards'});
-        }
-        if(beam){
-            beam.animate([
-                {width:`${fromW}px`},
-                {width:`${toW}px`}
-            ],{duration:dur, easing:spring, fill:'forwards'});
-        }
+        // Solo transform, sin `fill:'forwards'`: el estilo final se fija
+        // antes y la animación va de lo anterior a él y se libera al acabar.
+        // Con `forwards` cada clic dejaba tres animaciones vivas para siempre,
+        // y la barra animaba `width`, que recalcula el diseño en cada fotograma.
+        const anima=(el,final,frames)=>{
+            if(!el)return;
+            el.getAnimations().forEach(a=>a.cancel());
+            el.style.transform=final;
+            el.animate(frames,{duration:dur,easing:spring});
+        };
+        anima(thumb,`translate3d(${toX}px,0,0)`,[
+            {transform:`translate3d(${fromX}px,0,0) scale(1,1)`},
+            {transform:`translate3d(${(fromX+toX)/2}px,0,0) scale(${1+0.2*Math.min(dist,2)},.82)`, offset:0.55},
+            {transform:`translate3d(${toX}px,0,0) scale(1,1)`}
+        ]);
+        anima(halo,`translate3d(${toX}px,0,0)`,[
+            {transform:`translate3d(${fromX}px,0,0) scale(1)`},
+            {transform:`translate3d(${(fromX+toX)/2}px,0,0) scale(1.35)`, offset:0.55},
+            {transform:`translate3d(${toX}px,0,0) scale(1)`}
+        ]);
+        anima(beam,`scaleX(${newI/(n-1)})`,[
+            {transform:`scaleX(${curI/(n-1)})`},
+            {transform:`scaleX(${newI/(n-1)})`}
+        ]);
 
         card.dataset.activeI=String(newI);
     }
@@ -4619,14 +4328,38 @@ async function _renderBudsDetail(c, device){
     window.removeEventListener('resize',window.__ancResize||(()=>{}));
     window.__ancResize=_ancResize;
     window.addEventListener('resize',_ancResize);
+    // Un solo envío en marcha y siempre con el último modo pedido. Antes cada
+    // toque mandaba el suyo en paralelo: con ida y vuelta rápida (A→B→A) las
+    // órdenes podían llegar desordenadas y quedarse puesto B aunque la
+    // interfaz marcara A. Al acabar se lee el estado y, si no coincide, se
+    // reenvía una vez.
+    let _ancPedido=null,_ancEnviando=false;
+    async function _ancEnviar(){
+        if(_ancEnviando)return;
+        _ancEnviando=true;
+        try{
+            for(let reenvios=0;_ancPedido!==null&&reenvios<3;){
+                const modo=_ancPedido;_ancPedido=null;
+                try{await tauriInvoke('buds_set_anc',{mode:modo});}
+                catch(e){toast(_tr('No se pudo cambiar el modo'),'❌');return;}
+                if(_ancPedido!==null)continue;
+                const real=JSON.parse(await tauriInvoke('buds_get_status')).anc_mode;
+                if(_ancPedido===null&&real!==modo){_ancPedido=modo;reenvios++;}
+            }
+        }catch{}
+        finally{_ancEnviando=false;}
+    }
     document.querySelectorAll('.buds-anc-node').forEach(btn=>{
         btn.addEventListener('click',async()=>{
             const mode=parseInt(btn.dataset.anc);
-            _ancApply(mode);
+            // La orden sale antes que la animación: así el cambio en los
+            // auriculares no espera a que se calcule y arranque el dibujo.
             if(sppConnected){
-                try{await tauriInvoke('buds_set_anc',{mode});}
-                catch(e){toast('Error al cambiar ANC');}
-            } else if(gbcAvail){
+                _ancPedido=mode;
+                _ancEnviar();
+            }
+            _ancApply(mode);
+            if(!sppConnected&&gbcAvail){
                 try{
                     let act=null;
                     if(mode===1) act='AncToggle';
@@ -4640,17 +4373,12 @@ async function _renderBudsDetail(c, device){
             }
             _lastAnc=mode;
             setSetting('buds_anc_'+device.mac, String(mode));
-            const lbl=_ancSteps.find(m=>m.idx===mode)?.label||'';
-            toast(lbl);
         });
     });
 
     // Auto-ambient toggle (GBC only — SPP cmd TBD)
     setupToggle('buds-auto-ambient',async a=>{
-        if(gbcAvail){
-            try{await tauriInvoke('gbc_execute_action',{action:'AmbientToggle'});}catch(e){}
-        }
-        toast(a?'Cambio automático activado':'Cambio automático desactivado');
+        await tauriInvoke('gbc_execute_action',{action:'AmbientToggle'});
     });
 
     // Row: Calidad y efectos de sonido → toggle inline expansion
@@ -4675,7 +4403,6 @@ async function _renderBudsDetail(c, device){
             const lbl=enabled?(_BUDS_EQ_PRESETS.find(p=>p.idx===idx)?.label||''):'Plano';
             const sub=document.querySelectorAll('#buds-row-eq span')[2];
             if(sub)sub.textContent=lbl;
-            toast('EQ: '+lbl);
         });
     });
 
@@ -4691,24 +4418,20 @@ async function _renderBudsDetail(c, device){
         if(gbcAvail){
             try{await tauriInvoke('gbc_execute_action',{action:'StartStopFind'});toast('Sonido de localización');}
             catch(e){toast('Error al localizar');}
-        } else {toast('Requiere Galaxy Buds Client');}
+        }
     });
 
     // Row: Acerca de
     document.getElementById('buds-row-about')?.addEventListener('click',()=>_renderBudsAbout(c,device,status,modelTag,fw));
 
-    // Stubs for non-implemented rows
-    ['buds-row-voice','buds-row-adv','buds-row-a11y','buds-row-diag'].forEach(id=>{
-        document.getElementById(id)?.addEventListener('click',()=>toast('Próximamente'));
-    });
     document.getElementById('buds-row-conn')?.addEventListener('click',()=>_renderBudsConn(c,device));
     document.getElementById('buds-row-fit')?.addEventListener('click',()=>_renderBudsFitTest(c,device));
 
     // Live refresh: update battery rings
-    function _renderRingsLive(bl,br,bc){
+    function _renderRingsLive(bl,br,bc,guardada=false){
         const rings=document.getElementById('buds-rings');
         if(!rings) return;
-        rings.innerHTML=_battRing(bl,'Izda',_ICO.earbudL)+_battRing(br,'Dcha',_ICO.earbudR)+_battRing(bc,'Estuche',_caseIcoHtml(_curCase));
+        rings.innerHTML=_battRing(bl,'Izda',_ICO.earbudL)+_battRing(br,'Dcha',_ICO.earbudR)+_battRing(bc,'Estuche',_caseIcoHtml(_curCase),guardada);
     }
 
     // Master poll: detect BT connect/disconnect transitions + live battery
@@ -4735,7 +4458,7 @@ async function _renderBudsDetail(c, device){
             if(sppConnected){
                 try{
                     const r=JSON.parse(await tauriInvoke('buds_get_status'));
-                    _renderRingsLive(r.battery_l,r.battery_r,r.battery_case);
+                    _renderRingsLive(r.battery_l,r.battery_r,r.battery_case,r.battery_case_guardada);
                 }catch(e){}
             } else if(gbcAvail){
                 try{
@@ -4893,6 +4616,78 @@ async function _renderBudsTouch(c,device,status,sppConnected,gbcAvail){
 }
 
 // ── Book Share sub-page ──────────────────────────────────────────────────
+// ── Hoja de compartir un enlace (bookos-settings --share-url) ──
+// La abre el botón de compartir del navegador: busca dispositivos cercanos por
+// Quick Share y manda el enlace al que se elija, que lo abre en su navegador.
+// Si Quick Share estaba apagado, se enciende solo mientras la hoja está
+// abierta y se vuelve a apagar al cerrarla.
+export async function abrirHojaCompartir(url){
+    let yaActivo=false;
+    try{
+        yaActivo=JSON.parse(await tauriInvoke('qs_start')).already===true;
+        // Se reinicia la búsqueda para que vuelvan a anunciarse los que ya
+        // estaban: la hoja no ha visto los eventos de antes.
+        await tauriInvoke('qs_stop_discover').catch(()=>{});
+        await tauriInvoke('qs_discover');
+    }catch(e){toast('No se pudo iniciar Quick Share: '+e);return;}
+
+    const dispositivos={};
+    let dejarDeEscuchar=null;
+    const cerrar=()=>{
+        dejarDeEscuchar?.();
+        if(!yaActivo){
+            tauriInvoke('qs_stop_discover').catch(()=>{});
+            tauriInvoke('qs_stop').catch(()=>{});
+        }
+    };
+    showDialog('Enviar con Book Share',
+        `<div style="word-break:break-all;margin-bottom:12px">${esc(url)}</div><div id="hoja-compartir-lista" style="display:flex;flex-direction:column;gap:8px"></div>`,
+        {confirmText:null,cancelText:'Cancelar',onCancel:cerrar});
+
+    const pintar=()=>{
+        const lista=document.getElementById('hoja-compartir-lista');
+        if(!lista)return;
+        const ids=Object.keys(dispositivos);
+        if(!ids.length){
+            lista.innerHTML=`<div style="color:var(--tx2)">Buscando dispositivos cercanos…</div>`;
+            return;
+        }
+        lista.innerHTML=ids.map(id=>`<button class="qs-pick-dev" data-id="${esc(id)}" style="padding:9px 14px;border-radius:10px;border:1.5px solid var(--brd);background:transparent;color:var(--tx);text-align:left;cursor:pointer">${esc(dispositivos[id].name||id)}</button>`).join('');
+        lista.querySelectorAll('.qs-pick-dev').forEach(btn=>btn.addEventListener('click',async()=>{
+            const d=dispositivos[btn.dataset.id];
+            document.querySelector('.bk-overlay')?.remove();
+            dejarDeEscuchar?.();
+            // Quick Share no se apaga en el acto: el envío sigue en segundo
+            // plano y apagar el servicio lo cortaría. Se apaga cuando el envío
+            // termina, bien o mal (estados finales de rqs_lib).
+            let dejarTransferencia=null;
+            if(!yaActivo){
+                dejarTransferencia=await window.__TAURI__.event.listen('qs-transfer',ev=>{
+                    if(!['Finished','Rejected','Cancelled','Disconnected'].includes(ev.payload?.state))return;
+                    dejarTransferencia?.();
+                    tauriInvoke('qs_stop_discover').catch(()=>{});
+                    tauriInvoke('qs_stop').catch(()=>{});
+                });
+            }
+            try{
+                await tauriInvoke('qs_send_url',{endpointId:btn.dataset.id,name:d.name||'',addr:d.ip||'',url});
+                toast('Enviando enlace a '+(d.name||'el dispositivo')+'…');
+            }catch(e){
+                toast('Error al enviar: '+e);
+                dejarTransferencia?.();
+                if(!yaActivo)tauriInvoke('qs_stop').catch(()=>{});
+            }
+        }));
+    };
+    pintar();
+    dejarDeEscuchar=await window.__TAURI__.event.listen('qs-device',ev=>{
+        const d=ev.payload;
+        if(!d||!d.id)return;
+        if(d.present===true)dispositivos[d.id]=d; else delete dispositivos[d.id];
+        pintar();
+    });
+}
+
 async function _renderBookShare(c){
     c.innerHTML=renderHeader(t('hdr_book_share'))+renderSkeleton(2);
 
@@ -5056,7 +4851,7 @@ async function _renderBookShare(c){
                 if(!d)return;
                 let files=[];
                 try{
-                    const picked=await window.__TAURI__.dialog.open({multiple:true});
+                    const picked=await elegirRuta('open',{multiple:true});
                     if(!picked)return;
                     files=Array.isArray(picked)?picked:[picked];
                 }catch(e){toast('No se pudo abrir el selector de archivos');return;}
@@ -5083,7 +4878,7 @@ async function _renderBookShare(c){
             const isConn=p2pConnected.has(path);
             const sig=d.strength>0?` · ${d.strength}%`:'';
             const rightBtn=isConn
-                ?`<span style="font-size:12px;color:var(--green);font-weight:600">● Conectado</span>`
+                ?`<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:600"><i style="width:7px;height:7px;border-radius:50%;background:currentColor"></i>Conectado</span>`
                 :`<button class="p2p-connect-btn" data-path="${esc(path)}" data-mac="${esc(d.mac)}" data-name="${esc(d.name||d.mac)}"
                     style="padding:5px 14px;border-radius:20px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:12px;cursor:pointer">
                     Conectar</button>`;
@@ -5314,7 +5109,7 @@ async function _renderBookShare(c){
     document.getElementById('qs-recv-folder-row')?.addEventListener('click',async()=>{
         if(!qsRunning){toast('Activa Quick Share primero');return;}
         try{
-            const dir=await window.__TAURI__.dialog.open({directory:true,multiple:false});
+            const dir=await elegirRuta('open',{directory:true,multiple:false});
             if(!dir)return;
             await tauriInvoke('qs_set_download_path',{path:dir});
             const lbl=document.getElementById('qs-folder-label');
@@ -5330,7 +5125,7 @@ async function _renderBookShare(c){
         if(keys.length===0){toast('Sin dispositivos cercanos encontrados');return;}
         let files=[];
         try{
-            const picked=await window.__TAURI__.dialog.open({multiple:true});
+            const picked=await elegirRuta('open',{multiple:true});
             if(!picked)return;
             files=Array.isArray(picked)?picked:[picked];
         }catch(e){toast('No se pudo abrir el selector de archivos');return;}
@@ -5401,6 +5196,13 @@ if(typeof window!=='undefined'){
         _renderBudsDetail(app,dev);
     };
 }
+// Destino de `--page buds`: los Buds conectados o, si ya no lo están, la
+// lista de dispositivos.
+export async function renderBuds(c){
+    const dev=await _getConnectedBudsDevice();
+    if(dev)return _renderBudsDetail(c,dev);
+    return renderDispositivos(c);
+}
 export async function renderDispositivos(c){
     c.innerHTML=renderHeader(t('hdr_devices'))+renderSkeleton(2);
 
@@ -5417,8 +5219,12 @@ export async function renderDispositivos(c){
                nm.includes('earphone')||nm.includes('galaxy buds')||nm.includes('pixel buds')||
                nm.includes('wf-')||nm.includes('wh-')||nm.includes('beats');
     };
+    // BlueZ guarda también los dispositivos que solo se descubrieron al buscar
+    // (una tele, un Echo…); sin vincular no son "míos", así que se quedan fuera.
+    // Vincular uno nuevo se hace desde la página Bluetooth (botón buds-pair).
+    const vinculado=d=>d.connected||d.paired===true||d.paired==='true';
     // Connected audio device with empty icon still counts
-    const budsDevices=btDevices.filter(d=>isAudio(d)||(d.connected&&!d.icon));
+    const budsDevices=btDevices.filter(d=>vinculado(d)&&(isAudio(d)||(d.connected&&!d.icon)));
     // Sort: connected first
     budsDevices.sort((a,b)=>(b.connected?1:0)-(a.connected?1:0));
 
@@ -5433,7 +5239,7 @@ export async function renderDispositivos(c){
 
     function _budsSubtitle(d){
         const batt=battMap[d.mac];
-        const battSpan=batt?`<span style="color:var(--tx2);font-size:12px;margin-left:6px">· 🔋${batt}%</span>`:'';
+        const battSpan=batt?`<span style="color:var(--tx2);font-size:12px;margin-left:6px">· ${ico('battery',{size:13,cls:'ico-t'})} ${batt}%</span>`:'';
         if(d.connected) return `<span style="color:var(--green)">Conectado${battSpan}</span>`;
         return `<span style="color:var(--tx2)">Desconectado</span>`;
     }
@@ -5560,7 +5366,7 @@ export async function renderDispositivos(c){
                 const sub=row.querySelector('.ds');
                 if(sub){
                     const batt=battMap[d.mac];
-                    const battSpan=batt&&d.connected?`<span style="color:var(--tx2);font-size:12px;margin-left:6px">· 🔋${batt}%</span>`:'';
+                    const battSpan=batt&&d.connected?`<span style="color:var(--tx2);font-size:12px;margin-left:6px">· ${ico('battery',{size:13,cls:'ico-t'})} ${batt}%</span>`:'';
                     sub.innerHTML=d.connected?`<span style="color:var(--green)">Conectado${battSpan}</span>`:`<span style="color:var(--tx2)">Desconectado</span>`;
                 }
                 const iconEl=row.querySelector('[style*="color:"]');
@@ -5651,191 +5457,343 @@ export async function renderEnergyAdvanced(c){
 // popovers— pero hablando con el compositor. Lo que cambia es que aquí un
 // fallo se ve: cada acción enseña «aplicando…» y termina en aplicado o en el
 // error que devolvió el compositor, nunca en un éxito supuesto.
-export async function renderPantallasBookOS(c){
-    const title=_tr('Pantallas');
+// La pantalla que se está configurando. Fuera de la función para que
+// sobreviva a los repintados que siguen a cada cambio.
+let _bkSel=null;
+const _SOL=r=>`<svg viewBox="0 0 24 24" width="${r}" height="${r}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+
+/// Las escalas que salen como miniatura y cuál se recomienda.
+///
+/// La recomendada es la que deja el panel más cerca de una densidad lógica de
+/// referencia: 125 ppp en un portátil y 110 en un monitor, que es lo que Apple
+/// pone por defecto (MacBook Pro 14″: 3024 px a 2× ≈ 127 ppp; Studio Display:
+/// 5K a 2× ≈ 109 ppp). El monitor va algo más bajo porque se mira desde más
+/// lejos. Sin tamaño físico (proyectores, EDID vacío) no se recomienda nada.
+/// Solo van las que tienen sentido, como mucho cinco alrededor de la
+/// recomendada, y no hay lista completa en Avanzado: dos sitios para lo mismo
+/// confundían, y lo que queda fuera (100 % en un panel de 244 ppp) no se lee.
+function _bkEscalas(o,m){
+    const todas=(o.escalas?.length?o.escalas:[1,1.25,1.5,1.75,2]).slice().sort((a,b)=>a-b);
+    const ppp=o.mm_ancho>0&&m?m.ancho/(o.mm_ancho/25.4):0;
+    let recomendada=null,cerca=todas;
+    if(ppp){
+        const objetivo=o.integrada?125:110;
+        recomendada=todas.reduce((a,b)=>Math.abs(ppp/b-objetivo)<Math.abs(ppp/a-objetivo)?b:a);
+        cerca=todas.filter(e=>ppp/e>=objetivo*.7&&ppp/e<=objetivo*1.35);
+    }
+    const eje=recomendada??o.escala;
+    const lista=[...new Set([...cerca,o.escala])]
+        .sort((a,b)=>Math.abs(todas.indexOf(a)-todas.indexOf(eje))-Math.abs(todas.indexOf(b)-todas.indexOf(eje)))
+        .filter((e,i)=>i<5||e===o.escala)
+        // De más grande a más pequeño, como se lee: «texto más grande» a la izquierda.
+        .sort((a,b)=>b-a);
+    return {lista,recomendada};
+}
+
+/// Portada: las pantallas encendidas dibujadas en su sitio (un portátil para
+/// la integrada, un monitor para las demás) con el fondo de verdad dentro.
+function _bkPortada(outs,sel,fondo,ancho){
+    const activas=outs.filter(o=>o.activa);
+    const minX=Math.min(...activas.map(o=>o.x)),minY=Math.min(...activas.map(o=>o.y));
+    const maxX=Math.max(...activas.map(o=>o.x+o.logico_ancho)),maxY=Math.max(...activas.map(o=>o.y+o.logico_alto));
+    const f=Math.min(ancho/(maxX-minX),130/(maxY-minY));
+    const varias=outs.length>1;
+    const img=fondo?`<img class="disp-fondo" src="${esc(fondo)}" alt="" decoding="async" onerror="this.remove()">`:'';
+    // Las pantallas contiguas se tocan en coordenadas, pero dibujadas así la
+    // base del portátil se mete bajo el monitor: cada equipo encoge un poco.
+    const g=varias?6:0;
+    const piezas=activas.map(o=>{
+        const w=Math.round(o.logico_ancho*f)-2*g,hh=Math.round(o.logico_alto*f)-2*g;
+        const pie=o.integrada?'<span class="disp-base"></span>':'<span class="disp-pie"></span>';
+        return `<button type="button" class="disp-equipo${o.integrada?' portatil':' monitor'}${varias&&o.id===sel.id?' sel':''}" data-out="${esc(o.id)}"
+            style="left:${Math.round((o.x-minX)*f)+g}px;top:${Math.round((o.y-minY)*f)+g}px;width:${w}px" ${varias?'':'tabindex="-1"'} aria-label="${esc(o.nombre||o.conector)}">
+            <span class="disp-marco" style="width:${w}px;height:${hh}px">${img}</span>${pie}</button>`;
+    }).join('');
+    // Las apagadas no tienen posición: van aparte, en gris, para poder elegirlas.
+    const apagadas=outs.filter(o=>!o.activa).map(o=>`<button type="button" class="disp-apagada${o.id===sel.id?' sel':''}" data-out="${esc(o.id)}">${esc(o.nombre||o.conector)} · ${_tr('apagada')}</button>`).join('');
+    const ancho_=Math.round((maxX-minX)*f),alto=Math.round((maxY-minY)*f);
+    return `<div class="disp-hero">
+        <div class="disp-escena" style="width:${ancho_}px;height:${alto+18}px">${piezas}</div>
+        ${apagadas?`<div class="disp-apagadas">${apagadas}</div>`:''}
+        <div class="disp-nombre">${esc(sel.nombre||sel.conector)}</div>
+        <div class="disp-detalle">${esc(sel.detalle||sel.conector)}</div>
+    </div>`;
+}
+
+/// Miniaturas de escala: una esquina de ventana de BookOS (botones a la
+/// derecha, como los dibuja bookos-shell) sobre el fondo, a su tamaño real
+/// relativo. Es lo que hace legible «125 %» sin saber qué es un 125 %.
+function _bkMiniaturas(o,m,fondo){
+    const {lista,recomendada}=_bkEscalas(o,m);
+    if(lista.length<2)return '';
+    const nombre=(e,i)=>e===recomendada?_tr('Predeterminada'):i===0?_tr('Texto más grande'):i===lista.length-1?_tr('Más espacio'):'';
+    const max=lista[0];
+    const fichas=lista.map((e,i)=>{
+        const [lw,lh]=_bkLogico(m,e,o.transformacion);
+        const on=e===o.escala;
+        return `<button type="button" class="disp-escala${on?' on':''}" role="radio" aria-checked="${on}" data-escala="${e}" title="${Math.round(e*100)} % · ${lw}×${lh}">
+            <span class="disp-ficha">${fondo?`<img src="${esc(fondo)}" alt="" decoding="async" onerror="this.remove()">`:''}
+                <span class="disp-ventana" style="--e:${(e/max).toFixed(3)}">
+                    <span class="disp-barra"><i class="min"></i><i class="max"></i><i class="cerrar"></i></span>
+                    <span class="disp-texto">${_tr('Cada pantalla a su medida: elige cuánto quieres ver y cuánto quieres leer sin esfuerzo.')}</span>
+                </span>
+            </span>
+            <span class="disp-escala-nombre">${nombre(e,i)}</span>
+        </button>`;
+    }).join('');
+    const [lw,lh]=_bkLogico(m,o.escala,o.transformacion);
+    return `<div class="disp-escalas-card">
+        <div class="disp-escalas" role="radiogroup" aria-label="${_tr('Escala')}">${fichas}</div>
+        <div class="disp-escalas-pie">${Math.round(o.escala*100)} % · ${_tr('espacio como una pantalla de')} ${lw} × ${lh}</div>
+    </div>`;
+}
+
+export async function renderPantallasBookOS(c,vista='inicio'){
+    const title=vista==='avanzado'?_tr('Avanzado'):_tr('Pantallas');
     c.innerHTML=renderHeader(title)+renderSkeleton(2);
 
     // El brillo va dentro de este render y no añadido después desde
     // renderPantalla: aquello lo anteponía al título (prepend sobre `c`), lo
     // pintaba a 0% con la pista vacía hasta leer el valor, y desaparecía en
     // cuanto aplicar() repintaba la página.
-    const [outs,caps,brillo]=await Promise.all([bkGetOutputs(),bkCapabilities(),
-        tauriInvoke('get_brightness').then(r=>{const d=JSON.parse(r);return d.ok===false?null:d.brightness;}).catch(()=>null)]);
-    const rerender=()=>renderPantallasBookOS(c);
+    const [outs,caps,brillo,cfg,fondo]=await Promise.all([bkGetOutputs(),bkCapabilities(),
+        tauriInvoke('get_brightness').then(r=>{const d=JSON.parse(r);return d.ok===false?null:d.brightness;}).catch(()=>null),
+        tauriInvoke('bookos_get_config').then(JSON.parse).catch(()=>null),
+        // La miniatura pequeña y no el original: el fondo puede ser de 8K y aquí
+        // se pinta a 200 px.
+        tauriInvoke('get_current_wallpaper').then(r=>JSON.parse(r).path)
+            .then(p=>p?tauriInvoke('wallpaper_preview',{path:p,hero:false}):'')
+            .then(u=>u?getAssetUrl(u):'').catch(()=>'')]);
+    const rerender=()=>renderPantallasBookOS(c,vista);
     // Toda acción reescribe la configuración entera y vuelve a dibujar con lo
     // que diga el censo nuevo: así lo que se ve es el estado real y no lo que
     // se pidió.
-    const aplicar=async(id,cambios)=>{
+    //
+    // Con `confirmar`, lo que puede dejar la pantalla en negro (modo,
+    // rotación, encender o apagar) se deshace solo si nadie dice que se ve
+    // bien: con una pantalla negra no hay forma de llegar al botón.
+    const aplicar=async(id,cambios,confirmar=false)=>{
+        const antes=bkPeticiones(outs,null,null);
         bkToast('pendiente',_tr('Aplicando')+'…');
         const r=await bkApply(bkPeticiones(outs,id,cambios));
         if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return false;}
         bkToast('aplicado',_tr('Aplicado'));
         rerender();
+        if(confirmar)_bkConfirmar(antes,rerender);
         return true;
     };
 
-    let h=renderHeader(title);
-    if(brillo!=null)h+=renderCard([renderRowItem(_tr('Brillo'),'',renderSlider('native-brightness',brillo))]);
-    const setupBrillo=()=>{if(brillo!=null)setupSlider('native-brightness',async value=>{
-        try{const r=JSON.parse(await tauriInvoke('set_brightness',{value:Number(value)}));if(r.ok===false)throw new Error(r.error);}
-        catch(e){toast(String(e),'❌');}
-    });};
     if(!outs.length){
-        h+=renderCard([`<div class="detail-item"><span class="dt">${_tr('No se detectó ninguna pantalla')}</span></div>`]);
-        c.innerHTML=h;
-        setupBrillo();
+        c.innerHTML=renderHeader(title)+renderCard([`<div class="detail-item"><span class="dt">${_tr('No se detectó ninguna pantalla')}</span></div>`]);
         return;
     }
-
     const principal=outs.find(o=>o.principal&&o.activa)||outs.find(o=>o.activa)||outs[0];
+    const sel=outs.find(o=>o.id===_bkSel)||principal;
+    _bkSel=sel.id;
     const activas=outs.filter(o=>o.activa).length;
+    const m=bkModoActual(sel);
+    const hz=bkHz(m);
+    // La frecuencia variable va dentro de la frecuencia y no en un interruptor
+    // aparte: es otra forma de elegir el refresco (como ProMotion en macOS), y
+    // con el interruptor suelto se podía leer «120 Hz» con el panel bajando a 48.
+    const hzTexto=sel.vrr?`${_tr('Variable')} · ${_tr('hasta')} ${hz} Hz`:`${hz} Hz`;
+    const aviso=sel.activa?bkAvisoFluidez(sel.escala,hz):'';
 
-    outs.forEach((o,idx)=>{
-        const p=`bk${idx}`;
-        const m=bkModoActual(o);
-        const hz=bkHz(m);
-        const nombre=[o.fabricante,o.modelo].filter(Boolean).join(' ')||o.conector;
-        const rows=[];
-        rows.push(renderRowItem(esc(nombre),esc(o.conector)+(o.mm_ancho?` · ${o.mm_ancho}×${o.mm_alto} mm`:''),
-            renderToggle(`${p}-en`,o.activa)));
-        if(o.activa){
-            rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-res">
-                <span class="dt">${_tr('Resolución')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${esc(bkRes(m))}</span>${chevron()}</div>
-            </div>`);
-            rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-hz">
-                <span class="dt">${_tr('Frecuencia de actualización')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${hz} Hz</span>${chevron()}</div>
-            </div>`);
-            rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-scale">
-                <span class="dt">${_tr('Escala')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${Math.round(o.escala*100)}% · ${o.logico_ancho}×${o.logico_alto}</span>${chevron()}</div>
-            </div>`);
-            if(caps.rotation)rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-rot">
-                <span class="dt">${_tr('Rotación')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${esc(_tr(_bkRotLabel(o.transformacion)))}</span>${chevron()}</div>
-            </div>`);
-            if(o.vrr_capaz)rows.push(renderRowItem(_tr('Frecuencia variable'),
-                _tr('Ajusta el refresco al contenido; ahorra batería'),renderToggle(`${p}-vrr`,o.vrr)));
-            if(o!==principal)rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-pos">
-                <span class="dt">${_tr('Posición')}</span>
-                <div style="display:flex;align-items:center;gap:6px"><span style="color:var(--blue);font-size:14px">${esc(_bkPosLabel(o,principal))}</span>${chevron()}</div>
-            </div>`);
-            if(!o.principal)rows.push(`<div class="detail-item" style="cursor:pointer" id="${p}-primary"><span class="dt" style="color:var(--blue)">${_tr('Establecer como principal')}</span></div>`);
-            const aviso=bkAvisoFluidez(o.escala,hz);
-            if(aviso)rows.push(`<div class="detail-item"><span class="ds">⚠︎ ${esc(aviso)}</span></div>`);
+    let h=renderHeader(title);
+    if(vista==='inicio'){
+        h+=_bkPortada(outs,sel,fondo,Math.min(c.clientWidth-80,520));
+        if(sel.activa)h+=_bkMiniaturas(sel,m,fondo);
+        // Solo el panel interno tiene retroiluminación que mover.
+        if(sel.integrada&&brillo!=null){
+            const filas=[`<div class="detail-item detail-item-row disp-brillo">
+                <span class="dt">${_tr('Brillo')}</span>
+                <div class="disp-brillo-ctl">${_SOL(14)}<input type="range" class="filled" id="native-brightness" min="0" max="100" value="${brillo}" style="--fill:${brillo}%" aria-label="${_tr('Brillo')}">${_SOL(20)}</div>
+            </div>`];
+            // Solo con un compositor que ya conoce la clave. El ajuste a mano
+            // sigue valiendo con el automático puesto: brillo_auto.rs lo guarda
+            // como desvío sobre su curva en vez de pisarlo.
+            if(cfg?.brillo_automatico_pantalla!==undefined)
+                filas.push(renderRowItem(_tr('Ajustar el brillo automáticamente'),'',renderToggle('bk-brillo-auto',cfg.brillo_automatico_pantalla)));
+            h+=renderCard(filas);
         }
-        h+=renderSection(o.principal?_tr('Pantalla principal'):(o.activa?_tr('Pantalla'):_tr('Pantalla desconectada del escritorio')));
-        h+=renderCard(rows);
-    });
-
+        if(outs.length>1){
+            const filas=[renderRowItem(_tr('Usar esta pantalla'),'',renderToggle('bk-en',sel.activa))];
+            if(sel.activa&&!sel.principal)filas.push(`<div class="detail-item nav-row" role="button" tabindex="0" id="bk-primary"><span class="dt" style="color:var(--blue)">${_tr('Usar como principal')}</span></div>`);
+            h+=renderCard(filas);
+        }
+        const filas=[];
+        if(cfg?.luz_nocturna!==undefined){
+            const estado=cfg.luz_nocturna==='programada'?`${_tr('Programada')} · ${cfg.luz_nocturna_desde}–${cfg.luz_nocturna_hasta}`
+                :cfg.luz_nocturna==='si'?_tr('Encendida'):_tr('Apagada');
+            filas.push(renderNavRow(_tr('Luz nocturna'),'',{id:'bk-nocturna',right:`<span class="disp-valor">${esc(estado)}${chevron()}</span>`}));
+        }
+        if(sel.activa)filas.push(renderNavRow(_tr('Avanzado'),'',{id:'bk-avanzado',right:`<span class="disp-valor">${bkRes(m).replace('x','×')} · ${hzTexto}${chevron()}</span>`}));
+        if(filas.length)h+=renderCard(filas);
+        if(aviso)h+=renderCard([`<div class="detail-item"><span class="ds ico-aviso">${ico('triangle-alert',{size:14,cls:'ico-t'})} ${esc(aviso)}</span></div>`]);
+    }else{
+        const valor=(id,v)=>({id,right:`<span class="disp-valor">${esc(v)}${chevron()}</span>`});
+        // Los paneles integrados suelen anunciar un único modo (este Galaxy
+        // Book: solo 2880×1800 a 120 Hz en el EDID). Un menú con una sola
+        // opción parece roto; se enseña como dato y se dice dónde está el
+        // control que sí cambia el tamaño, que es la escala de la portada.
+        const resoluciones=new Set((sel.modos||[]).map(x=>`${x.ancho}x${x.alto}`)).size;
+        const filas=[
+            resoluciones>1?renderNavRow(_tr('Resolución'),'',valor('bk-res',bkRes(m).replace('x','×')))
+                :renderRowItem(_tr('Resolución'),_tr('Es la única que ofrece esta pantalla. Para ver las cosas más grandes o más pequeñas, cambia la escala.'),
+                    `<span class="disp-valor">${bkRes(m).replace('x','×')}</span>`),
+            renderNavRow(_tr('Frecuencia de actualización'),'',valor('bk-hz',hzTexto)),
+        ];
+        if(caps.rotation)filas.push(renderNavRow(_tr('Rotación'),'',valor('bk-rot',_tr(_bkRotLabel(sel.transformacion)))));
+        if(sel!==principal)filas.push(renderNavRow(_tr('Posición'),'',valor('bk-pos',_bkPosLabel(sel,principal))));
+        h+=renderSection(sel.nombre||sel.conector)+renderCard(filas);
+        if(aviso)h+=renderCard([`<div class="detail-item"><span class="ds ico-aviso">${ico('triangle-alert',{size:14,cls:'ico-t'})} ${esc(aviso)}</span></div>`]);
+    }
     if(caps.multi_output===false&&outs.length>1){
         h+=renderCard([`<div class="detail-item"><span class="ds">${_tr('Esta versión del escritorio dibuja en una sola pantalla a la vez. Las demás se detectan y se pueden consultar, pero todavía no encenderse.')}</span></div>`]);
     }
     c.innerHTML=h;
-    setupBrillo();
 
-    outs.forEach((o,idx)=>{
-        const p=`bk${idx}`;
-        const m=bkModoActual(o);
-        setupToggle(`${p}-en`,async a=>{
-            // La comprobación de aquí es cortesía: quien decide de verdad es el
-            // compositor, que rechaza cualquier configuración sin una pantalla
-            // encendida. Adelantarla evita el viaje al bus y da mejor mensaje.
-            if(!a&&activas<=1){bkToast('error',_tr('No puedes apagar la única pantalla encendida'));rerender();return;}
-            if(!await aplicar(o.id,{activa:a}))rerender();
-        });
-        document.getElementById(`${p}-res`)?.addEventListener('click',e=>{
-            const vistas=[...new Set((o.modos||[]).map(x=>`${x.ancho}x${x.alto}`))];
-            popoverSelect(e.currentTarget,{
-                title:_tr('Resolución'),
-                options:vistas.map(r=>({val:r,label:r})),
-                current:bkRes(m),
-                onSelect:async v=>{
-                    const [w,hh]=v.split('x').map(Number);
-                    const cand=(o.modos||[]).filter(x=>x.ancho===w&&x.alto===hh)
-                        .sort((a,b)=>(bkHz(b)===bkHz(m)?1:0)-(bkHz(a)===bkHz(m)?1:0)||b.refresco_mhz-a.refresco_mhz)[0];
-                    if(!cand){bkToast('error',_tr('Ese modo no existe en esta pantalla'));return;}
-                    await aplicar(o.id,{ancho:cand.ancho,alto:cand.alto,refresco_mhz:cand.refresco_mhz});
-                },
-            });
-        });
-        document.getElementById(`${p}-hz`)?.addEventListener('click',e=>{
-            // Solo los refrescos de la resolución puesta: cambiar las dos cosas
-            // a la vez desde un mismo menú es como se acaba pidiendo un modo
-            // que no existe.
-            const mismos=(o.modos||[]).filter(x=>x.ancho===m.ancho&&x.alto===m.alto)
-                .sort((a,b)=>b.refresco_mhz-a.refresco_mhz);
-            popoverSelect(e.currentTarget,{
-                title:_tr('Frecuencia de actualización'),
-                options:mismos.map(x=>({val:String(x.refresco_mhz),label:bkHz(x)+' Hz',
-                    sub:bkAvisoFluidez(o.escala,bkHz(x))||undefined})),
-                current:String(m.refresco_mhz),
-                onSelect:async v=>{await aplicar(o.id,{ancho:m.ancho,alto:m.alto,refresco_mhz:parseInt(v)});},
-            });
-        });
-        document.getElementById(`${p}-scale`)?.addEventListener('click',e=>{
-            const escalas=(o.escalas?.length?o.escalas:[1,1.25,1.5,1.75,2]);
-            popoverSelect(e.currentTarget,{
-                title:_tr('Escala'),
-                options:escalas.map(x=>{
-                    const [lw,lh]=_bkLogico(m,x,o.transformacion);
-                    return {val:String(x),label:Math.round(x*100)+'%',right:`${lw}×${lh}`,
-                        sub:bkAvisoFluidez(x,bkHz(m))||undefined};
-                }),
-                current:String(o.escala),
-                onSelect:async v=>{await aplicar(o.id,{escala:parseFloat(v)});},
-            });
-        });
-        document.getElementById(`${p}-rot`)?.addEventListener('click',e=>{
-            popoverSelect(e.currentTarget,{
-                title:_tr('Rotación'),
-                options:['normal','90','180','270'].map(x=>({val:x,label:_tr(_bkRotLabel(x))})),
-                current:o.transformacion,
-                onSelect:async v=>{await aplicar(o.id,{transformacion:v});},
-            });
-        });
-        setupToggle(`${p}-vrr`,async a=>{
-            if(!await aplicar(o.id,{vrr:a}))rerender();
-        });
-        document.getElementById(`${p}-pos`)?.addEventListener('click',e=>{
-            const [pw,ph]=[principal.logico_ancho,principal.logico_alto];
-            const [ow,oh]=_bkLogico(m,o.escala,o.transformacion);
-            popoverSelect(e.currentTarget,{
-                title:_tr('Posición'),
-                options:[
-                    {val:'right',label:_tr('A la derecha')},
-                    {val:'left',label:_tr('A la izquierda')},
-                    {val:'above',label:_tr('Arriba')},
-                    {val:'below',label:_tr('Abajo')},
-                    {val:'mirror',label:_tr('Duplicar pantalla')},
-                ],
-                current:'',
-                onSelect:async v=>{
-                    // Las posiciones son del conjunto: se recolocan las dos, y
-                    // la principal se ancla al origen para que el escritorio no
-                    // se vaya a coordenadas negativas.
-                    const destino=v==='mirror'?{x:principal.x,y:principal.y}
-                        :v==='left'?{x:principal.x-ow,y:principal.y}
-                        :v==='above'?{x:principal.x,y:principal.y-oh}
-                        :v==='below'?{x:principal.x,y:principal.y+ph}
-                        :{x:principal.x+pw,y:principal.y};
-                    bkToast('pendiente',_tr('Aplicando')+'…');
-                    const r=await bkApply(bkPeticiones(outs,o.id,destino));
-                    if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
-                    bkToast('aplicado',_tr('Aplicado'));
-                    rerender();
-                },
-            });
-        });
-        document.getElementById(`${p}-primary`)?.addEventListener('click',async()=>{
-            bkToast('pendiente',_tr('Aplicando')+'…');
-            const r=await bkApply(bkPeticionesPrincipal(outs,o.id));
-            if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
-            bkToast('aplicado',_tr('Aplicado'));
-            rerender();
+    c.querySelectorAll('[data-out]').forEach(b=>b.addEventListener('click',()=>{
+        if(b.dataset.out===_bkSel)return;
+        _bkSel=b.dataset.out;rerender();
+    }));
+    c.querySelectorAll('.disp-escala').forEach(b=>b.addEventListener('click',async()=>{
+        const e=parseFloat(b.dataset.escala);
+        if(e!==sel.escala)await aplicar(sel.id,{escala:e});
+    }));
+    setupSlider('native-brightness',async value=>{
+        try{const r=JSON.parse(await tauriInvoke('set_brightness',{value:Number(value)}));if(r.ok===false)throw new Error(r.error);}
+        catch(e){toast(String(e),'❌');}
+    });
+    setupToggle('bk-brillo-auto',async a=>{
+        try{await tauriInvoke('bookos_apply_config',{config:{brillo_automatico_pantalla:a}});}
+        catch(e){toast(String(e),'❌');rerender();}
+    });
+    setupToggle('bk-en',async a=>{
+        // La comprobación de aquí es cortesía: quien decide de verdad es el
+        // compositor, que rechaza cualquier configuración sin una pantalla
+        // encendida. Adelantarla evita el viaje al bus y da mejor mensaje.
+        if(!a&&activas<=1){bkToast('error',_tr('No puedes apagar la única pantalla encendida'));rerender();return;}
+        if(!await aplicar(sel.id,{activa:a},true))rerender();
+    });
+    document.getElementById('bk-primary')?.addEventListener('click',async()=>{
+        bkToast('pendiente',_tr('Aplicando')+'…');
+        const r=await bkApply(bkPeticionesPrincipal(outs,sel.id));
+        if(!r.ok){bkToast('error',r.error||_tr('Error al aplicar'));return;}
+        bkToast('aplicado',_tr('Aplicado'));
+        rerender();
+    });
+    document.getElementById('bk-nocturna')?.addEventListener('click',()=>{
+        window.pushSubNav?.(rerender);
+        desktop.nightLight(c,{disponible:caps.night_light!==false});
+    });
+    document.getElementById('bk-avanzado')?.addEventListener('click',()=>{
+        window.pushSubNav?.(rerender);
+        renderPantallasBookOS(c,'avanzado');
+    });
+
+    document.getElementById('bk-res')?.addEventListener('click',e=>{
+        const vistas=[...new Set((sel.modos||[]).map(x=>`${x.ancho}x${x.alto}`))];
+        popoverSelect(e.currentTarget,{
+            title:_tr('Resolución'),
+            options:vistas.map(r=>({val:r,label:r.replace('x','×')})),
+            current:bkRes(m),
+            onSelect:async v=>{
+                const [w,hh]=v.split('x').map(Number);
+                const cand=(sel.modos||[]).filter(x=>x.ancho===w&&x.alto===hh)
+                    .sort((a,b)=>(bkHz(b)===bkHz(m)?1:0)-(bkHz(a)===bkHz(m)?1:0)||b.refresco_mhz-a.refresco_mhz)[0];
+                if(!cand){bkToast('error',_tr('Ese modo no existe en esta pantalla'));return;}
+                await aplicar(sel.id,{ancho:cand.ancho,alto:cand.alto,refresco_mhz:cand.refresco_mhz},true);
+            },
         });
     });
+    document.getElementById('bk-hz')?.addEventListener('click',e=>{
+        // Solo los refrescos de la resolución puesta: cambiar las dos cosas
+        // a la vez desde un mismo menú es como se acaba pidiendo un modo
+        // que no existe.
+        const mismos=(sel.modos||[]).filter(x=>x.ancho===m.ancho&&x.alto===m.alto)
+            .sort((a,b)=>b.refresco_mhz-a.refresco_mhz);
+        // Variable se apoya en el modo más rápido de la resolución: el panel
+        // baja desde ahí cuando el contenido no necesita tanto.
+        const tope=mismos[0];
+        const opciones=mismos.map(x=>({val:String(x.refresco_mhz),label:bkHz(x)+' Hz',
+            sub:bkAvisoFluidez(sel.escala,bkHz(x))||undefined}));
+        if(sel.vrr_capaz)opciones.unshift({val:'vrr',label:`${_tr('Variable')} · ${_tr('hasta')} ${bkHz(tope)} Hz`,
+            sub:_tr('Ajusta el refresco al contenido; ahorra batería')});
+        popoverSelect(e.currentTarget,{
+            title:_tr('Frecuencia de actualización'),
+            options:opciones,
+            current:sel.vrr?'vrr':String(m.refresco_mhz),
+            onSelect:async v=>{
+                const vrr=v==='vrr';
+                const x=vrr?tope:mismos.find(y=>String(y.refresco_mhz)===v);
+                await aplicar(sel.id,{ancho:x.ancho,alto:x.alto,refresco_mhz:x.refresco_mhz,vrr},true);
+            },
+        });
+    });
+    document.getElementById('bk-rot')?.addEventListener('click',e=>{
+        popoverSelect(e.currentTarget,{
+            title:_tr('Rotación'),
+            options:['normal','90','180','270'].map(x=>({val:x,label:_tr(_bkRotLabel(x))})),
+            current:sel.transformacion,
+            onSelect:async v=>{await aplicar(sel.id,{transformacion:v},true);},
+        });
+    });
+    document.getElementById('bk-pos')?.addEventListener('click',e=>{
+        const [pw,ph]=[principal.logico_ancho,principal.logico_alto];
+        const [ow,oh]=_bkLogico(m,sel.escala,sel.transformacion);
+        popoverSelect(e.currentTarget,{
+            title:_tr('Posición'),
+            options:[
+                {val:'right',label:_tr('A la derecha')},
+                {val:'left',label:_tr('A la izquierda')},
+                {val:'above',label:_tr('Arriba')},
+                {val:'below',label:_tr('Abajo')},
+                {val:'mirror',label:_tr('Duplicar pantalla')},
+            ],
+            current:'',
+            onSelect:async v=>{
+                // Las posiciones son del conjunto: se recolocan las dos, y
+                // la principal se ancla al origen para que el escritorio no
+                // se vaya a coordenadas negativas.
+                const destino=v==='mirror'?{x:principal.x,y:principal.y}
+                    :v==='left'?{x:principal.x-ow,y:principal.y}
+                    :v==='above'?{x:principal.x,y:principal.y-oh}
+                    :v==='below'?{x:principal.x,y:principal.y+ph}
+                    :{x:principal.x+pw,y:principal.y};
+                await aplicar(sel.id,destino);
+            },
+        });
+    });
+}
+
+/// «¿Se ve bien?» con cuenta atrás. Sin respuesta en 15 s se vuelve a lo de
+/// antes, que es lo que pasa si la pantalla se quedó en negro y no se ve el
+/// diálogo. El tiempo es el de macOS y GNOME.
+function _bkConfirmar(antes,rerender){
+    let quedan=15,hecho=false;
+    const deshacer=async()=>{
+        if(hecho)return;hecho=true;clearInterval(reloj);
+        const r=await bkApply(antes);
+        if(!r.ok)bkToast('error',r.error||_tr('Error al aplicar'));
+        else bkToast('aplicado',_tr('Configuración anterior restaurada'));
+        rerender();
+    };
+    showDialog(_tr('¿Mantener esta configuración?'),
+        `${_tr('Se volverá a la anterior en')} <b id="bk-cuenta">${quedan}</b> s.`,
+        {confirmText:_tr('Mantener'),cancelText:_tr('Volver atrás'),
+         onConfirm:()=>{hecho=true;clearInterval(reloj);},onCancel:deshacer});
+    // El foco en «Volver atrás» y no en «Mantener»: con la pantalla en negro,
+    // un Intro a ciegas tiene que deshacer, no confirmar lo que no se ve.
+    document.querySelector('.bk-overlay #d-cancel')?.focus();
+    const reloj=setInterval(()=>{
+        quedan--;
+        const n=document.getElementById('bk-cuenta');
+        if(n)n.textContent=quedan;
+        // Por el botón y no llamando a deshacer(): así el diálogo se cierra
+        // por su camino y suelta el atajo de Escape que registró.
+        if(quedan<=0)document.querySelector('.bk-overlay #d-cancel')?.click();
+    },1000);
 }
 
 function _bkRotLabel(t){

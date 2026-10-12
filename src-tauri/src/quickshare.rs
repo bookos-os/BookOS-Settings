@@ -47,6 +47,7 @@ impl Default for QsState {
 // ── Event forwarding tasks (spawned once on qs_start) ────────────────────────
 
 fn spawn_event_tasks(app: AppHandle) {
+    crate::isla::escuchar(app.clone());
     // Forward ChannelMessage → "qs-transfer" event
     let app1 = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -54,7 +55,10 @@ fn spawn_event_tasks(app: AppHandle) {
         let mut rx = state.msg_tx.subscribe();
         loop {
             match rx.recv().await {
-                Ok(msg) => { let _ = app1.emit("qs-transfer", &msg); }
+                Ok(msg) => {
+                    let _ = app1.emit("qs-transfer", &msg);
+                    crate::isla::transferencia(&msg).await;
+                }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => break,
             }
@@ -196,6 +200,26 @@ pub async fn qs_send_files(
         ob:   OutboundPayload::Files(files),
     };
 
+    sender.send(info).await.map_err(|e| e.to_string())?;
+    Ok(r#"{"ok":true}"#.into())
+}
+
+/// Envía un enlace a un dispositivo descubierto. Llega como URL y el otro
+/// lado lo abre en su navegador (lo usa el botón de compartir del navegador
+/// de BookOS, vía `bookos-settings --share-url`).
+#[tauri::command]
+pub async fn qs_send_url(
+    endpoint_id: String,
+    name: String,
+    addr: String,
+    url: String,
+    state: State<'_, QsState>,
+) -> Result<String, String> {
+    let sender = {
+        let guard = state.file_sender.lock().map_err(|e| e.to_string())?;
+        guard.as_ref().ok_or("Servicio no iniciado. Llama a qs_start primero.")?.clone()
+    };
+    let info = SendInfo { id: endpoint_id, name, addr, ob: OutboundPayload::Url(url) };
     sender.send(info).await.map_err(|e| e.to_string())?;
     Ok(r#"{"ok":true}"#.into())
 }

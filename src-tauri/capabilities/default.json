@@ -3,8 +3,7 @@
   "identifier": "default",
   "description": "Permisos básicos para la ventana principal",
   "windows": [
-    "main",
-    "buds-popup"
+    "main"
   ],
   "permissions": [
     "core:default",

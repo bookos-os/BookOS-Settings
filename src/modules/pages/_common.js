@@ -1,5 +1,6 @@
-import{tauriInvoke,getAssetUrl}from'../../tauri-api.js';
-import{t}from'../i18n.js';
+import{tauriInvoke,getAssetUrl,elegirRuta}from'../../tauri-api.js';
+import{t,getLang}from'../i18n.js';
+import{ico}from'./iconos.js';
 
 // ── Settings cache — optimistic in-memory store, updated on every write ──
 // Prevents toggle state from "resetting" when navigating back to a page before
@@ -99,7 +100,12 @@ const _TOAST_ICONS = {
     '✅':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
     '⚠':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
     '⚠️':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
-    '⚡':'<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+    '⚡':ico('zap'),
+    '⚙️':ico('settings'),
+    '⏰':ico('alarm-clock'),
+    '⏳':ico('hourglass'),
+    '↻':ico('rotate-cw'),
+    '…':ico('loader'),
     '🔋':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="18" height="12" rx="2" ry="2"/><line x1="23" y1="13" x2="23" y2="11"/></svg>',
     '🔒':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     '🔔':'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
@@ -332,17 +338,13 @@ const _TOAST_TR_DYN=[
 ];
 function _toastTr(msg){
     if(!msg) return msg;
-    // Follow the same locale resolution as t(): manual override first, then
-    // system locale. (Used to default to Spanish, leaking untranslated toasts
-    // to every non-override English user.)
-    const stored=(typeof localStorage!=='undefined' ? localStorage.getItem('bookos_lang') : null);
-    const lang=(stored&&stored!=='auto')?(stored.startsWith('es')?'es':'en')
-        :((navigator.language||'en').toLowerCase().startsWith('es')?'es':'en');
-    if (lang === 'es') return msg;
-    if (_TOAST_TR_EN[msg]) return _TOAST_TR_EN[msg];
+    if (getLang() === 'es') return msg;
+    const clave=msg.trim().replace(/\s+/g,' ');
+    if (Object.hasOwn(_TOAST_TR_EN,clave)) return msg.replace(msg.trim(),()=>_TOAST_TR_EN[clave]);
     // Fall back to the UI literal dictionary — many toast strings ('Rutina
     // creada', 'Desactivados', …) only exist there.
-    if (_UI_TR_EN[msg]) return _UI_TR_EN[msg];
+    const traducido=_tr(msg);
+    if(traducido!==msg)return traducido;
     for (const [re,rep] of _TOAST_TR_DYN) {
         if (re.test(msg)) return msg.replace(re,rep);
     }
@@ -364,7 +366,10 @@ function toast(msg, icon='✓'){
     const t=document.createElement('div');
     t.className='toast';
     // Map known emoji icons to inline SVG so toasts look uniform; arbitrary HTML icons pass through.
-    const svgIcon = _TOAST_ICONS[icon] !== undefined ? _TOAST_ICONS[icon] : icon;
+    // El mismo emoji llega unas veces con el selector de variación (U+FE0F) y
+    // otras sin él: se prueba con y sin, para que ninguno se cuele como emoji.
+    const sinVS=String(icon).replace(/\uFE0F/g,'');
+    const svgIcon = _TOAST_ICONS[icon] ?? _TOAST_ICONS[sinVS] ?? _TOAST_ICONS[sinVS+'\uFE0F'] ?? icon;
     t.innerHTML=`<span class="toast-icon">${svgIcon}</span>${esc(_toastTr(msg))}`;
     toastContainer.appendChild(t);
     setTimeout(()=>t.remove(),3000);
@@ -407,6 +412,7 @@ function showDialog(title,msg,{confirmText='Confirmar',confirmClass='confirm',ca
         </div>
     </div>`;
     document.body.appendChild(ov);
+    translateDOM(ov);
     const close=()=>{ov.remove();document.removeEventListener('keydown',onKey,true);try{prevFocus?.focus?.();}catch(e){}};
     function onKey(e){
         if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();onCancel?.();return;}
@@ -631,11 +637,11 @@ const _UI_TR_EN = {
     'Procesa todos los archivos de nuevo':'Reprocesses all files',
     'Repite la contraseña':'Repeat the password',
     'Revierte los cambios cuando la condición deje de cumplirse':'Reverts changes when the condition no longer holds',
-    'Se borrarán los archivos personales del usuario':'The user\'s personal files will be deleted',
+    'Se borrarán los archivos personales del usuario':'The personal files of user',
     'Sin actividad significativa':'No significant activity',
     'Sin resultados.':'No results.',
     'Teléfono':'Phone',
-    'y no se podrá recuperar.':'and cannot be recovered.',
+    'y no se podrá recuperar.':'will be deleted and cannot be recovered.',
     // Recovery / snapshots page
     'Recuperación':'Recovery',
     'Tomar captura al actualizar':'Take a snapshot when updating',
@@ -781,6 +787,7 @@ const _UI_TR_EN = {
     'Cliente de correo':'Email client',
     'Gestor de archivos':'File manager',
     'Imágenes':'Images',
+    'Imágenes y vídeos':'Images and videos',
     'Vídeo':'Video',
     'Audio':'Audio',
     'Documentos PDF':'PDF documents',
@@ -1019,7 +1026,7 @@ const _UI_TR_EN = {
     'Programar tema':'Schedule theme',
     'Programar modo oscuro':'Schedule dark mode',
     'Ajustes del modo Oscuro/Claro':'Dark/Light mode settings',
-    'Ajustes de los iconos tintados':'Tinted icons settings',
+    'Ajustes de los iconos tintados':'Tinted icon settings',
     'Iconos tintados':'Tinted icons',
     'Tintado':'Tinted',
     'Pintar la base':'Tint the base',
@@ -1325,7 +1332,7 @@ const _UI_TR_EN = {
     'Hora automática (NTP)':'Automatic time (NTP)',
     'Sincroniza el reloj por internet':'Sync the clock over the internet',
     'Zona horaria':'Time zone',
-    'Buscar zona…':'Search zone…',
+    'Buscar zona…':'Search time zones…',
     'Hora automática activada':'Automatic time enabled',
     'Hora automática desactivada':'Automatic time disabled',
     'Zona horaria actualizada':'Time zone updated',
@@ -1486,7 +1493,6 @@ const _UI_TR_EN = {
     'Reconexión automática':'Auto-reconnect',
     'Recordar':'Remember',
     'Recursos':'Resources',
-    'Red':'Network',
     'Red abierta':'Open network',
     'Red olvidada':'Network forgotten',
     'Redes':'Networks',
@@ -1604,6 +1610,67 @@ const _UI_TR_EN = {
     'Salud':'Health',
     'Capacidad':'Capacity',
     'Nivel de la batería':'Battery level',
+    'Últimas 24 horas':'Last 24 hours',
+    'Variable':'Variable',
+    'hasta':'up to',
+    'Predeterminada':'Default',
+    'Texto más grande':'Larger text',
+    'Más espacio':'More space',
+    'espacio como una pantalla de':'looks like',
+    'Integrado':'Built-in',
+    'Activar sonido':'Unmute',
+    'I':'L',
+    'D':'R',
+    'Volumen de entrada':'Input volume',
+    'Perfil de la tarjeta':'Card profile',
+    'Balance y perfil de la tarjeta':'Balance and card profile',
+    'Canción':'Song',
+    'Animación al minimizar':'Minimize animation',
+    'Efecto genio':'Genie effect',
+    'Probar un aviso':'Try an alert',
+    'Salen arriba a la derecha y se guardan en la campana del panel, que conserva los 20 últimos. Pasa el puntero por encima para verlo.':'They appear in the top-right corner and are kept in the panel bell, which holds the last 20. Hover to see it.',
+    'En pantalla':'On screen',
+    'Avisos':'Alerts',
+    'Con No molestar los avisos van directos a la campana; los urgentes salen igualmente. Para silenciar solo 1, 4 u 8 horas, abre la campana.':'With Do Not Disturb, alerts go straight to the bell; urgent ones still show. To silence for just 1, 4 or 8 hours, open the bell.',
+    'Ajustes avisa cuando hay una versión nueva de BookOS.':'Settings lets you know when a new BookOS version is out.',
+    'Se ven hasta tres a la vez, unos 5 segundos; los urgentes, 10.':'Up to three show at once, for about 5 seconds; urgent ones, 10.',
+    'Probar':'Try',
+    'Así se ven los avisos':'This is how alerts look',
+    'Este es un aviso de prueba de Ajustes.':'This is a test alert from Settings.',
+    'No molestar está activado: el aviso está en la campana.':'Do Not Disturb is on: the alert is in the bell.',
+    'Efecto escala':'Scale effect',
+    'Ocultar y mostrar el dock automáticamente':'Automatically hide and show the Dock',
+    'Se aparta cuando una ventana llega a él y vuelve al llevar el puntero abajo':'Moves away when a window reaches it and comes back when you move the pointer to the bottom',
+    'Número de escritorios':'Number of desktops',
+    'Estilo':'Style',
+    'Moderna':'Modern',
+    'Neutra':'Neutral',
+    'Redondeada':'Rounded',
+    'Clásica':'Classic',
+    'Artista':'Artist',
+    'Botón de apagado':'Power button',
+    'Controles multimedia':'Media controls',
+    'Animaciones':'Animations',
+    'Al bloquear y al desbloquear':'When locking and unlocking',
+    'Arrastra para moverlo':'Drag to move it',
+    'Arrastra para moverlo; las esquinas cambian el tamaño':'Drag to move it; the corners change its size',
+    'Apagar, reiniciar o suspender sin desbloquear':'Shut down, restart or sleep without unlocking',
+    'Toca el reloj, el usuario, la música o el botón de apagado':'Tap the clock, the user, the music or the power button',
+    'Arrástralos para subirlos o bajarlos. Las esquinas del reloj y de la foto cambian su tamaño.':'Drag them up or down. The corners of the clock and the photo change their size.',
+    'Efectos de sonido':'Sound effects',
+    'Es la única que ofrece esta pantalla. Para ver las cosas más grandes o más pequeñas, cambia la escala.':'It is the only one this display offers. To make things larger or smaller, change the scale.',
+    'Cada pantalla a su medida: elige cuánto quieres ver y cuánto quieres leer sin esfuerzo.':'Every screen its own size: choose how much you see and how easily you read it.',
+    'Ajustar el brillo automáticamente':'Automatically adjust brightness',
+    'Usar esta pantalla':'Use this display',
+    'Usar como principal':'Use as main display',
+    'apagada':'off',
+    '¿Mantener esta configuración?':'Keep this configuration?',
+    'Se volverá a la anterior en':'Reverting to the previous one in',
+    'Mantener':'Keep',
+    'Volver atrás':'Revert',
+    'Configuración anterior restaurada':'Previous configuration restored',
+    'Pantallas':'Displays',
+    'Sin datos de las últimas 24 horas':'No data for the last 24 hours',
     'Cargando':'Charging',
     'Completa':'Full',
     'Hoy':'Today',
@@ -1713,11 +1780,16 @@ const _UI_TR_EN = {
     'Perfil · Nombre · Hostname':'Profile · Name · Hostname',
     'Mantenimiento':'Maintenance',
     'Almacenamiento · Cache':'Storage · Cache',
+    'Almacenamiento · Caché':'Storage · Cache',
+    'Actividades dinámicas':'Dynamic activities',
+    'Wi-Fi · Bluetooth · Modo avión':'Wi-Fi · Bluetooth · Airplane mode',
+    'Perfil · Nombre · Nombre del equipo':'Profile · Name · Hostname',
     'Apps predeterminadas':'Default apps',
     'Idioma · Teclado · Fecha':'Language · Keyboard · Date',
     'Visión · Audición':'Vision · Hearing',
     'Sistema · Flatpak':'System · Flatpak',
     'Capturas · Revertir':'Snapshots · Rollback',
+    'Instantáneas · Restaurar':'Snapshots · Restore',
     'Luz nocturna':'Night light',
     'Tasa de refresco':'Refresh rate',
     'Escala':'Scale',
@@ -1821,6 +1893,40 @@ const _UI_TR_EN = {
     // ── Keyboard / touchpad+mouse pages ──
     'Touchpad y ratón':'Touchpad and mouse',
     'Distribución':'Layout',
+    'Teclas de volumen y brillo':'Volume and brightness keys','Al pulsar':'On press','Al mantener':'On hold','Subir el valor':'Increase value','Bajar el valor':'Decrease value',
+    'Cuánto cambia con cada pulsación · de 1 a 10 %':'How much it changes per key press · 1 to 10 %',
+    'Cuánto cambia en cada repetición, unas diez por segundo · de 1 a 30 %':'How much it changes per repeat, about ten per second · 1 to 30 %',
+    'Último valor conocido':'Last known value',
+    'No se pudo cambiar el modo':'Could not change the mode',
+    'El servicio de los auriculares (bookos-budsd) no está en marcha.':'The earbuds service (bookos-budsd) is not running.',
+    'Apuntar y clic':'Point and click','Desplazamiento':'Scrolling','Más gestos':'More gestures','Lenta':'Slow',
+    'Un toque con un dedo hace clic':'Tap with one finger to click','El contenido sigue el movimiento de los dedos':'Content follows your fingers',
+    'Ver todas las ventanas':'Show all windows','Tres dedos hacia arriba':'Three fingers up','Vista de escritorios':'Desktop overview',
+    'Cuatro dedos hacia arriba':'Four fingers up','Cambiar de escritorio':'Switch desktop','Cuatro dedos hacia los lados':'Four fingers sideways',
+    'Ver el escritorio':'Show desktop','Cuatro dedos hacia abajo':'Four fingers down','Abrir el launchpad':'Open launchpad','Pellizca con cuatro dedos':'Pinch with four fingers',
+    'Huella y contraseña':'Fingerprint and password','Huellas · Contraseña':'Fingerprints · Password',
+    'Tu cuenta tiene contraseña':'Your account has a password','Huella':'Fingerprint','Añadir huella':'Add fingerprint',
+    'Desbloquea el equipo y autoriza cambios del sistema con tu huella. Se guarda en el lector y no sale del equipo.':'Unlock the computer and authorize system changes with your fingerprint. It is stored in the reader and never leaves the computer.',
+    'No se encontró un lector de huellas':'No fingerprint reader found','Si el equipo tiene uno, comprueba que fprintd está instalado.':'If the computer has one, check that fprintd is installed.',
+    'La contraseña sigue disponible en la pantalla de bloqueo':'The password is still available on the lock screen',
+    'Borrar huella':'Delete fingerprint','Se borrará la huella del':'This will delete the fingerprint of the',
+    'Apoya el dedo en el lector y levántalo':'Place your finger on the reader and lift it',
+    'Levanta y apóyalo otra vez, moviéndolo un poco':'Lift and place it again, moving it slightly',
+    'No se leyó bien: vuelve a apoyarlo':'Not read properly: place it again','No se pudo registrar la huella':'Could not enroll the fingerprint',
+    'Índice derecho':'Right index','Índice izquierdo':'Left index','Pulgar derecho':'Right thumb','Pulgar izquierdo':'Left thumb',
+    'Corazón derecho':'Right middle','Corazón izquierdo':'Left middle','Anular derecho':'Right ring','Anular izquierdo':'Left ring',
+    'Meñique derecho':'Right little','Meñique izquierdo':'Left little',
+    'Añadir usuario…':'Add user…',
+    'Repetición · Distribución':'Repeat · Layout',
+    'Velocidad de repetición':'Key repeat rate',
+    'Retardo hasta repetir':'Delay until repeat',
+    'Apagada':'Off','Rápida':'Fast','Corto':'Short','Largo':'Long',
+    'por segundo':'per second',
+    'Mantén una tecla aquí para probar':'Hold a key here to test',
+    'Prueba de repetición':'Repeat test',
+    'Entrada de texto':'Text input',
+    'Atajos y remapeo de teclas':'Shortcuts and key remapping',
+    'Cambia lo que hace cada tecla en la app Teclas':'Change what each key does in the Keys app',
     'Atajos':'Shortcuts',
     'Repetición de teclas':'Key repeat',
     'Retardo antes de repetir':'Delay before repeating',
@@ -1899,13 +2005,433 @@ const _UI_TR_EN = {
     'Acento automático desactivado':'Automatic accent off',
     'No se pudo cambiar el acento del escritorio':'Could not change the desktop accent',
     'Color de acento del escritorio según el fondo':'Desktop accent color based on wallpaper',
+    'Tema':'Theme',
+    'Efectos':'Effects',
+    'Completos':'Full',
+    'Reducidos':'Reduced',
+    'Desenfoque del panel y del dock, y animaciones de las ventanas':'Panel and dock blur, and window animations',
+    'Color e iconos':'Color and icons',
+    'Estilo de iconos':'Icon style',
+    'Personalizar el tintado':'Customize tint',
+    'Tono, intensidad y logo de cada app':'Hue, strength and each app logo',
+    'Ahora sigue al fondo de pantalla: el color que elijas durará hasta el próximo cambio de fondo.':'It currently follows the wallpaper: the color you pick lasts until the next wallpaper change.',
+    'Tema claro desde':'Light theme from',
+    'Tema oscuro desde':'Dark theme from',
+    'Azul':'Blue','Índigo':'Indigo','Morado':'Purple','Rosa':'Pink','Rojo':'Red','Naranja':'Orange',
+    'Amarillo':'Yellow','Arena':'Sand','Verde':'Green','Turquesa':'Teal','Grafito':'Graphite',
+    'Pasa el puntero por encima para verla. «Sin animación» también quita el desenfoque, igual que los efectos reducidos.':'Hover to preview it. «No animation» also removes blur, like reduced effects.',
+    'Sin animación':'No animation',
+    'Ocultar el dock automáticamente':'Automatically hide the dock',
+    'Ocultar la barra superior automáticamente':'Automatically hide the top bar',
+    'Se aparta cuando una ventana llega a él y vuelve al llevar el puntero abajo · Meta+Alt+D':'Moves away when a window reaches it and comes back when the pointer goes down · Meta+Alt+D',
+    'Igual que el dock, pero arriba · Meta+Alt+B':'Like the dock, but at the top · Meta+Alt+B',
+    'Nombre del escritorio':'Desktop name',
+    'Dock':'Dock',
+    'Escritorios':'Desktops',
+    'El número de escritorios se aplica al volver a iniciar sesión.':'The number of desktops applies after signing in again.',
+    'Los lanzadores se fijan y se retiran desde el dock o el launchpad.':'Launchers are pinned and removed from the dock or the launchpad.',
+    'Fondos de BookOS':'BookOS wallpapers',
+    'Tus fondos':'Your wallpapers',
+    'Añadir fondo…':'Add wallpaper…',
+    'Añadir…':'Add…',
+    'Mostrar todos':'Show all',
+    'Claro y oscuro: cambia con el tema':'Light and dark: follows the theme',
+    'Claro y oscuro':'Light and dark',
+    'Dispositivo Wi-Fi apagado':'Wi-Fi device is off',
+    'No se encontraron redes':'No networks found',
+    'Dispositivo Bluetooth apagado':'Bluetooth device is off',
+    'No hay dispositivos vinculados':'No paired devices',
+    'Escala fraccional a':'Fractional scaling at',
+    'puede notarse menos fluido que con una escala entera':'may feel less smooth than integer scaling',
+    'Batería baja':'Low battery',
+    'Nivel de batería durante las últimas 24 horas, de 0 a 100 por ciento':'Battery level over the last 24 hours, from 0 to 100 percent',
+    'Color del logo':'Logo color',
+    'Repositorio BookOS':'BookOS repository',
+    'Completado':'Completed',
+    'Sistema operativo':'Operating system',
+    'Entorno de escritorio':'Desktop environment',
+    'Kernel de Linux':'Linux kernel',
+    'Tarjeta gráfica':'Graphics card',
+    'Idioma y región':'Language and region',
+    'Hora automática':'Automatic time',
+    'Inicio':'Startup',
+    'Dispositivos':'Devices',
+    'Sin zona':'No time zone',
+    'Se aplica al volver a iniciar sesión':'Applies the next time you log in',
+    'Desbloquear con huella':'Unlock with fingerprint',
+    'Aplicar paleta a los iconos':'Apply palette to icons',
+    'Colores del fondo':'Wallpaper colors',
+    'Colores básicos':'Basic colors',
+    'Leyendo el fondo de pantalla…':'Reading wallpaper…',
+    'No se pudo leer el fondo de pantalla':'Could not read the wallpaper',
+    'Paleta aplicada':'Palette applied',
+    'No se pudo aplicar la paleta':'Could not apply the palette',
+    'Paleta de colores desactivada':'Color palette disabled',
+    'Firmware':'Firmware',
+    'Software':'Software',
+    'Reintentar':'Retry',
+    'Tapa':'Lid',
+    'Al cerrar la tapa con batería':'When closing the lid on battery power',
+    'Al cerrar la tapa conectado':'When closing the lid while plugged in',
+    'Inactividad':'Inactivity',
+    'Suspender tras el bloqueo':'Suspend after locking',
+    'Con la batería crítica':'When the battery is critically low',
+    'Aplicando':'Applying',
+    'Aplicado':'Applied',
+    'No se detectó ninguna pantalla':'No displays detected',
+    'Programada':'Scheduled',
+    'Encendida':'On',
+    'Rotación':'Rotation',
+    'Esta versión del escritorio dibuja en una sola pantalla a la vez. Las demás se detectan y se pueden consultar, pero todavía no encenderse.':'This version of the desktop uses one display at a time. Other displays are detected and can be inspected, but cannot yet be enabled.',
+    'No puedes apagar la única pantalla encendida':'You cannot turn off the only active display',
+    'Ese modo no existe en esta pantalla':'That mode is not available on this display',
+    'Ajusta el refresco al contenido; ahorra batería':'Adjusts the refresh rate to the content to save battery',
+    'Estos cambios se aplicarán al volver a iniciar sesión.':'These changes will apply the next time you log in.',
+    'No se pudo leer la configuración de BookOS':'Could not read the BookOS configuration',
+    'Apariencia':'Appearance',
+    'Cálida':'Warm',
+    'Fría':'Cool',
+    'Desde':'From',
+    'Hasta':'Until',
+    'Esta sesión no puede teñir la pantalla':'Screen tinting is unavailable in this session',
+    'No molestar no disponible':'Do not disturb is unavailable',
+    'Pasa el puntero por encima para verla. «Sin animación» también quita el desenfoque del panel y del dock.':'Hover over it to preview. “No animation” also removes blur from the panel and dock.',
+    'Energía y firmware':'Power and firmware',
+    'Comprobando capacidades…':'Checking capabilities…',
+    'El kernel o el firmware no exponen controles compatibles.':'The kernel or firmware does not expose compatible controls.',
+    'No se pudieron leer las capacidades del firmware.':'Could not read the firmware capabilities.',
+    'Sin dispositivo de audio':'No audio device',
+    'Balance':'Balance',
+    'Bloqueo y suspensión':'Locking and suspension',
+    'No se pudo leer el estado':'Could not read the status',
+    'Aplicando iconos…':'Applying icons…',
+    'Iconos aplicados':'Icons applied',
+    'No se pudieron aplicar los iconos':'Could not apply icons',
+    'No se pudo cambiar el canal':'Could not change the channel',
+    "Busca dispositivos cercanos para emparejarlos con este equipo.":"Search for nearby devices to pair with this computer.",
+    "Batería:":"Battery:",
+    "Estado:":"Status:",
+    "Vinculado:":"Paired:",
+    "Tipo:":"Type:",
+    "Puerta de enlace":"Gateway",
+    "Activa Wi-Fi para buscar redes":"Turn on Wi-Fi to search for networks",
+    "Activa Bluetooth para buscar dispositivos":"Turn on Bluetooth to search for devices",
+    "No se pudo modificar el dispositivo":"Could not modify the device",
+    "No se pudo olvidar":"Could not forget the device",
+    "No se pudo conectar":"Could not connect",
+    "El equipo no se conectará automáticamente a esta red.":"This computer will not connect to this network automatically.",
+    "No cargando":"Not charging",
+    "Límite de carga alcanzado":"Charge limit reached",
+    "Permisos para proteger la batería":"Permission to protect the battery",
+    "BookOS necesita autorización para escribir el límite de carga del firmware.":"BookOS needs permission to set the firmware charge limit.",
+    "Máxima":"Maximum",
+    "Limita carga para alargar vida útil":"Limits charging to extend battery lifespan",
+    "Autorización cancelada":"Authorization cancelled",
+    "No se pudo aplicar el límite":"Could not apply the limit",
+    "No se pudo aplicar el límite de carga":"Could not apply the charge limit",
+    "No se cambió el límite: autorización cancelada":"Charge limit unchanged: authorization cancelled",
+    "No se pudo quitar el límite de carga":"Could not remove the charge limit",
+    "100% (sin límite)":"100% (no limit)",
+    "Se requiere autenticación":"Authentication required",
+    "Confirma tu identidad para autorizar esta acción.":"Confirm your identity to authorize this action.",
+    "Error al verificar.":"Verification failed.",
+    "Toca el sensor…":"Touch the sensor…",
+    "Falló":"Failed",
+    "Error al actualizar":"Could not update",
+    "Desactivar inicio automático":"Disable automatic login",
+    "Volverás a necesitar contraseña al encender el equipo.":"You will need your password again when you turn on the computer.",
+    "Confirmar eliminación":"Confirm deletion",
+    "El nombre de usuario es obligatorio":"Username is required",
+    "Usuario inválido (solo minúsculas, números, _ y -, debe empezar por letra)":"Invalid username (use lowercase letters, numbers, _ and -; start with a letter)",
+    "La contraseña debe tener al menos 8 caracteres":"Password must contain at least 8 characters",
+    "Las contraseñas no coinciden":"Passwords do not match",
+    "Confirmar creación de cuenta":"Confirm account creation",
+    "Rellena todos los campos":"Fill in all fields",
+    "Contraseña actual incorrecta":"Current password is incorrect",
+    "Error al cambiar contraseña":"Could not change the password",
+    "No se pudieron exportar los ajustes":"Could not export settings",
+    "No se pudieron importar los ajustes":"Could not import settings",
+    "No se pudieron cargar los fondos de pantalla":"Could not load wallpapers",
+    "Tiñe las apps y el acento del escritorio con los colores de tu fondo":"Tints apps and the desktop accent with your wallpaper colors",
+    "Recolorea los iconos de las apps con el tono elegido":"Recolors app icons with the selected shade",
+    "Sin acción":"No action",
+    "más":"more",
+    "Eliminar rutina":"Delete routine",
+    "Hora de activación":"Activation time",
+    "Máximo brillo, enfocado":"Maximum brightness, focused",
+    "Concentración":"Focus",
+    "Reducción de ruido":"Noise reduction",
+    "Controles de ruido":"Noise controls",
+    "Controles de sonido":"Sound controls",
+    "Reproducir o pausar música":"Play or pause music",
+    "Reproducir siguiente canción":"Play next track",
+    "Reproducir canción anterior":"Play previous track",
+    "Ejecutar acción personalizada":"Run custom action",
+    "Controles de pellizcar y mantener":"Pinch and hold controls",
+    "Enviar con Book Share":"Send with Book Share",
+    "el dispositivo":"the device",
+    "Instala KDE Connect en tu teléfono para vincularlos":"Install KDE Connect on your phone to pair the devices",
+    "Fuera de alcance":"Out of range",
+    "Visible para otros":"Visible to others",
+    "Mantén Quick Share activo en el otro equipo":"Keep Quick Share running on the other computer",
+    "Listo para recibir":"Ready to receive",
+    "Este equipo es visible para dispositivos cercanos":"This computer is visible to nearby devices",
+    "Carpeta de descarga":"Download folder",
+    "Elige un archivo y selecciona un dispositivo cercano":"Choose a file and select a nearby device",
+    "— listo para recibir":"— ready to receive",
+    "Error al iniciar":"Could not start",
+    "¿A qué dispositivo?":"Which device?",
+    "míos":"mine",
+    "Activa el modo emparejamiento en tus auriculares y pulsa Buscar":"Put your earbuds in pairing mode and click Search",
+    "Bloquear la pantalla":"Lock screen",
+    "Suspensión híbrida":"Hybrid sleep",
+    "Cuenta desde que se bloquea la pantalla":"Starts counting when the screen locks",
+    "Lo decide UPower al llegar al nivel crítico":"Determined by UPower when the battery reaches the critical level",
+    "Este ajuste modifica el firmware y requiere permisos de administrador.":"This setting modifies the firmware and requires administrator privileges.",
+    "No se pudo aplicar el ajuste":"Could not apply the setting",
+    "Esta sección estará disponible próximamente.":"This section will be available soon.",
+    "Título de la canción":"Track title",
+    "Código":"Code",
+    "eliges cualquier otro color, o escribes su código.":"to choose any other color or enter its code.",
+    "Color de la fecha":"Date color",
+    "Solo en la pantalla de acceso":"Only on the login screen",
+    "Píldora":"Pill",
+    "Mayús":"Shift",
+    "Portátil, móvil, tablet y auriculares":"Laptop, phone, tablet and earbuds",
+    "Día del mes y tu próximo evento":"Day of the month and your next event",
+    "Lo que suena, con controles · solo con Win+L":"Now playing, with controls · only with Win+L",
+    "Solo aparece si hay avisos · solo con Win+L":"Only appears when there are notifications · only with Win+L",
+    "Hoy y mañana con tus eventos · solo con Win+L":"Today and tomorrow with your events · only with Win+L",
+    "+ Añadir":"+ Add",
+    "Sacar la basura":"Take out the trash",
+    "BookBar oculta · toca para activarla":"BookBar hidden · tap to enable it",
+    "Modo Concentración":"Focus mode",
+    "Adaptar al fondo":"Adapt to wallpaper",
+    "Separación entre cifras":"Digit spacing",
+    "Tamaño de la fecha":"Date size",
+    "Pequeña":"Small",
+    "Grosor de la fecha":"Date weight",
+    "Separación del reloj":"Clock spacing",
+    "El mismo que el reloj":"Same as the clock",
+    "En \"Bajo el reloj\" van en fila y se mueven con él, así que las flechas no aplican.":"In \"Below the clock\", widgets form a row and move with the clock, so the arrow keys have no effect.",
+    "Este fondo no tiene un sujeto que recortar":"This wallpaper has no subject to cut out",
+    "No se pudo preparar la profundidad":"Could not prepare the depth effect",
+    "No se pudo abrir el selector":"Could not open the picker",
+    "Para guardar la pantalla de inicio de sesión, introduce la contraseña del equipo.":"Enter your computer password to save the login screen.",
+    "Pantalla de inicio de sesión actualizada":"Login screen updated",
+    "No se pudo guardar":"Could not save",
+    "Guardado. Se aplicará al volver a iniciar sesión.":"Saved. Applies the next time you log in.",
+    "Muy cálida":"Very warm",
+    "Algo cálida":"Slightly warm",
+    "Con el modo programado":"With scheduled mode",
+    "Solo funciona en una sesión de BookOS iniciada desde la pantalla de acceso. Lo que elijas se guarda igualmente.":"Only works in a BookOS session started from the login screen. Your choices are still saved.",
+    "Requiere un lector compatible y una huella registrada. La contraseña sigue disponible.":"Requires a compatible reader and an enrolled fingerprint. You can still use your password.",
+    "Velocidad del ratón":"Mouse speed",
+    "Efectos de ventanas y desenfoque":"Window effects and blur",
+    "Animaciones de actividades":"Activity animations",
+    "No se detectó ningún altavoz o auricular":"No speakers or headphones detected",
+    "No se detectó ningún micrófono":"No microphone detected",
+    "Aplicación":"Application",
+    "Sonido al cambiar el volumen":"Sound when changing volume",
+    "Con las teclas de volumen":"With the volume keys",
+    "No se pudo cambiar el cortafuegos":"Could not change the firewall",
+    "Alta":"High",
+    "Calendario":"Calendar",
+    "Color personalizado":"Custom color",
+    "Correo":"Mail",
+    "Cristal":"Glass",
+    "Estirado vertical":"Vertical stretch",
+    "Junta":"Tight",
+    "Opacidad":"Opacity",
+    "Pegada":"Close",
+    "Permisos requeridos":"Permission required",
+    "Profundidad (capas)":"Depth (layers)",
+    "Suelta":"Loose",
+    "Volver":"Back",
+    "Widget":"Widget",
+    "Animaciones del bloqueo":"Lock screen animations",
+    "Bloquear tras inactividad":"Lock after inactivity",
+    "Servicio BookOS no disponible":"BookOS service unavailable",
+    "Temporizador siempre visible":"Always show timer",
+    "Tonalidad":"Hue",
+    "Velocidad del touchpad":"Touchpad speed",
+    "Adaptativo":"Adaptive",
+    "Apagar":"Shut down",
+    "Buscando dispositivos…":"Searching for devices…",
+    "Buscando por Wi-Fi Direct…":"Searching via Wi-Fi Direct…",
+    "Buscando...":"Searching...",
+    "Cargando...":"Loading...",
+    "Casi completo":"Almost full",
+    "Cine":"Cinema",
+    "Compartir cercano":"Nearby sharing",
+    "Conectado y disponible":"Connected and available",
+    "Conectando…":"Connecting…",
+    "Descanso":"Rest",
+    "Desconectando...":"Disconnecting...",
+    "Deshabilitar toques":"Disable touch controls",
+    "Dispositivo Bluetooth":"Bluetooth device",
+    "Dispositivo cercano":"Nearby device",
+    "Dispositivo olvidado":"Device forgotten",
+    "Doble toque":"Double tap",
+    "Editar rutina":"Edit routine",
+    "Enviar archivo":"Send file",
+    "Expresivo":"Expressive",
+    "Huella no reconocida — reintentando":"Fingerprint not recognized — retrying",
+    "Huella reconocida":"Fingerprint recognized",
+    "Mi rutina":"My routine",
+    "Neutro":"Neutral",
+    "Nueva rutina":"New routine",
+    "Obteniendo red...":"Getting network...",
+    "Olvidar dispositivo":"Forget device",
+    "Optimizado (15W)":"Optimized (15W)",
+    "Otros dispositivos pueden encontrarte":"Other devices can find you",
+    "Paquetes del sistema personalizados (libfprint, apps BookOS)":"Custom system packages (libfprint, BookOS apps)",
+    "Punto manual desde Ajustes":"Manual snapshot from Settings",
+    "Quick Share · KDE Connect · Archivos cercanos":"Quick Share · KDE Connect · Nearby files",
+    "Rendimiento (28W)":"Performance (28W)",
+    "Rutina":"Routine",
+    "Sensor no disponible":"Sensor unavailable",
+    "Silencioso (8W)":"Quiet (8W)",
+    "Sin disparador":"No trigger",
+    "Sin dispositivos KDE Connect":"No KDE Connect devices",
+    "Sin dispositivos encontrados":"No devices found",
+    "Sin distracciones":"No distractions",
+    "Sin rotar":"No rotation",
+    "Solicitud entrante":"Incoming request",
+    "Tema del sistema":"System theme",
+    "Tema oscuro, no molestar":"Dark theme, do not disturb",
+    "Tema oscuro, volumen alto":"Dark theme, high volume",
+    "Toque y presionar":"Tap and hold",
+    "Toques y acciones":"Taps and actions",
+    "Trabajo":"Work",
+    "Triple toque":"Triple tap",
+    "Un toque":"Single tap",
+    "Vibrante":"Vivid",
+    "Vincular nuevos Buds":"Pair new Buds",
+    "Restaurar al finalizar":"Restore when finished",
+    "Ahorro al desconectar":"Save power when unplugged",
+    "Buscar ajustes":"Search settings",
+    "Se requiere autorización":"Authorization required",
+    "Esta acción modifica configuración del sistema. Confirma tu identidad para continuar.":"This action changes system settings. Confirm your identity to continue.",
+    "No se pudo abrir la ventana de autenticación":"Could not open the authentication window",
+    "En":"On",
+    "consumo":"usage",
+    "sin sujeto claro":"no clear subject",
+    "Dispositivos vinculados":"Paired devices",
+    "Escanear":"Scan",
+    "Instalando actualizaciones":"Installing updates",
+    "Instalando...":"Installing...",
+    "Elegir foto":"Choose photo",
+    "Confirmar nueva":"Confirm new password",
+    "Ajustes":"Settings",
+    "Notas":"Notes",
+    "Fotos":"Photos",
+    "Crear rutina":"Create routine",
+    "Si":"If",
+    "Entonces":"Then",
+    "Acciones a ejecutar":"Actions to run",
+    "Buscando dispositivos cercanos…":"Searching for nearby devices…",
+    "Enviar":"Send",
+    "Rechazar":"Reject",
+    "Con profundidad, el sujeto del fondo se recorta y se pinta":"With depth enabled, the wallpaper subject is cut out and placed",
+    "por delante":"in front",
+    "del reloj. Solo funciona si el fondo tiene un sujeto claro contra cielo, pared o degradado; si no lo tiene, se queda como está.":"of the clock. This only works if the wallpaper has a clear subject against the sky, a wall or a gradient; otherwise it stays as it is.",
+    "La muestra":"The",
+    "A":"A",
+    "B":"B",
+    "muestra":"sample",
+    "toma el tono del fondo de pantalla y lo aclara hasta que se lee bien encima. Cambia sola al cambiar el fondo. Con":"sample takes its color from the wallpaper and lightens it for readability. It changes automatically with the wallpaper. Use",
+    "Arrastra el reloj para moverlo y tira de una esquina para cambiar su tamaño. El grosor está en \"Fuente y color\".":"Drag the clock to move it and drag a corner to resize it. Weight is in \"Font and color\".",
+    "Con \"Todas las cuentas\" se ven todos los usuarios en fila y se entra pulsando el que quieras.":"\"All accounts\" shows all users in a row. Click one to log in.",
+    ": con Win+L el sistema solo expone la cuenta que está bloqueada, así que ahí no cambia nada. Arrastra el bloque para colocarlo; eso sí vale para ambas.":": with Win+L, the system only exposes the locked account, so this does not change anything there. Drag the block to position it; this works on both screens.",
+    "Tarjeta":"Card",
+    "Solo se transparenta el fondo: los textos siguen opacos para que el widget se siga leyendo.":"Only the background becomes transparent; text stays opaque so the widget remains readable.",
+    "El tiempo no admite transparencia: su color no es una superficie, es el cielo del diseño.":"Weather does not support transparency: its color represents the sky in the design.",
+    "Con el widget seleccionado, las":"With the widget selected, the",
+    "flechas":"arrow keys",
+    "lo mueven punto a punto y con":"move it one point at a time. Hold",
+    "de cinco en cinco. También puedes arrastrarlo o tirar de una esquina.":"to move it five points at a time. You can also drag it or resize it by dragging a corner.",
+    "El desenfoque se calcula al guardar y se guarda como imagen aparte, así la pantalla no gasta tiempo en difuminar al arrancar.":"Blur is calculated when saving and stored as a separate image, so the login screen does not need to blur it at startup.",
+    "Con el contenido oculto se ve qué aplicación avisa y cuántos avisos hay, pero no el texto. Un portátil bloqueado suele estar desatendido.":"When content is hidden, you can see which app sent notifications and how many there are, but not their text. A locked laptop is usually unattended.",
+    "Toca el reloj, las cuentas o la BookBar para personalizarlos. Toca el fondo para cambiar la imagen.":"Click the clock, accounts or BookBar to customize them. Click the background to change the image.",
+    "Para":"To",
+    ", introduce la contraseña del equipo.":", enter your computer password.",
+    "cambiar el idioma del sistema":"change the system language",
+    "cambiar el nombre visible":"change the display name",
+    "cambiar el nombre del equipo":"change the computer name",
+    "cambiar qué hace la tapa":"change what closing the lid does",
+    "cambiar la acción con batería crítica":"change the critical battery action",
+    "Cualquier persona con acceso al equipo iniciará sesión como":"Anyone with access to this computer will log in as",
+    "sin contraseña. Confirma para continuar.":"without a password. Confirm to continue.",
+    "Introduce tu contraseña para borrar la cuenta":"Enter your password to delete account",
+    "Introduce tu contraseña de administrador para crear la cuenta":"Enter your administrator password to create account",
+    "A:":"To:",
+    "De:":"From:",
+    "Blanco":"White",
+    "Negro":"Black",
+    "Plateado":"Silver",
+    "Las cifras se alargan hasta llenar el hueco libre que deja el fondo, sin taparlo":"The digits stretch to fill the space left by the wallpaper without covering it",
+    "(ahora,":"(currently,",
+    "). Se vuelve a medir al cambiar de imagen o de sitio el reloj.":"). This is measured again when you change the image or move the clock.",
+    ". Se vuelve a medir al cambiar de imagen o de sitio el reloj.":". This is measured again when you change the image or move the clock.",
+    "Archivos":"Files",
+    "Error GBC:":"GBC error:",
+    "Error P2P:":"P2P error:",
+    "Las cifras se alargan hasta llenar el hueco libre que deja el fondo, sin taparlo (ahora,":"The digits stretch to fill the space left by the wallpaper without covering it (currently,",
+    "Adaptado al fondo de pantalla":"Adapted to wallpaper",
+    "¿Seguro que quieres eliminar esta rutina?":"Are you sure you want to delete this routine?",
+    "No se pudo cargar la información":"Could not load information",
+    "Sensibilidad · Botones · Velocidad":"Sensitivity · Buttons · Speed",
+    "Brillo · Resolución · Escala":"Brightness · Resolution · Scale",
+    "Bloqueo · Reloj":"Lock · Clock",
+    "Efectos · Animaciones":"Effects · Animations",
+    "Hardware · Info":"Hardware · Info",
+    "Reducir efectos y animaciones":"Reduce effects and animations",
+    "Bloqueo por inactividad":"Lock after inactivity",
+    "Firewall (UFW)":"Firewall (UFW)",
+    "Hostname":"Hostname",
+    "Avatar":"Avatar",
+    "Escritorio BookOS":"BookOS desktop",
 };
+
+// Los datos variables se conservan: traducir una frase entera evita que los
+// nombres de redes, cuentas y archivos se pierdan entre fragmentos sin traducir.
+const _UI_TR_DYN=[
+    [/^Conectar a (.+)$/,'Connect to $1'],
+    [/^Olvidar "(.+)"$/,'Forget "$1"'],
+    [/^¿Quieres olvidar (.+)\?$/,'Do you want to forget $1?'],
+    [/^Eliminar cuenta "(.+)"$/,'Delete account "$1"'],
+    [/^Para (.+), introduce la contraseña del equipo\.$/,(_,accion)=>`To ${_tr(accion)}, enter your computer password.`],
+    [/^(.+) de batería restante$/,'$1 of battery remaining'],
+    [/^(.+) para completar la carga$/,'$1 until fully charged'],
+    [/^(\d+)% disponible$/,'$1% available'],
+    [/^Límite: (\d+)%$/,'Limit: $1%'],
+    [/^Hasta el (\d+)%$/,'Up to $1%'],
+    [/^(\d+)% \(protección activa\)$/,'$1% (protection enabled)'],
+    [/^Consumo: (.+) W$/,'Power draw: $1 W'],
+    [/^No se pudo quitar el límite \((.+)\)$/,'Could not remove the limit ($1)'],
+    [/^Modo activado \((.+)\)$/,'Mode enabled ($1)'],
+    [/^Archivo recibido: (.+)$/,'File received: $1'],
+    [/^Archivo enviado: (.+)$/,'File sent: $1'],
+    [/^Enviando enlace a (.+)…$/,'Sending link to $1…'],
+    [/^Ajustes exportados a (.+)$/,'Settings exported to $1'],
+    [/^Escritorio (\d+)$/,'Desktop $1'],
+    [/^(\d+) archivos$/,'$1 files'],
+    [/^Forma de (.+)$/,(_,widget)=>`${_tr(widget)} shape`],
+    [/^De: (.+)$/,'From: $1'],
+    [/^A: (.+)$/,'To: $1'],
+    [/^Error(?: al (enviar|iniciar|actualizar))?: (.+)$/,(_,accion,error)=>`${accion?`Could not ${ {enviar:'send',iniciar:'start',actualizar:'update'}[accion]}`:'Error'}: ${_tr(error)}`],
+    [/^No se pudo iniciar Quick Share: (.+)$/,(_,error)=>`Could not start Quick Share: ${_tr(error)}`],
+];
 
 function _tr(str){
     if (!str || typeof str !== 'string') return str;
-    const lang = (typeof localStorage!=='undefined' ? localStorage.getItem('bookos_lang') : null) || 'es';
-    if (lang === 'es') return str;
-    if (_UI_TR_EN[str]) return _UI_TR_EN[str];
+    if (getLang() === 'es') return str;
+    const clave=str.trim().replace(/\s+/g,' ');
+    if (Object.hasOwn(_UI_TR_EN,clave)) return str.replace(str.trim(),()=>_UI_TR_EN[clave]);
+    for(const [patron,traduccion] of _UI_TR_DYN){
+        if(patron.test(clave))return str.replace(str.trim(),()=>clave.replace(patron,traduccion));
+    }
     return str;
 }
 
@@ -1916,8 +2442,7 @@ function _tr(str){
 // app language is English. Idempotent (English text isn't in the dict, so a
 // second pass is a no-op) and only mutates exact full-string matches.
 function _isEN(){
-    const lang=(typeof localStorage!=='undefined'?localStorage.getItem('bookos_lang'):null)||'es';
-    return lang==='en';
+    return getLang()==='en';
 }
 function translateDOM(root){
     if(!_isEN()||!root||typeof document==='undefined')return;
@@ -1928,20 +2453,22 @@ function translateDOM(root){
         for(const tn of nodes){
             const raw=tn.nodeValue; if(!raw)continue;
             const key=raw.trim(); if(!key)continue;
-            const tr=_UI_TR_EN[key];
-            if(tr&&tr!==key)tn.nodeValue=raw.replace(key,tr);
+            const tr=_tr(key);
+            if(tr&&tr!==key)tn.nodeValue=raw.replace(key,()=>tr);
         }
-        (root.querySelectorAll?root:document).querySelectorAll('[placeholder],[title],[aria-label]').forEach(el=>{
+        const atributos='[placeholder],[title],[aria-label]';
+        const elementos=[...(root.matches?.(atributos)?[root]:[]),...root.querySelectorAll(atributos)];
+        elementos.forEach(el=>{
             for(const a of ['placeholder','title','aria-label']){
                 const v=el.getAttribute(a); if(!v)continue;
-                const tr=_UI_TR_EN[v.trim()];
+                const tr=_tr(v.trim());
                 if(tr&&tr!==v.trim())el.setAttribute(a,tr);
             }
         });
     }catch(e){}
 }
-// Auto-translate dynamically-inserted content (pages, dialogs, popovers) by
-// observing the body for added subtrees. Debounced via rAF to coalesce bursts.
+// Los estados cambian también mediante textContent y atributos, sin insertar
+// elementos. Se agrupan por fotograma para no recorrer el DOM por cada cambio.
 if(typeof window!=='undefined'){
     window.translateDOM=translateDOM;
     if(typeof document!=='undefined'&&typeof MutationObserver!=='undefined'){
@@ -1949,12 +2476,17 @@ if(typeof window!=='undefined'){
         const _flush=()=>{ _raf=0; const batch=_pending; _pending=new Set(); batch.forEach(node=>translateDOM(node)); };
         const _obs=new MutationObserver(muts=>{
             if(!_isEN())return;
-            for(const m of muts) for(const node of m.addedNodes){
-                if(node.nodeType===1) _pending.add(node);
+            for(const m of muts){
+                if(m.type==='characterData')_pending.add(m.target.parentElement);
+                else if(m.type==='attributes')_pending.add(m.target);
+                else for(const node of m.addedNodes){
+                    if(node.nodeType===1)_pending.add(node);
+                    else if(node.nodeType===3)_pending.add(node.parentElement);
+                }
             }
             if(_pending.size&&!_raf)_raf=requestAnimationFrame(_flush);
         });
-        const _start=()=>{ if(document.body){ _obs.observe(document.body,{childList:true,subtree:true}); translateDOM(document.body); } };
+        const _start=()=>{ if(document.body){ _obs.observe(document.body,{childList:true,characterData:true,attributes:true,attributeFilter:['placeholder','title','aria-label'],subtree:true}); translateDOM(document.body); } };
         if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_start);
         else _start();
     }
@@ -1972,7 +2504,7 @@ function renderSlider(id, value=50, min=0, max=100){
     return `<div class="slider-container"><input type="range" class="filled" id="${id}" min="${min}" max="${max}" value="${value}" style="--fill:${fill}%"><span class="slider-label" id="${id}-l">${value}%</span></div>`;
 }
 function renderHeader(title, rightActions=''){
-    return `<div class="detail-header"><button type="button" class="back-btn" aria-label="Volver" title="Volver">←</button><h2 class="detail-title">${_tr(title)}</h2>${rightActions?`<div class="detail-header-actions">${rightActions}</div>`:''}</div>`;
+    return `<div class="detail-header"><button type="button" class="back-btn" aria-label="Volver" title="Volver">${ico('arrow-left',{size:22,sw:2.2})}</button><h2 class="detail-title">${_tr(title)}</h2>${rightActions?`<div class="detail-header-actions">${rightActions}</div>`:''}</div>`;
 }
 function renderSection(title){
     return `<p class="section-header">${_tr(title)}</p>`;
@@ -2064,6 +2596,7 @@ function popoverSelect(anchor,{options,current,onSelect,footer=null,title=''}){
     // insertaba en la página y empujaba el resto hacia abajo: una lista de ocho
     // tiempos ocupaba media pantalla para elegir uno.
     document.body.appendChild(pop);
+    translateDOM(pop);
     const btn=anchor.querySelector('.bk-select')||anchor;
     const r=btn.getBoundingClientRect(),vh=window.innerHeight,vw=window.innerWidth;
     pop.style.minWidth=`${Math.max(r.width,160)}px`;
@@ -2194,7 +2727,7 @@ function appIconUrl(id,iconPath){
     return iconPath&&iconPath.startsWith('/')?getAssetUrl(iconPath):'';
 }
 export{
-    tauriInvoke,getAssetUrl,appIconUrl,t,
+    tauriInvoke,getAssetUrl,elegirRuta,appIconUrl,t,
     getSetting,setSetting,primeSetting,ci,_icInvalidate,getCachedHwState,
     esc,addInterval,addSystemListener,toast,showDialog,showRootAuth,promptSudo,invokeWithAuth,
     renderSkeleton,renderSkeletonChart,renderLoading,renderCard,renderInfoItem,renderServiceError,

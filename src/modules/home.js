@@ -1,22 +1,23 @@
 export const searchIndex=[
-{id:'conexiones',title:'Conexiones',subtitle:'WiFi · Bluetooth · Modo Avión',keywords:['wifi','red','internet','bluetooth','avion','conexion','network','connections','airplane','ethernet','cable','wired']},
+{id:'conexiones',title:'Conexiones',subtitle:'Wi-Fi · Bluetooth · Modo avión',keywords:['wifi','red','internet','bluetooth','avion','conexion','network','connections','airplane','ethernet','cable','wired']},
 {id:'dispositivos',title:'Dispositivos conectados',subtitle:'Share · Buds',keywords:['dispositivo','compartir','share','buds','devices','connected','nearby','headphones','earbuds']},
-{id:'recuperacion',title:'Recuperación',subtitle:'Capturas · Revertir',keywords:['recuperacion','recovery','snapshot','captura','revertir','rollback','btrfs','snapper','restaurar','backup']},
-{id:'teclado',title:'Teclado',subtitle:'Distribución',keywords:['teclado','keyboard','distribucion','layout','atajos','shortcuts','teclas','repeticion','xkb']},
+{id:'recuperacion',title:'Recuperación',subtitle:'Instantáneas · Restaurar',keywords:['recuperacion','recovery','snapshot','captura','revertir','rollback','btrfs','snapper','restaurar','backup']},
+{id:'teclado',title:'Teclado',subtitle:'Repetición · Distribución',keywords:['repetir','retardo','velocidad','teclado','keyboard','distribucion','layout','atajos','shortcuts','teclas','repeticion','xkb']},
 {id:'touchpadmouse',title:'Touchpad y ratón',subtitle:'Sensibilidad · Botones · Velocidad',keywords:['touchpad','raton','mouse','tactil','panel','gestos','tap','scroll','puntero','botones','velocidad','aceleracion']},
 {id:'modos',title:'Modos y rutinas',subtitle:'Modos · Rutinas',keywords:['modo','rutina','modes','routines','automation','automatizacion']},
 {id:'sonido',title:'Sonido',subtitle:'Volumen · Salida',keywords:['sonido','volumen','audio','silencio','salida','sound','volume','mute','output','balance']},
 {id:'notificaciones',title:'Notificaciones',subtitle:'No molestar',keywords:['notificacion','alerta','dnd','notifications','alert','do not disturb']},
 {id:'pantalla',title:'Pantalla',subtitle:'Brillo · Resolución · Escala',keywords:['pantalla','brillo','resolucion','display','blur','efectos','screen','brightness','resolution','escala']},
 {id:'bateria',title:'Batería',subtitle:'Energía · Carga · Samsung Book',keywords:['bateria','energia','carga','samsung','book','ventilador','rendimiento','battery','power','charge','performance','fan']},
-{id:'bloqueo',title:'Pantalla de bloqueo',subtitle:'Bloqueo · Reloj · SDDM',keywords:['bloqueo','lock','aod','huella','lockscreen','biometrics','fingerprint','sddm']},
+{id:'bloqueo',title:'Pantalla de bloqueo',subtitle:'Bloqueo · Reloj',keywords:['bloqueo','lock','aod','huella','lockscreen','biometrics','fingerprint']},
 {id:'inicio',title:'Escritorio',subtitle:'Dock · Escritorios virtuales',keywords:['inicio','home','escritorio','homescreen','layout','desktop','dock','escritorios']},
 {id:'fondos',title:'Fondo de pantalla',subtitle:'Fondos · Paleta',keywords:['fondo','wallpaper','paleta','background','palette','accent','color']},
 {id:'temas',title:'Temas',subtitle:'Temas · Modo oscuro',keywords:['tema','oscuro','claro','dark','light','themes','theme','mode']},
+{id:'huella',title:'Huella y contraseña',subtitle:'Huellas · Contraseña',keywords:['huella','dactilar','fingerprint','fprint','contraseña','password','lector','desbloquear']},
 {id:'seguridad',title:'Seguridad y privacidad',subtitle:'Firewall · Permisos',keywords:['seguridad','privacidad','permiso','firewall','ufw','security','privacy','permissions','camera','microphone']},
-{id:'cuentas',title:'Cuentas',subtitle:'Perfil · Nombre · Hostname',keywords:['cuenta','perfil','nombre','hostname','account','profile','name','password','user']},
+{id:'cuentas',title:'Cuentas',subtitle:'Perfil · Nombre · Nombre del equipo',keywords:['cuenta','perfil','nombre','hostname','account','profile','name','password','user']},
 {id:'avanzadas',title:'Funciones avanzadas',subtitle:'Actividades dinámicas',keywords:['avanzado','labs','advanced','experimental','compositor','effects']},
-{id:'mantenimiento',title:'Mantenimiento',subtitle:'Almacenamiento · Cache',keywords:['mantenimiento','limpiar','cache','espacio','disk','almacenamiento','memoria','maintenance','clean','storage','space']},
+{id:'mantenimiento',title:'Mantenimiento',subtitle:'Almacenamiento · Caché',keywords:['mantenimiento','limpiar','cache','espacio','disk','almacenamiento','memoria','maintenance','clean','storage','space']},
 {id:'aplicaciones',title:'Aplicaciones',subtitle:'Apps predeterminadas',keywords:['aplicacion','app','predeterminada','navegador','browser','apps','default','pdf','image','video','imagenes','correo','email']},
 {id:'general',title:'Administración general',subtitle:'Idioma · Teclado · Fecha',keywords:['idioma','teclado','fecha','hora','keyboard','general','language','date','time','locale','shortcuts','atajos','autostart']},
 {id:'accesibilidad',title:'Accesibilidad',subtitle:'Efectos · Animaciones',keywords:['accesibilidad','vision','zoom','accessibility','cursor','font','invert','contrast']},
@@ -43,8 +44,6 @@ export const subSearchIndex=[
 {parent:'pantalla',title:'Escala',keywords:['escala','zoom','dpi']},
 // Bateria
 {parent:'bateria',title:'Modo de rendimiento',keywords:['rendimiento','performance','balanced','silencioso','potencia']},
-{parent:'bateria',title:'Modo ahorro',keywords:['ahorro','ahorrador','save','baja']},
-{parent:'bateria',title:'Carga adaptativa',keywords:['carga','adaptativa','adaptive','inteligente']},
 {parent:'bateria',title:'Protección de batería',keywords:['proteccion','limite','80','tope']},
 {parent:'bateria',title:'Modo ventilador',keywords:['ventilador','fan','silencio','ruido']},
 {parent:'bateria',title:'Información de la batería',keywords:['info','salud','ciclos','health','wear']},
@@ -59,7 +58,7 @@ export const subSearchIndex=[
 {parent:'conexiones',title:'Modo avión',keywords:['avion','airplane','vuelo']},
 {parent:'conexiones',title:'VPN',keywords:['vpn','virtual','tunel']},
 // Bloqueo
-{parent:'bloqueo',title:'Tema SDDM',keywords:['sddm','login','tema','sesion']},
+{parent:'bloqueo',title:'Personalizar',keywords:['reloj','avatar','tamaño','posicion','altura','musica','personalizar','fuente','grosor','letra']},
 // Notificaciones
 {parent:'notificaciones',title:'No molestar (DND)',keywords:['dnd','molestar','silencio']},
 {parent:'notificaciones',title:'Notificaciones',keywords:['notificacion','alerta','aviso']},
@@ -110,7 +109,6 @@ export const subSearchIndex=[
 // Avanzadas — efectos concretos
 // Bateria — añadidos
 {parent:'bateria',title:'Al conectar el cargador',keywords:['cargador','enchufe','charger','plug','ac','corriente']},
-{parent:'bateria',title:'Atenuar pantalla',keywords:['atenuar','dim','brillo','bajo']},
 {parent:'bateria',title:'Perfil térmico',keywords:['termico','thermal','watts','tdp','temperatura']},
 {parent:'bateria',title:'Límite de carga',keywords:['limite','carga','80','tope','charge limit']},
 // Sonido — añadidos
@@ -132,11 +130,13 @@ import{t}from'./i18n.js';
 const ic=s=>`<div class="item-icon"><img src="assets/${s}" alt=""></div>`;
 // Earbuds icon for the Home profile-card shortcut — reuses the same SVG art as
 // the Buds page rings (looks clean, never emoji).
-const BUDS_SVG=`<span class="home-buds-pair"><img src="assets/budsleft.svg" alt=""><img src="assets/budsright.svg" alt=""></span>`;
+// Como máscara y no como <img>: los SVG son trazo oscuro y en tema oscuro no
+// se veían. Así toman el color del texto.
+const BUDS_SVG=`<span class="home-buds-pair"><i style="--src:url(assets/budsleft.svg)"></i><i style="--src:url(assets/budsright.svg)"></i></span>`;
 const it=(page,icon,key)=>`<div class="item" data-page="${page}" tabindex="0" role="button">${ic(icon)}<div class="item-texts"><span class="title">${t(key)}</span><span class="subtitle">${t(key+'_sub')}</span></div></div>`;
 
 export function renderHome(u){
-    const name=u?.display_name||'Usuario';
+    const name=u?.display_name||t('user');
     const ini=name.charAt(0).toUpperCase();
     // Backend inlines the avatar as a data URL — no protocol headaches.
     const _assetUrl=(p)=>window.__TAURI__?.core?.convertFileSrc?window.__TAURI__.core.convertFileSrc(p):('asset://localhost'+(p.startsWith('/')?p:'/'+p));
@@ -147,11 +147,11 @@ export function renderHome(u){
     return `
 <div class="card card-profile">
     <div class="item" data-page="cuentas" tabindex="0" role="button">
-        <div class="profile-left"><span class="title">${name}</span><span class="subtitle">${t('bookos_account')}</span></div>${av}
+        ${av}<div class="profile-left"><span class="title">${name}</span><span class="subtitle">${t('bookos_account')}</span></div>
     </div>
     <div class="item home-buds-row" id="home-buds" tabindex="0" role="button" style="display:none">
         <div class="item-icon">${BUDS_SVG}</div>
-        <div class="item-texts"><span class="title home-buds-name"></span></div>
+        <div class="item-texts"><span class="title home-buds-name"></span><span class="subtitle home-buds-bat"></span></div>
     </div>
 </div>
 
@@ -183,6 +183,7 @@ export function renderHome(u){
 
 <div class="card">
     ${it('seguridad','security.svg','security')}
+    ${it('huella','fingerprint.svg','fingerprint')}
     ${it('aplicaciones','aplications.svg','apps')}
     ${it('actualizacion','software.svg','updates')}
 </div>
