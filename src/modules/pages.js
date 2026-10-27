@@ -12,13 +12,9 @@ import{
 }from'./pages/_common.js';
 import{ico}from'./pages/iconos.js';
 import{getLang}from'./i18n.js';
-// Routines engine lives in its own light module (loaded by main.js at startup);
-// the page renderers below consume it for the Modos/automation UI.
-import{getRoutines,saveRoutines,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,executeRoutine,snapshotForRoutine,restoreSnapshot,_getSnap,_deleteSnap}from'./routines-engine.js';
 // Re-export shared helpers so existing importers of pages.js keep working.
 export{invalidateHwCache};
 import{installPaletteCss,previewPaletteCss,paletteToCss,syncPalette}from'./dynamic-color.js';
-export{getRoutines,saveRoutines,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,executeRoutine,snapshotForRoutine,restoreSnapshot};
 
 function parseServiceResult(raw){
     const value=typeof raw==='string'?JSON.parse(raw):raw;
@@ -302,48 +298,58 @@ function paintWifi(status){
                         <span class="conn-net-name" style="color:var(--blue)">${esc(active.ssid)}</span>
                         <span class="conn-net-sub">${_tr('Conectado')} · ${esc(active.security||_tr('Abierta'))}</span>
                     </div>
-                    <button class="conn-gear-btn" id="detail-btn" data-ssid="${esc(active.ssid)}" data-sec="${esc(active.security||'')}" data-band="${esc(active.band||'')}">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--tx2)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                    </button>
+                    <button class="conn-gear-btn" id="detail-btn" data-ssid="${esc(active.ssid)}">${WIFI_GEAR}</button>
                   </div>`
                 :renderInfoItem('Sin conexión activa','Selecciona una red abajo');
-            cur.querySelector('#detail-btn')?.addEventListener('click',e=>{
-                e.stopPropagation();
-                const b=e.currentTarget;
-                // Find the container to render into — go up to the #app element
-                const app=document.getElementById('app');
-                if(app)renderWifiDetailPage(app,{ssid:b.dataset.ssid,security:b.dataset.sec,band:b.dataset.band});
-            });
         }
         const others=nets.filter(n=>!n.active);
         el.innerHTML=others.length?others.map(n=>`
-            <div class="conn-net-item" data-ssid="${esc(n.ssid)}" data-sec="${esc(n.security||'')}">
+            <div class="conn-net-item" data-ssid="${esc(n.ssid)}">
                 ${wifiIcon(n.band,false)}
                 <div class="conn-net-info">
                     <span class="conn-net-name">${esc(n.ssid)}</span>
-                    <span class="conn-net-sub">${esc(n.security||'Abierta')}</span>
+                    <span class="conn-net-sub">${n.saved?_tr('Guardada')+' · ':''}${esc(n.security||_tr('Abierta'))}</span>
                 </div>
-                ${n.security&&n.security!=='--'?lockIcon():''}
+                ${n.saved?`<button class="conn-gear-btn" data-ssid="${esc(n.ssid)}">${WIFI_GEAR}</button>`:n.security?lockIcon():''}
             </div>`).join(''):renderInfoItem('No se encontraron redes');
+        // El engranaje abre el detalle; la fila, conectar. `nets` es el mismo
+        // estado que se acaba de pintar, así que la búsqueda por SSID no falla.
+        const red=ssid=>nets.find(n=>n.ssid===ssid);
+        document.querySelectorAll('#wifi-current .conn-gear-btn,#wl .conn-gear-btn').forEach(b=>b.addEventListener('click',e=>{
+            e.stopPropagation();
+            const app=document.getElementById('app');
+            if(app)renderWifiDetailPage(app,red(b.dataset.ssid));
+        }));
         el.querySelectorAll('.conn-net-item[data-ssid]').forEach(row=>{
-            row.addEventListener('click',()=>{
-                const ssid=row.dataset.ssid,sec=row.dataset.sec;
-                if(!sec||sec==='--'){cWifi(ssid,'');return;}
-                document.getElementById('wd')?.remove();
-                const d=document.createElement('div');d.id='wd';d.className='wifi-dialog';
-                d.innerHTML=`<span class="dt">Conectar a ${esc(ssid)}</span><input type="password" id="wp" placeholder="Contraseña" autofocus><div class="wifi-dialog-btns"><button class="btn btn-secondary btn-sm" id="wc">Cancelar</button><button class="btn btn-primary btn-sm" id="wo">Conectar</button></div>`;
-                row.insertAdjacentElement('afterend',d);
-                document.getElementById('wc').onclick=()=>d.remove();
-                document.getElementById('wo').onclick=()=>{cWifi(ssid,document.getElementById('wp').value);d.remove();};
-                document.getElementById('wp').addEventListener('keydown',e=>{if(e.key==='Enter'){cWifi(ssid,document.getElementById('wp').value);d.remove();}});
+            row.addEventListener('click',async()=>{
+                const n=red(row.dataset.ssid);
+                // Con perfil guardado NetworkManager ya tiene la contraseña; solo
+                // se pide si falla (la han cambiado en el router).
+                if(!n.security||n.saved){
+                    if(await cWifi(n.ssid,'')||!n.security)return;
+                }
+                pedirClaveWifi(row,n.ssid);
             });
         });
     }catch(e){el.innerHTML=renderServiceError(e,'redes Wi-Fi');}
 }
+const WIFI_GEAR=`<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--tx2)" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+function pedirClaveWifi(row,ssid){
+    document.getElementById('wd')?.remove();
+    const d=document.createElement('div');d.id='wd';d.className='wifi-dialog';
+    d.innerHTML=`<span class="dt">Conectar a ${esc(ssid)}</span><input type="password" id="wp" placeholder="Contraseña" autofocus><div class="wifi-dialog-btns"><button class="btn btn-secondary btn-sm" id="wc">Cancelar</button><button class="btn btn-primary btn-sm" id="wo">Conectar</button></div>`;
+    row.insertAdjacentElement('afterend',d);
+    const enviar=()=>{cWifi(ssid,document.getElementById('wp').value);d.remove();};
+    document.getElementById('wc').onclick=()=>d.remove();
+    document.getElementById('wo').onclick=enviar;
+    document.getElementById('wp').addEventListener('keydown',e=>{if(e.key==='Enter')enviar();});
+}
+/// `true` si conectó. Antes el `{ok:false}` del servicio no se miraba y una
+/// conexión fallida decía «Conectado a …».
 async function cWifi(s,p){
     toast('Conectando...','📶');
-    try{await tauriInvoke('connect_wifi',{ssid:s,password:p});toast('Conectado a '+s,'📶');loadWifi();}
-    catch(e){toast('Error al conectar','❌');}
+    try{parseServiceResult(await tauriInvoke('connect_wifi',{ssid:s,password:p}));toast('Conectado a '+s,'📶');loadWifi();return true;}
+    catch(e){toast('Error al conectar','❌');return false;}
 }
 
 let _btCache=null,_btSig='';
@@ -445,7 +451,7 @@ function paintBT(status){
 }
 
 // ── WiFi network detail page ─────────────────────────────────────────────
-async function renderWifiDetailPage(c,{ssid,security,band}){
+async function renderWifiDetailPage(c,{ssid,security,band,active,autoconnect}){
     // Clear current page intervals and register sub-nav back callback
     window.clearPageIntervals?.();
     if(window.pushSubNav)window.pushSubNav(()=>renderWifiPage(c));
@@ -454,10 +460,11 @@ async function renderWifiDetailPage(c,{ssid,security,band}){
         `<div class="wifi-detail-hero">
             <div class="wifi-detail-icon">${bigIcon}</div>
             <div class="wifi-detail-ssid">${esc(ssid)}</div>
-            <div class="wifi-detail-status" id="wd-status">${_tr('Conectado')}</div>
+            <div class="wifi-detail-status" id="wd-status">${_tr(active?'Conectado':'Guardada')}</div>
         </div>`+
+        renderCard([renderRowItem('Conectar automáticamente','Se conecta sola cuando la red está a su alcance',renderToggle('wifi-auto',autoconnect)).replace('class="ds"','class="ds" data-custom="1"')])+
         `<div class="detail-card" id="wd-details">${renderLoading(_tr('Obteniendo detalles...'))}</div>`+
-        `<div class="detail-card" id="wd-pw-card">
+        (security?`<div class="detail-card" id="wd-pw-card">
             <div class="wifi-detail-row wifi-pw-row">
                 <span class="wifi-detail-label">${_tr('Contraseña')}</span>
                 <div class="wifi-pw-actions">
@@ -470,23 +477,32 @@ async function renderWifiDetailPage(c,{ssid,security,band}){
                     </button>
                 </div>
             </div>
-        </div>`+
+        </div>`:'')+
         `<div style="padding:0 0 16px"><button class="btn-forget" id="wd-forget">${_tr('Olvidar red')}</button></div>`;
+
+    setupToggle('wifi-auto',async on=>{
+        parseServiceResult(await tauriInvoke('set_wifi_autoconnect',{ssid,enabled:on}));
+        toast(_tr(on?'Se conectará automáticamente':'Ya no se conectará automáticamente'));
+    });
 
     // Load network details
     try{
-        const d=JSON.parse(await tauriInvoke('get_wifi_details',{ssid}));
+        // IP, puerta de enlace y demás son del adaptador, no de la red: de una
+        // red guardada que no está conectada solo se sabe lo que anuncia.
+        const d=active?JSON.parse(await tauriInvoke('get_wifi_details',{ssid})):{};
         const ipFull = d.ip ? (d.prefix ? `${d.ip}/${d.prefix}` : d.ip) : '';
         const rows=[
             ['Seguridad', security||_tr('Abierta'), false],
             ['Frecuencia', band||'—', false],
+        ];
+        if(active)rows.push(
             ['Dirección IP', ipFull||'—', !!ipFull],
             ['Puerta de enlace', d.gateway||'—', !!d.gateway],
             ['DNS', d.dns||'—', !!d.dns],
             ['IPv6', d.ip6||'—', !!d.ip6],
             ['MTU', d.mtu||'—', false],
             ['Dirección MAC', d.mac||'—', !!d.mac],
-        ];
+        );
         document.getElementById('wd-details').innerHTML=rows.map(([l,v,copyable])=>
             `<div class="wifi-detail-row"${copyable?` data-copy="${esc(v)}" title="${_tr('Copiar')}"`:''}>
                 <span class="wifi-detail-label">${_tr(l)}</span>
@@ -711,6 +727,27 @@ function _emitIpcState(profile,chargeLimit){
     tauriInvoke('write_ipc_state',{state}).catch(()=>{});
 }
 
+function _estadoBateriaTexto(pct,estado,limite){
+    const carga=estado==='charging'
+        ?(limite<100?`${_tr('Cargando hasta el')} ${limite}%`:_tr('Cargando'))
+        :_tr(_ESTADOS_BATERIA[estado]||'Batería');
+    return `${_tr(`${pct}% disponible`)} · ${carga}`;
+}
+
+const _perfilesEnergeticos=[
+    {val:'power-saver',label:'Silencioso',sub:'Ahorra batería'},
+    {val:'balanced',label:'Optimizado',sub:'Equilibra consumo y rendimiento'},
+    {val:'performance',label:'Rendimiento',sub:'Prioriza la potencia'},
+];
+const _normalizarPerfil=perfil=>({'low-power':'power-saver','quiet':'power-saver'}[perfil]||perfil);
+function _sincronizarPerfilEnergetico(perfil){
+    const selector=document.getElementById('bat-energy-profile');
+    if(!selector||selector.dataset.pending)return;
+    const actual=_perfilesEnergeticos.find(p=>p.val===_normalizarPerfil(perfil));
+    selector.dataset.mode=actual?.val||'';
+    selector.querySelector('span').textContent=actual?_tr(actual.label):'—';
+}
+
 export async function renderBateria(c){
     c.innerHTML=renderHeader(t('hdr_battery'))+renderSkeleton(2)+renderSkeletonChart();
     await _renderBateriaContent(c);
@@ -740,7 +777,6 @@ export async function renderBateria(c){
             ]);
             if(!bat)return;
             const pct=parseInt(bat.percentage)||0;
-            const states=_ESTADOS_BATERIA;
             const effectiveLimit=bprot2?savedLimit2:100;
             // At the protection limit, "not charging" really means full
             if(bat.state==='not charging'&&pct>=effectiveLimit-1)bat.state='fully-charged';
@@ -763,17 +799,15 @@ export async function renderBateria(c){
                     if(lblEl)lblEl.textContent='';
                 }
             }
-            if(subEl)subEl.innerHTML=timeText?`${pct}% disponible`:(states[bat.state]||'Batería');
+            if(subEl)subEl.textContent=_estadoBateriaTexto(pct,bat.state,effectiveLimit);
             if(fillEl){fillEl.style.width=pct+'%';}
             const erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
-            const chargingLbl2=bprot2&&savedLimit2<100?`Cargando hasta el ${savedLimit2}%`:(bat.state==='charging'?'Cargando':'');
-            if(rateEl)rateEl.textContent=`${chargingLbl2?chargingLbl2+' · ':''}${erate>0?`Consumo: ${erate.toFixed(1)} W`:''}`;
+            if(rateEl)rateEl.textContent=erate>0?` · ${_tr(`Consumo: ${erate.toFixed(1)} W`)}`:'';
 
             // ── Sync desde el sistema (detecta cambios del applet) ──────
             if(hw2){
                 const sysProfile=hw2.performance_mode||'balanced';
-                document.querySelectorAll('.perf-mode-card').forEach(x=>
-                    x.classList.toggle('active',x.dataset.mode===sysProfile));
+                _sincronizarPerfilEnergetico(sysProfile);
                 // Sync límite de carga si no lo está arrastrando el usuario
                 const sliderEl=document.getElementById('cl');
                 if(sliderEl&&document.activeElement!==sliderEl){
@@ -796,8 +830,7 @@ export async function renderBateria(c){
                     if(ipc.source==='applet'&&ipc.ts&&ipc.ts!==_lastIpcTs){
                         _lastIpcTs=ipc.ts;
                         if(ipc.power_profile){
-                            document.querySelectorAll('.perf-mode-card').forEach(x=>
-                                x.classList.toggle('active',x.dataset.mode===ipc.power_profile));
+                            _sincronizarPerfilEnergetico(ipc.power_profile);
                         }
                     }
                 }catch(e){}
@@ -867,7 +900,6 @@ async function _renderBateriaContent(c){
         tauriInvoke('set_charge_limit',{limit:savedChargeLimit}).catch(()=>{});
     }
 
-    const states=_ESTADOS_BATERIA;
     const pct=parseInt(bat.percentage)||0;
     // At the protection limit, "not charging" really means full
     if(bat.state==='not charging'&&pct>=chargeLimit-1)bat.state='fully-charged';
@@ -884,7 +916,7 @@ async function _renderBateriaContent(c){
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
     </button>`;
     let h=renderHeader(t('hdr_battery'), _statsBtn);
-    h+=`<div class="bat-page-wrap">`; // max-width wrapper — evita que el chart se estire en pantalla completa
+    h+=`<div class="bat-page-wrap">`;
 
     // Hero — número grande + label más pequeño en la misma línea
     const _splitTime=(t)=>{const m=t.match(/^(.+?)\s+(para\s+|de\s+)(.+)$/i);return m?{num:m[1],label:m[2]+m[3]}:{num:t,label:''};};
@@ -892,21 +924,16 @@ async function _renderBateriaContent(c){
     if(timeText){
         const {num,label}=_splitTime(timeText);
         h+=`<div class="bat-time-big"><span class="bat-time-num">${num}</span>${label?` <span class="bat-time-label">${label}</span>`:''}</div>`;
-        h+=`<span class="bat-sub">${pct}% disponible</span>`;
     } else {
         h+=`<div class="bat-time-big"><span class="bat-time-num">${pct}%</span></div>`;
-        h+=`<span class="bat-sub">${states[bat.state]||'Batería'}</span>`;
     }
+    const erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
+    h+=`<div class="bat-sub-line"><span class="bat-sub">${_estadoBateriaTexto(pct,bat.state,chargeLimit)}</span><span class="bat-full-info">${erate>0?` · ${_tr(`Consumo: ${erate.toFixed(1)} W`)}`:''}</span></div>`;
     // Battery bar: siempre verde (#30CF00), marcador de límite si hay protección
-    const isCharging=bat.state==='charging';
     const fillColor='green';
-    const limitMarker=bprot&&chargeLimit<100?`<div class="bat-limit-marker" style="left:${chargeLimit}%" title="Límite: ${chargeLimit}%"></div>`:'';
+    const limitMarker=bprot&&chargeLimit<100?`<div class="bat-limit-zone" style="left:${chargeLimit}%" title="${_tr('Límite')}: ${chargeLimit}%"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="var(--green)" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/><path fill="none" stroke="var(--bg)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m8.5 12 2.6 2.6 4.6-5"/></svg></div>`:'';
     h+=`<div class="bat-level-bar">${limitMarker}<div class="bat-level-fill ${fillColor}" style="width:${pct}%"></div></div>`;
     h+=`</div>`;
-    let erate=parseFloat((bat.energy_rate||'0').split(' ')[0].replace(',','.'))||0;
-    const chargingLabel=isCharging?(bprot&&chargeLimit<100?`Cargando hasta el ${chargeLimit}%`:'Cargando'):'';
-    const lineParts=[chargingLabel,erate>0?`Consumo: ${erate.toFixed(1)} W`:''].filter(Boolean);
-    h+=`<div class="bat-full-info" style="color:var(--tx2)">${lineParts.join(' · ')}</div>`;
 
     // Ajustes ANTES del gráfico
     {
@@ -915,6 +942,12 @@ async function _renderBateriaContent(c){
             renderRowItem('Protección de la batería',bprotLabel?`<span style="color:var(--blue)">${bprotLabel}</span>`:'Limita carga para alargar vida útil',renderToggle('bprot',bprot)),
             `<div id="bprot-limit-section"${bprot?'':' style="display:none"'} style="padding:2px 20px 12px">${renderSlider('cl',savedChargeLimit,50,100)}</div>`,
         ]);
+    }
+
+    if(gb.perf_supported){
+        const perfil=_perfilesEnergeticos.find(p=>p.val===_normalizarPerfil(gb.performance_mode));
+        h+=renderCard([renderRowItem('Perfil energético','',`<button type="button" class="bk-select" id="bat-energy-profile" data-mode="${perfil?.val||''}" aria-haspopup="listbox"><span>${perfil?_tr(perfil.label):'—'}</span></button>`),
+            '<p class="bat-profile-error" id="bat-profile-error" role="alert" hidden></p>']);
     }
 
     // ── Stats for the popup (opened from the 3-dot header button) ───────────
@@ -1005,8 +1038,7 @@ async function _renderBateriaContent(c){
         }).join('');
         const empty=buckets.some(Boolean)?'':`<span class="bat-history-empty">${_tr('Sin datos de las últimas 24 horas')}</span>`;
         h+=`<div class="bat-chart bat-history">
-            <span class="chart-subtitle">${_tr('Últimas 24 horas')}</span>
-            <span class="chart-title">${_tr('Nivel de la batería')}</span>
+            <div class="bat-history-heading"><span class="chart-title">${_tr('Nivel de la batería')}</span><span class="chart-subtitle">${_tr('Últimas 24 horas')}</span></div>
             <div class="bat-history-chart">
                 ${vlines}
                 <div class="bat-history-plot" role="img" aria-label="${_tr('Nivel de batería durante las últimas 24 horas, de 0 a 100 por ciento')}">
@@ -1051,17 +1083,6 @@ async function _renderBateriaContent(c){
     }
     c.dataset.batUsbc=_usbcHtml;
 
-    // Performance mode — shown when power-profiles-daemon is available (generic Linux)
-    if(gb.perf_supported){
-        const rawPm=gb.performance_mode||'balanced';
-        // Samsung platform-profile values → internal card keys
-        const pm={'low-power':'power-saver','quiet':'power-saver','balanced':'balanced','performance':'performance'}[rawPm]||rawPm;
-        const perfIcons={'power-saver':'./assets/power-saver.svg','balanced':'./assets/optimized.svg','performance':'./assets/performance.svg'};
-        const perfNames={'power-saver':'Silencioso','balanced':'Optimizado','performance':'Rendimiento'};
-        const perfDescs={'power-saver':'Ahorra batería','balanced':'Equilibrado','performance':'Máximo poder'};
-        const modes=['power-saver','balanced','performance'];
-        h+=renderSection(t('sec_perf_mode'))+`<div class="perf-modes">${modes.map(m=>`<div class="perf-mode-card ${pm===m?'active':''}" data-mode="${m}"><div class="perf-mode-icon"><img src="${perfIcons[m]}" width="32" height="32" class="perf-icon-img"></div><div class="perf-mode-name">${perfNames[m]}</div><div class="perf-mode-desc">${perfDescs[m]}</div></div>`).join('')}</div>`;
-    }
     // ── Opciones avanzadas de energía (tapa, suspensión, crítica) ─────────────
     h+=renderCard([`<div class="detail-item detail-item-row" style="cursor:pointer" id="go-power-adv"><div class="detail-texts"><span class="dt">${_tr('Opciones avanzadas de energía')}</span><span class="ds">${_tr('Tapa, suspensión y batería crítica')}</span></div>${chevron()}</div>`]);
     h+=`</div>`; // cierre bat-page-wrap
@@ -1105,7 +1126,7 @@ async function _renderBateriaContent(c){
     setupToggle('show-pct',async a=>{
         showpct=a;
         setSetting('ShowBatteryPercent',a?'true':'false');
-        const curProfile=document.querySelector('.perf-mode-card.active')?.dataset?.mode||'balanced';
+        const curProfile=document.getElementById('bat-energy-profile')?.dataset.mode||'balanced';
         const savedLim=parseInt(await getSetting('ChargeLimit','80').catch(()=>'80'))||80;
         const state=JSON.stringify({power_profile:curProfile,charge_limit:savedLim,show_percent:a,source:'settings',ts:Date.now()});
         tauriInvoke('write_ipc_state',{state}).catch(()=>{});
@@ -1113,22 +1134,39 @@ async function _renderBateriaContent(c){
     });
     };
 
-    document.querySelectorAll('.perf-mode-card').forEach(b=>{b.addEventListener('click',async()=>{
-        const mode=b.dataset.mode;
-        const modoTermico={'ahorro':'ahorro','power-saver':'silencioso','balanced':'optimizado','performance':'rendimiento'}[mode]||'optimizado';
-        try{await tauriInvoke('set_performance_mode',{mode})}catch(e){}
-        try{
-            const res=await tauriInvoke('aplicar_perfil_termico',{modo:modoTermico});
-            toast(`${b.querySelector('.perf-mode-name')?.textContent}: ${res}`);
-        }catch(e){
-            toast(`Modo activado (${e})`,'⚠️');
-        }
-        document.querySelectorAll('.perf-mode-card').forEach(x=>x.classList.remove('active'));
-        b.classList.add('active');
-        // Notifica al applet de batería via IPC
-        const savedLim=parseInt(await getSetting('ChargeLimit','80').catch(()=>'80'))||80;
-        _emitIpcState(mode,savedLim);
-    });});
+    const selectorPerfil=document.getElementById('bat-energy-profile');
+    selectorPerfil?.addEventListener('click',()=>popoverSelect(selectorPerfil.closest('.detail-item'),{
+        title:_tr('Perfil energético'),
+        current:selectorPerfil.dataset.mode,
+        options:_perfilesEnergeticos.map(p=>({val:p.val,label:_tr(p.label),sub:_tr(p.sub)})),
+        onSelect:async mode=>{
+            const anterior=selectorPerfil.dataset.mode;
+            if(mode===anterior)return;
+            const error=document.getElementById('bat-profile-error');
+            error.hidden=true;
+            selectorPerfil.dataset.pending='true';
+            selectorPerfil.disabled=true;
+            selectorPerfil.querySelector('span').textContent=_tr(_perfilesEnergeticos.find(p=>p.val===mode).label);
+            const modoTermico={'power-saver':'silencioso','balanced':'optimizado','performance':'rendimiento'}[mode];
+            try{
+                await tauriInvoke('set_performance_mode',{mode});
+                await tauriInvoke('aplicar_perfil_termico',{modo:modoTermico});
+                const real=JSON.parse(await tauriInvoke('check_hw_features',{force:true}));
+                if(_normalizarPerfil(real.performance_mode)!==mode)throw new Error(_tr('El sistema no ha aplicado el perfil solicitado'));
+                delete selectorPerfil.dataset.pending;
+                _sincronizarPerfilEnergetico(real.performance_mode);
+                const savedLim=parseInt(await getSetting('ChargeLimit','80').catch(()=>'80'))||80;
+                _emitIpcState(mode,savedLim);
+            }catch(e){
+                delete selectorPerfil.dataset.pending;
+                _sincronizarPerfilEnergetico(anterior);
+                error.textContent=`${_tr('No se pudo cambiar el perfil energético')}: ${e}`;
+                error.hidden=false;
+            }finally{
+                selectorPerfil.disabled=false;
+            }
+        },
+    }));
     if(gb.charge_limit_supported){
         setupSlider('cl',async v=>{
             const lim=parseInt(v);
@@ -1141,7 +1179,7 @@ async function _renderBateriaContent(c){
                 await setSetting('ChargeLimit',String(lim));
                 toast(`Límite de carga: ${lim}%`,'🔋');
                 // Notifica al applet vía IPC
-                const curProfile=document.querySelector('.perf-mode-card.active')?.dataset?.mode||'balanced';
+                const curProfile=document.getElementById('bat-energy-profile')?.dataset.mode||'balanced';
                 _emitIpcState(curProfile,lim);
             }catch(e){toast('Error al aplicar límite de carga','❌');}
         });
@@ -1193,33 +1231,34 @@ return desktop.appearance(c,()=>renderTintedIcons(c));
 // ── Dark/Light mode settings sub-page (automatic schedule) ──
 
 
-// ── Tinted icons customization sub-page ──
-// Dual tint: Light and Dark icon variants each keep their own hue + strength.
-// Selecting a preview loads that variant into the sliders; editing recolours
-// only that variant. (Visual mock — persisted locally.)
+// ── Personalización de iconos tintados ──
 export async function renderTintedIcons(c){
+    const estilo=JSON.parse(await tauriInvoke('get_icon_style',{force:true}));
+    if(estilo.mode!=='tinted'){
+        await desktop.appearance(c,()=>renderTintedIcons(c));
+        return;
+    }
     const _tintColor=desktop.tinte;
     const termGlyph=`<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`;
     // Per-variant defaults (fall back to the fixed icon colours' rough hue).
     const get=(k,d)=>parseInt(localStorage.getItem(k)||String(d),10);
     const variants={
-        light:{hue:get('bookos_tint_light_hue',210),str:get('bookos_tint_light_strength',45),lhue:get('bookos_tint_light_logohue',210)},
-        dark :{hue:get('bookos_tint_dark_hue',210), str:get('bookos_tint_dark_strength',70), lhue:get('bookos_tint_dark_logohue',210)},
+        light:{hue:get('bookos_tint_light_hue',210),str:get('bookos_tint_light_strength',45)},
+        dark :{hue:get('bookos_tint_dark_hue',210), str:get('bookos_tint_dark_strength',70)},
     };
     let selected=localStorage.getItem('bookos_tint_mode')||'light';
 
     const swatch=(m,label,tileBg)=>{
         const v=variants[m];
-        return `<div class="ti-preview-swatch ${m===selected?'active':''}" data-tmode="${m}">
+        return `<button type="button" class="ti-preview-swatch ${m===selected?'active':''}" role="radio" aria-checked="${m===selected}" data-tmode="${m}">
             <div class="ti-preview-tile" style="background:${tileBg}"><div class="ti-preview-glyph" id="ti-pg-${m}" style="background:${_tintColor(v.hue,v.str)}">${termGlyph}</div></div>
-            <span class="ti-preview-label">${_tr(label)}</span>
-            <div class="mode-radio ${m===selected?'on':''}"></div>
-        </div>`;
+            <span class="ti-preview-label">${_tr(label)}<svg class="ti-seleccion" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg></span>
+        </button>`;
     };
 
     c.innerHTML=renderHeader('Iconos tintados')+
         `<div class="theme-block ti-page-block">
-            <div class="ti-preview-row">
+            <div class="ti-preview-row" role="radiogroup" aria-label="${_tr('Base de los iconos')}">
                 ${swatch('light','Claro','#ffffff')}
                 ${swatch('dark','Oscuro','#1c1c2e')}
             </div>
@@ -1236,28 +1275,19 @@ export async function renderTintedIcons(c){
         </div>
         <div class="theme-block ti-page-block">
             ${renderRowItem('Pintar la base','El cuadrado de fondo toma el color del tinte',renderToggle('tintbase',localStorage.getItem('bookos_tint_base')!=='0'))}
-            ${renderRowItem('Pintar el logo','Recolorea el logo de cada app con su propio color',renderToggle('tintlogo',localStorage.getItem('bookos_tint_logo')==='1'))}
-            <div id="ti-logo-hue-row" class="ti-controls" style="display:${localStorage.getItem('bookos_tint_logo')==='1'?'block':'none'}">
-                <div class="ti-slider-row">
-                    <span class="ti-slider-label">${_tr('Color del logo')}</span>
-                    <div class="ti-slider ti-hue"><input type="range" id="ti-logo-hue" min="0" max="360"></div>
-                </div>
-            </div>
         </div>`;
 
     const hueEl=document.getElementById('ti-hue');
     const strEl=document.getElementById('ti-strength');
 
     // Load the selected variant's values into the sliders + recolour tracks.
-    const lhueEl=document.getElementById('ti-logo-hue');
     const loadSliders=()=>{
         const v=variants[selected];
-        hueEl.value=v.hue; strEl.value=v.str; lhueEl.value=v.lhue;
+        hueEl.value=v.hue; strEl.value=v.str;
         hueEl.style.setProperty('--thumb',_tintColor(v.hue,0));
         strEl.style.setProperty('--c0',_tintColor(v.hue,0));    // left = strong
         strEl.style.setProperty('--c1',_tintColor(v.hue,100));  // right = white-ish
         strEl.style.setProperty('--thumb',_tintColor(v.hue,v.str));
-        lhueEl.style.setProperty('--thumb',_tintColor(v.lhue,0));
     };
     // Recolour only the selected variant's glyph as the sliders move.
     const onSlide=()=>{
@@ -1274,12 +1304,6 @@ export async function renderTintedIcons(c){
     };
     hueEl.addEventListener('input',onSlide);
     strEl.addEventListener('input',onSlide);
-    lhueEl.addEventListener('input',()=>{
-        const lh=parseInt(lhueEl.value,10);
-        variants[selected].lhue=lh;
-        lhueEl.style.setProperty('--thumb',_tintColor(lh,0));
-        localStorage.setItem(`bookos_tint_${selected}_logohue`,String(lh));
-    });
     // On release (not every pixel — regenerating the pack is heavy), apply the
     // tinted icon theme with the new hue/strength.
     const applyTint=async()=>{
@@ -1289,24 +1313,16 @@ export async function renderTintedIcons(c){
         toast(_tr('Aplicando iconos…'),'🔄');
         try{
             const tintBase=localStorage.getItem('bookos_tint_base')!=='0';
-            const tintLogo=localStorage.getItem('bookos_tint_logo')==='1';
-            const logoHue=parseInt(lhueEl.value,10);
-            const r=JSON.parse(await tauriInvoke('set_icon_style',{mode:'tinted',hue:h,strength:s,dark:isDark,tintBase,tintLogo,logoHue}));
+            const r=JSON.parse(await tauriInvoke('set_icon_style',{mode:'tinted',hue:h,strength:s,dark:isDark,tintBase,tintLogo:false,logoHue:h}));
             toast(r.ok?_tr('Iconos aplicados'):(_tr('Error')+': '+(r.error||'')), r.ok?'✅':'❌');
         }catch(e){toast(_tr('No se pudieron aplicar los iconos'),'❌');}
     };
     hueEl.addEventListener('change',applyTint);
     strEl.addEventListener('change',applyTint);
-    lhueEl.addEventListener('change',applyTint);
     setupToggle('tintbase',a=>{localStorage.setItem('bookos_tint_base',a?'1':'0');applyTint();});
-    setupToggle('tintlogo',a=>{
-        localStorage.setItem('bookos_tint_logo',a?'1':'0');
-        document.getElementById('ti-logo-hue-row').style.display=a?'block':'none';
-        applyTint();
-    });
     document.querySelectorAll('.ti-preview-swatch').forEach(sw=>sw.addEventListener('click',()=>{
-        document.querySelectorAll('.ti-preview-swatch').forEach(x=>{x.classList.remove('active');x.querySelector('.mode-radio').classList.remove('on');});
-        sw.classList.add('active');sw.querySelector('.mode-radio').classList.add('on');
+        document.querySelectorAll('.ti-preview-swatch').forEach(x=>{x.classList.remove('active');x.setAttribute('aria-checked','false');});
+        sw.classList.add('active');sw.setAttribute('aria-checked','true');
         selected=sw.dataset.tmode;
         localStorage.setItem('bookos_tint_mode',selected);
         loadSliders();
@@ -2620,11 +2636,15 @@ const HUELLA_SVG=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 export async function renderHuella(c){
     const titulo='Huella y contraseña';
     c.innerHTML=renderHeader(titulo)+renderSkeleton(3);
-    const [u,fp,cfg]=await Promise.all([
+    const [u,fp,cfg,pin]=await Promise.all([
         tauriInvoke('get_user_info').then(JSON.parse).catch(()=>({username:''})),
         tauriInvoke('list_fingerprints').then(JSON.parse).catch(()=>({available:false,fingers:[],stages:0})),
         tauriInvoke('bookos_get_config').then(JSON.parse).catch(()=>null),
+        tauriInvoke('get_pin').then(JSON.parse).then(r=>r.pin).catch(()=>false),
     ]);
+    // fprintd solo deja registrar o borrar a root (ver `fprintd_root` en main.rs).
+    // La huella no sirve aquí: no da una contraseña que pasarle a sudo.
+    const pedirClave=desc=>promptAuth({title:'Se requiere autorización',description:_tr(desc),confirmLabel:'Autorizar',allowFingerprint:false}).then(r=>r?.password);
     // El orden de DEDOS en main.rs: el siguiente libre es el que se registra.
     const libre=Object.keys(NOMBRES_DEDO).find(f=>!fp.fingers.includes(f));
     const dedo=f=>`<button type="button" class="fp-dedo" data-dedo="${f}" title="${esc(_tr('Borrar'))}"><i>${HUELLA_SVG}</i><span>${esc(_tr(NOMBRES_DEDO[f]))}</span></button>`;
@@ -2642,22 +2662,36 @@ export async function renderHuella(c){
         +renderSection('Contraseña')+renderCard([
             `<div class="detail-item detail-item-row" style="cursor:pointer" id="fp-pw" role="button" tabindex="0">
                 <div class="detail-texts"><span class="dt">${_tr('Tu cuenta tiene contraseña')}</span></div>${chevron()}
-            </div>`])
+            </div>`,
+            renderRowItem('PIN',pin?'Desbloquea la pantalla con tu PIN':'Desbloquea la pantalla con unas cifras en vez de la contraseña',
+                pin?`<button class="btn btn-secondary btn-sm" id="fp-pin-quitar">${_tr('Quitar')}</button> <button class="btn btn-secondary btn-sm" id="fp-pin">${_tr('Cambiar')}</button>`
+                   :`<button class="btn btn-secondary btn-sm" id="fp-pin">${_tr('Configurar')}</button>`)])
         +renderSection('Huella')
         +`<p class="ds fp-intro">${_tr('Desbloquea el equipo y autoriza cambios del sistema con tu huella. Se guarda en el lector y no sale del equipo.')}</p>`
         +huellas
         +(fp.available&&cfg?renderCard([renderRowItem('Desbloquear con huella','La contraseña sigue disponible en la pantalla de bloqueo',renderToggle('bloqueo_huella',!!cfg.bloqueo_huella)).replace('class="ds"','class="ds" data-custom="1"')]):'');
     c.querySelector('#fp-pw').addEventListener('click',()=>dialogoContrasena(u.username));
+    c.querySelector('#fp-pin').addEventListener('click',()=>dialogoPin(()=>renderHuella(c)));
+    c.querySelector('#fp-pin-quitar')?.addEventListener('click',async()=>{
+        const clave=await pedirClave('Para quitar el PIN, introduce la contraseña del equipo.');
+        if(!clave)return;
+        try{await tauriInvoke('set_pin',{pin:null,password:clave});toast(_tr('PIN quitado'));renderHuella(c);}
+        catch(e){toast(String(e),'❌');}
+    });
     setupToggle('bloqueo_huella',async v=>{await tauriInvoke('bookos_apply_config',{config:{bloqueo_huella:v}});toast(_tr('Guardado'));});
     c.querySelectorAll('.fp-dedo[data-dedo]').forEach(b=>b.addEventListener('click',()=>{
         const f=b.dataset.dedo;
         showDialog(_tr('Borrar huella'),`${_tr('Se borrará la huella del')} ${esc(_tr(NOMBRES_DEDO[f]).toLowerCase())}.`,{confirmText:_tr('Borrar'),confirmClass:'danger',
             onConfirm:async()=>{
-                try{await tauriInvoke('delete_fingerprint',{finger:f});renderHuella(c);}
+                const clave=await pedirClave('Para borrar la huella, introduce la contraseña del equipo.');
+                if(!clave)return;
+                try{await tauriInvoke('delete_fingerprint',{finger:f,password:clave});renderHuella(c);}
                 catch(e){toast(String(e),'❌');}
             }});
     }));
     c.querySelector('#fp-anadir')?.addEventListener('click',async()=>{
+        const clave=await pedirClave('Para registrar una huella, introduce la contraseña del equipo.');
+        if(!clave)return;
         const panel=c.querySelector('#fp-registro'),anillo=c.querySelector('#fp-anillo'),estado=c.querySelector('#fp-estado');
         c.querySelector('#fp-dedos').hidden=true;panel.hidden=false;
         const total=fp.stages||10;
@@ -2670,12 +2704,56 @@ export async function renderHuella(c){
             else pintar(stage,'Levanta y apóyalo otra vez, moviéndolo un poco');
         });
         try{
-            const r=JSON.parse(await tauriInvoke('enroll_fingerprint',{finger:libre}));
+            const r=JSON.parse(await tauriInvoke('enroll_fingerprint',{finger:libre,password:clave}));
             toast(_tr(r.ok?'Huella registrada':'No se pudo registrar la huella'),r.ok?'✓':'❌');
+            // Sin esto, el porqué solo quedaba en el journal de fprintd.
+            if(!r.ok)console.warn('[huella] fprintd-enroll:',r.output);
         }catch(e){toast(String(e),'❌');}
         // Un momento con el anillo completo a la vista antes de volver a la lista.
         finally{dejar();setTimeout(()=>renderHuella(c),900);}
     });
+}
+
+// Pide la contraseña en el mismo diálogo, como Cambiar contraseña: el PIN
+// vive en /etc y escribirlo necesita sudo.
+function dialogoPin(alTerminar){
+    const ov=document.createElement('div');
+    ov.className='bk-overlay';
+    ov.innerHTML=`<div class="bk-dialog" style="min-width:320px">
+        <div class="bk-dialog-title">${_tr('PIN')}</div>
+        <div style="padding:0 4px 12px;display:flex;flex-direction:column;gap:10px">
+            <p class="ds" style="margin:0">${_tr('Sirve para desbloquear la pantalla. Para instalar o cambiar ajustes del sistema se sigue pidiendo la contraseña.')}</p>
+            <div><label class="ds" style="display:block;margin-bottom:4px">${_tr('Contraseña actual')}</label>
+                <input type="password" id="pin-clave" class="upd-auth-input" autocomplete="current-password"></div>
+            <div><label class="ds" style="display:block;margin-bottom:4px">${_tr('PIN nuevo')}</label>
+                <input type="password" id="pin-nuevo" class="upd-auth-input" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="${esc(_tr('De 4 a 12 cifras'))}"></div>
+            <div><label class="ds" style="display:block;margin-bottom:4px">${_tr('Confirmar PIN')}</label>
+                <input type="password" id="pin-conf" class="upd-auth-input" inputmode="numeric" maxlength="12" autocomplete="off"></div>
+            <div id="pin-err" style="font-size:12px;color:var(--red,#e53935);display:none"></div>
+        </div>
+        <div class="bk-dialog-btns">
+            <button class="bk-dbtn cancel" id="pin-cancel">${_tr('Cancelar')}</button>
+            <button class="bk-dbtn confirm" id="pin-ok">${_tr('Guardar')}</button>
+        </div>
+    </div>`;
+    document.body.appendChild(ov);
+    const close=()=>ov.remove();
+    const err=ov.querySelector('#pin-err');
+    const fallo=m=>{err.textContent=_tr(m);err.style.display='block';};
+    ov.querySelector('#pin-cancel').onclick=close;
+    ov.querySelector('#pin-ok').onclick=async()=>{
+        const clave=ov.querySelector('#pin-clave').value;
+        const pin=ov.querySelector('#pin-nuevo').value;
+        if(!clave||!pin)return fallo('Rellena todos los campos');
+        if(!/^\d{4,12}$/.test(pin))return fallo('El PIN son de 4 a 12 cifras');
+        if(pin!==ov.querySelector('#pin-conf').value)return fallo('Los PIN no coinciden');
+        // Antes que set_pin para distinguir «contraseña mal» de un fallo al escribir.
+        if(!JSON.parse(await tauriInvoke('verify_password',{password:clave})).ok)return fallo('Contraseña actual incorrecta');
+        try{await tauriInvoke('set_pin',{pin,password:clave});close();toast(_tr('PIN guardado'),'✓');alTerminar();}
+        catch(e){fallo(String(e));}
+    };
+    ov.addEventListener('click',e=>{if(e.target===ov)close();});
+    ov.querySelector('#pin-clave').focus();
 }
 
 // Lo usan Cuentas y Huella y contraseña: un solo diálogo para la misma acción.
@@ -2686,11 +2764,11 @@ function dialogoContrasena(username){
         <div class="bk-dialog-title">Cambiar contraseña</div>
         <div style="padding:0 4px 12px;display:flex;flex-direction:column;gap:10px">
             <div><label class="ds" style="display:block;margin-bottom:4px">Contraseña actual</label>
-                <input type="password" id="pw-current" class="sel" placeholder="Contraseña actual" autocomplete="current-password"></div>
+                <input type="password" id="pw-current" class="upd-auth-input" placeholder="Contraseña actual" autocomplete="current-password"></div>
             <div><label class="ds" style="display:block;margin-bottom:4px">Nueva contraseña</label>
-                <input type="password" id="pw-new" class="sel" placeholder="Nueva contraseña" autocomplete="new-password"></div>
+                <input type="password" id="pw-new" class="upd-auth-input" placeholder="Nueva contraseña" autocomplete="new-password"></div>
             <div><label class="ds" style="display:block;margin-bottom:4px">Confirmar nueva</label>
-                <input type="password" id="pw-confirm" class="sel" placeholder="Confirmar contraseña" autocomplete="new-password"></div>
+                <input type="password" id="pw-confirm" class="upd-auth-input" placeholder="Confirmar contraseña" autocomplete="new-password"></div>
             <div id="pw-err" style="font-size:12px;color:var(--red,#e53935);display:none"></div>
         </div>
         <div class="bk-dialog-btns">
@@ -3213,444 +3291,10 @@ async function setupDynamicColor(current){
     });
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// ── Modos y Rutinas ────────────────────────────────────────────────────
-// ════════════════════════════════════════════════════════════════════════
-
-// ── SVG icon library (Lucide-style, stroke-based) ──
 const SVGI = {
-    // Mode icons (24px)
-    moon:      `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
-    briefcase: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>`,
-    film:      `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/></svg>`,
-    target:    `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
-    // Trigger icons (18px)
-    clock:     `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
-    plug:      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><rect x="6" y="7" width="12" height="10" rx="2"/></svg>`,
-    batteryPlug:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 11h4"/></svg>`,
-    batteryOff:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/><line x1="6" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="6" y2="15"/></svg>`,
-    wifi:      `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/></svg>`,
-    wifiOff:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><path d="M10.72 5.08A16 16 0 0 1 22.56 9"/><path d="M5 12.55a11 11 0 0 1 5.17-2.39"/><path d="M10.71 16.11a6 6 0 0 1 4.12-.17"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/></svg>`,
-    bluetooth: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"/></svg>`,
-    batteryLow:`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 11h2"/></svg>`,
-    // Action icons (18px)
-    zap:       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
-    plane:     `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 4s-2 1-3.5 2.5L11 8 2.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 7.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
-    sun:       `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`,
-    volume2:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`,
-    bellOff:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="2" y1="2" x2="22" y2="22"/></svg>`,
-    moonSm:    `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`,
-    palette:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1" fill="currentColor" stroke="none"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>`,
-    keyboard:  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></svg>`,
-    // UI icons
-    plus:      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    x:         `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
-    play:      `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
-    pencil:    `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
-    trash:     `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
     chevronR:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>`,
+    plus:      `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
 };
-
-const RB_TRIGGERS=[
-    {type:'time',              svg:SVGI.clock,     label:'A una hora específica',     valueType:'time'},
-    {type:'power_connected',   svg:SVGI.plug,      label:'Al conectar el cargador'},
-    {type:'power_disconnected',svg:SVGI.batteryOff,label:'Al desconectar el cargador'},
-    {type:'wifi_on',           svg:SVGI.wifi,      label:'Al activar el WiFi'},
-    {type:'wifi_off',          svg:SVGI.wifiOff,   label:'Al desactivar el WiFi'},
-    {type:'bt_on',             svg:SVGI.bluetooth, label:'Al activar Bluetooth'},
-    {type:'bt_off',            svg:SVGI.bluetooth, label:'Al desactivar Bluetooth'},
-    {type:'low_battery',       svg:SVGI.batteryLow,label:'Batería baja (<20%)'},
-];
-const RB_ACTIONS=[
-    // ── Conexiones
-    {type:'wifi',          svg:SVGI.wifi,     label:'WiFi',               valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Conexiones'},
-    {type:'bluetooth',     svg:SVGI.bluetooth,label:'Bluetooth',          valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Conexiones'},
-    {type:'airplane',      svg:SVGI.plane,    label:'Modo avión',         valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Conexiones'},
-    // ── Pantalla
-    {type:'brightness',    svg:SVGI.sun,      label:'Brillo de pantalla', valueType:'range', min:0, max:100, default:50, category:'Pantalla'},
-    // ── Sonido
-    {type:'volume',        svg:SVGI.volume2,  label:'Volumen del sistema', valueType:'range', min:0, max:100, default:50, category:'Sonido'},
-    // ── Batería y rendimiento
-    {type:'performance',   svg:SVGI.zap,      label:'Modo de rendimiento',valueType:'select', options:[['power-saver','Silencioso'],['balanced','Optimizado'],['performance','Rendimiento']], category:'Batería'},
-    {type:'thermal',       svg:SVGI.zap,      label:'Perfil térmico',     valueType:'select', options:[['ahorro','Ahorro extremo (5W)'],['silencioso','Silencioso (8W)'],['optimizado','Optimizado (15W)'],['rendimiento','Rendimiento (28W)']], category:'Batería'},
-    {type:'fan_mode',      svg:SVGI.zap,      label:'Modo ventilador',    valueType:'select', options:[['0','Automático'],['1','Silencioso'],['2','Normal']], category:'Batería'},
-    {type:'charge_limit',  svg:SVGI.plug,     label:'Límite de carga',    valueType:'range', min:50, max:100, default:80, category:'Batería'},
-    // ── Personalización
-    {type:'theme',         svg:SVGI.palette,  label:'Tema del sistema',   valueType:'select', options:[['BreezeDark','Oscuro'],['BreezeLight','Claro']], category:'Personalización'},
-    {type:'kbd_brightness',svg:SVGI.keyboard, label:'Brillo del teclado', valueType:'range', min:0, max:3, default:1, category:'Personalización'},
-    // ── Notificaciones
-    {type:'dnd',           svg:SVGI.bellOff,  label:'No molestar',        valueType:'toggle_val', options:[['true',t('activate')],['false',t('deactivate')]], category:'Notificaciones'},
-];
-
-function rbTriggerLabel(t){const d=RB_TRIGGERS.find(x=>x.type===t.type);return d?(_tr(d.label)+(t.value?' — '+t.value:'')):t.type;}
-function rbActionLabel(a){
-    const d=RB_ACTIONS.find(x=>x.type===a.type);
-    if(!d)return a.type;
-    if(d.valueType==='range')return _tr(d.label)+' — '+a.value+'%';
-    if(d.valueType==='select'||d.valueType==='toggle_val'){const o=(d.options||[]).find(x=>x[0]===a.value);return _tr(d.label)+' — '+(o?_tr(o[1]):a.value);}
-    return _tr(d.label);
-}
-
-function renderRoutinesList(routines){
-    if(!routines.length)return`<div class="detail-card routine-empty-card">
-        <div class="routine-empty">
-            <span class="routine-empty-title">No hay rutinas</span>
-            <span class="routine-empty-sub">Automatiza brillo, tema, no molestar y más según hora o eventos</span>
-            <button type="button" class="rb-new-btn" data-create-routine>${SVGI.plus}<span>Crear rutina</span></button>
-        </div>
-    </div>`;
-    return`<div class="detail-card">`+routines.map(r=>`
-        <div class="routine-item" data-id="${esc(r.id)}">
-            <div class="routine-item-main">
-                <div class="routine-item-info">
-                    <span class="routine-item-name">${esc(r.name||'Rutina')}</span>
-                    <span class="routine-item-desc">${esc(
-                        (r.triggers[0]?rbTriggerLabel(r.triggers[0]):_tr('Sin disparador'))
-                        +' → '
-                        +(r.actions[0]?rbActionLabel(r.actions[0]):_tr('Sin acción'))
-                        +(r.actions.length>1?' +'+( r.actions.length-1)+' '+_tr('más'):'')
-                    )}</span>
-                </div>
-                <div class="routine-item-actions">
-                    <button class="rb-icon-btn rb-btn-run" data-run="${esc(r.id)}" title="Ejecutar">${SVGI.play}</button>
-                    <button class="rb-icon-btn rb-btn-edit" data-edit="${esc(r.id)}" title="Editar">${SVGI.pencil}</button>
-                    <button class="rb-icon-btn rb-btn-delete" data-delete="${esc(r.id)}" title="Eliminar">${SVGI.trash}</button>
-                    <button type="button" class="toggle-switch ${r.enabled?'active':''}" data-routine-toggle="${esc(r.id)}" role="switch" aria-checked="${r.enabled?'true':'false'}"></button>
-                </div>
-            </div>
-            <div class="routine-item-chips">
-                ${r.triggers.slice(0,3).map(t=>`<span class="routine-chip routine-chip-trigger">${rbTriggerLabel(t)}</span>`).join('')}
-                ${r.actions.slice(0,4).map(a=>`<span class="routine-chip routine-chip-action">${rbActionLabel(a)}</span>`).join('')}
-            </div>
-        </div>
-    `).join('')+`</div>`;
-}
-
-function bindRoutineEvents(c){
-    // Empty-state CTA (re-bound here so it works after deleting the last routine)
-    c.querySelector('[data-create-routine]')?.addEventListener('click',()=>openRoutineBuilder(null,c));
-    c.querySelectorAll('[data-routine-toggle]').forEach(el=>{
-        el.addEventListener('click',async()=>{
-            const routines=getRoutines(),r=routines.find(x=>x.id===el.dataset.routineToggle);
-            if(!r)return;
-            r.enabled=!r.enabled;
-            saveRoutines(routines);
-            el.classList.toggle('active',r.enabled);
-            el.setAttribute('aria-checked',r.enabled?'true':'false');
-            if(!r.enabled&&r.undo){
-                const snap=_getSnap(r.id);
-                if(snap){await restoreSnapshot(snap);_deleteSnap(r.id);toast(`"${r.name}" desactivada — estado restaurado`,'↩');}
-                else{toast(`"${r.name}" desactivada`);}
-            } else {
-                toast(r.enabled?`"${r.name}" activada`:`"${r.name}" desactivada`);
-            }
-        });
-    });
-    c.querySelectorAll('[data-run]').forEach(btn=>{
-        btn.addEventListener('click',async(e)=>{
-            e.stopPropagation();
-            const r=getRoutines().find(x=>x.id===btn.dataset.run);if(!r)return;
-            btn.style.opacity='0.4';btn.disabled=true;
-            await executeRoutine(r);
-            btn.style.opacity='';btn.disabled=false;
-            toast(`"${r.name}" ejecutada`,'✓');
-        });
-    });
-    c.querySelectorAll('[data-edit]').forEach(btn=>{
-        btn.addEventListener('click',(e)=>{
-            e.stopPropagation();
-            const r=getRoutines().find(x=>x.id===btn.dataset.edit);if(r)openRoutineBuilder(r,c);
-        });
-    });
-    c.querySelectorAll('[data-delete]').forEach(btn=>{
-        btn.addEventListener('click',(e)=>{
-            e.stopPropagation();
-            showDialog('Eliminar rutina','¿Seguro que quieres eliminar esta rutina?',{confirmText:'Eliminar',confirmClass:'danger',onConfirm:()=>{
-                const routines=getRoutines().filter(x=>x.id!==btn.dataset.delete);saveRoutines(routines);
-                const list=document.getElementById('routines-list');
-                if(list){list.innerHTML=renderRoutinesList(routines);bindRoutineEvents(c);}
-                toast('Rutina eliminada');
-            }});
-        });
-    });
-}
-
-// ── Desktop Routine Builder Dialog ──────────────────────────────────────
-
-function openRoutineBuilder(existing,mainContainer){
-    const isEdit=!!existing;
-    let routine=existing?JSON.parse(JSON.stringify(existing)):{id:crypto.randomUUID(),name:'',enabled:true,undo:true,triggers:[],actions:[]};
-    if(routine.undo===undefined)routine.undo=true;
-    const ov=document.createElement('div');ov.className='rb-overlay';
-    const render=()=>{
-        ov.innerHTML=`<div class="rb-dialog">
-            <div class="rb-dialog-header">
-                <span class="rb-dialog-title">${isEdit?'Editar rutina':'Nueva rutina'}</span>
-                <button class="rb-dialog-close" id="rb-cancel" title="Cerrar">${SVGI.x}</button>
-            </div>
-            <div class="rb-dialog-namebar">
-                <input class="rb-name-input" id="rb-name" placeholder="Nombre de la rutina…" value="${esc(routine.name)}" maxlength="48" spellcheck="false">
-            </div>
-            <div class="rb-dialog-body">
-                <div class="rb-col">
-                    <div class="rb-col-header">
-                        <span class="rb-col-label rb-col-label-if">Si</span>
-                        <span class="rb-col-hint">Condición de activación</span>
-                    </div>
-                    <div class="rb-col-items">
-                        ${routine.triggers.length?routine.triggers.map((t,i)=>{
-                            const d=RB_TRIGGERS.find(x=>x.type===t.type);
-                            return`<div class="rb-item rb-item-trigger">
-                                <span class="rb-item-icon rb-icon-blue">${d?.svg||SVGI.zap}</span>
-                                <span class="rb-item-label">${rbTriggerLabel(t)}</span>
-                                <button class="rb-item-rm" data-rm-trigger="${i}" title="Eliminar">${SVGI.x}</button>
-                            </div>`;
-                        }).join(''):''}
-                        <button class="rb-add-row" id="rb-add-trigger">${SVGI.plus}<span>Añadir condición</span></button>
-                    </div>
-                </div>
-                <div class="rb-col-divider"></div>
-                <div class="rb-col">
-                    <div class="rb-col-header">
-                        <span class="rb-col-label rb-col-label-then">Entonces</span>
-                        <span class="rb-col-hint">Acciones a ejecutar</span>
-                    </div>
-                    <div class="rb-col-items">
-                        ${routine.actions.length?routine.actions.map((a,i)=>{
-                            const d=RB_ACTIONS.find(x=>x.type===a.type);
-                            return`<div class="rb-item rb-item-action">
-                                <span class="rb-item-icon rb-icon-green">${d?.svg||SVGI.zap}</span>
-                                <span class="rb-item-label">${rbActionLabel(a)}</span>
-                                <button class="rb-item-rm" data-rm-action="${i}" title="Eliminar">${SVGI.x}</button>
-                            </div>`;
-                        }).join(''):''}
-                        <button class="rb-add-row" id="rb-add-action">${SVGI.plus}<span>Añadir acción</span></button>
-                    </div>
-                </div>
-            </div>
-            <div class="rb-undo-section">
-                <div class="rb-undo-row">
-                    <div class="rb-undo-info">
-                        <span class="rb-undo-label">Restaurar al finalizar</span>
-                        <span class="rb-undo-hint">Revierte los cambios cuando la condición deje de cumplirse</span>
-                    </div>
-                    <div class="toggle-switch ${routine.undo?'active':''}" id="rb-undo-toggle"></div>
-                </div>
-            </div>
-            <div class="rb-dialog-footer">
-                <button class="rb-footer-cancel" id="rb-footer-cancel">Cancelar</button>
-                <button class="rb-footer-save" id="rb-footer-save">Guardar rutina</button>
-            </div>
-        </div>`;
-        bind();
-    };
-    const close=()=>ov.remove();
-    const save=()=>{
-        routine.name=(ov.querySelector('#rb-name')?.value||'').trim()||'Mi rutina';
-        const routines=getRoutines(),idx=routines.findIndex(x=>x.id===routine.id);
-        if(idx>=0)routines[idx]=routine;else routines.push(routine);
-        saveRoutines(routines);
-        const list=document.getElementById('routines-list');
-        if(list){list.innerHTML=renderRoutinesList(routines);bindRoutineEvents(mainContainer);}
-        close();toast(isEdit?'Rutina actualizada':'Rutina creada','✓');
-    };
-    function bind(){
-        ov.querySelector('#rb-cancel')?.addEventListener('click',close);
-        ov.querySelector('#rb-footer-cancel')?.addEventListener('click',close);
-        ov.querySelector('#rb-footer-save')?.addEventListener('click',()=>{routine.name=(ov.querySelector('#rb-name')?.value||'').trim()||'Mi rutina';save();});
-        ov.querySelector('#rb-name')?.addEventListener('input',e=>{routine.name=e.target.value;});
-        ov.querySelector('#rb-add-trigger')?.addEventListener('click',()=>showTriggerPicker(routine,render,ov));
-        ov.querySelector('#rb-add-action')?.addEventListener('click',()=>showActionPicker(routine,render,ov));
-        ov.querySelectorAll('[data-rm-trigger]').forEach(b=>b.addEventListener('click',()=>{routine.triggers.splice(parseInt(b.dataset.rmTrigger),1);render();}));
-        ov.querySelectorAll('[data-rm-action]').forEach(b=>b.addEventListener('click',()=>{routine.actions.splice(parseInt(b.dataset.rmAction),1);render();}));
-        ov.querySelector('#rb-undo-toggle')?.addEventListener('click',()=>{routine.undo=!routine.undo;ov.querySelector('#rb-undo-toggle')?.classList.toggle('active',routine.undo);});
-        ov.addEventListener('click',e=>{if(e.target===ov)close();});
-    }
-    document.body.appendChild(ov);render();
-    requestAnimationFrame(()=>ov.querySelector('#rb-name')?.focus());
-}
-
-// ── Picker popover (desktop centered dialog) ────────────────────────────
-
-function rbPickerDialog(title,bodyHTML,onClose){
-    const ov=document.createElement('div');ov.className='rb-picker-overlay';
-    ov.innerHTML=`<div class="rb-picker-dialog">
-        <div class="rb-picker-header">
-            <span class="rb-picker-title">${title}</span>
-            <button class="rb-dialog-close" id="pk-close">${SVGI.x}</button>
-        </div>
-        <div class="rb-picker-body">${bodyHTML}</div>
-    </div>`;
-    document.body.appendChild(ov);
-    const close=(val)=>{ov.remove();onClose(val);};
-    ov.querySelector('#pk-close').addEventListener('click',()=>close(null));
-    ov.addEventListener('click',e=>{if(e.target===ov)close(null);});
-    return{ov,close};
-}
-
-function showTriggerPicker(routine,rebuild){
-    const {ov}=rbPickerDialog('Añadir condición',
-        `<div class="rb-pick-list">${RB_TRIGGERS.map(t=>`
-            <button class="rb-pick-item" data-type="${t.type}">
-                <span class="rb-pick-icon rb-icon-blue">${t.svg}</span>
-                <span class="rb-pick-label">${t.label}</span>
-                ${SVGI.chevronR}
-            </button>`).join('')}</div>`,
-        ()=>{}
-    );
-    ov.querySelectorAll('.rb-pick-item').forEach(item=>item.addEventListener('click',()=>{
-        const type=item.dataset.type,def=RB_TRIGGERS.find(x=>x.type===type);
-        ov.remove();
-        if(def?.valueType==='time'){showTimeInput(val=>{if(val!==null){routine.triggers.push({type,value:val});rebuild();}});}
-        else{routine.triggers.push({type});rebuild();}
-    }));
-}
-
-function showActionPicker(routine,rebuild){
-    // Group actions by category
-    const categories=[...new Set(RB_ACTIONS.map(a=>a.category||'Otros'))];
-    let listHTML='';
-    categories.forEach(cat=>{
-        const items=RB_ACTIONS.filter(a=>(a.category||'Otros')===cat);
-        if(!items.length)return;
-        listHTML+=`<div class="rb-pick-cat">${cat}</div>`;
-        listHTML+=items.map(a=>`
-            <button class="rb-pick-item" data-type="${a.type}">
-                <span class="rb-pick-icon rb-icon-green">${a.svg}</span>
-                <span class="rb-pick-label">${a.label}</span>
-                ${SVGI.chevronR}
-            </button>`).join('');
-    });
-    const {ov}=rbPickerDialog('Añadir acción',
-        `<div class="rb-pick-list">${listHTML}</div>`,
-        ()=>{}
-    );
-    ov.querySelectorAll('.rb-pick-item').forEach(item=>item.addEventListener('click',()=>{
-        const type=item.dataset.type,def=RB_ACTIONS.find(x=>x.type===type);ov.remove();
-        if(def?.valueType==='range')showRangeInput(def,val=>{if(val!==null){routine.actions.push({type,value:String(val)});rebuild();}});
-        else if(def?.valueType==='select'||def?.valueType==='toggle_val')showSelectInput(def,val=>{if(val!==null){routine.actions.push({type,value:val});rebuild();}});
-        else{routine.actions.push({type,value:'true'});rebuild();}
-    }));
-}
-
-function showTimeInput(cb){
-    const {ov}=rbPickerDialog('Hora de activación',
-        `<div class="rb-value-body">
-            <input type="time" id="rb-time-val" class="rb-time-input" value="08:00">
-            <div class="rb-value-btns">
-                <button class="rb-footer-cancel" id="tv-cancel">Cancelar</button>
-                <button class="rb-footer-save" id="tv-ok">Añadir</button>
-            </div>
-        </div>`,
-        ()=>cb(null)
-    );
-    ov.querySelector('#tv-cancel').addEventListener('click',()=>{ov.remove();cb(null);});
-    ov.querySelector('#tv-ok').addEventListener('click',()=>{const v=ov.querySelector('#rb-time-val').value;ov.remove();cb(v);});
-}
-
-function showRangeInput(def,cb){
-    const pct=def.default+'%';
-    const {ov}=rbPickerDialog(def.label,
-        `<div class="rb-value-body">
-            <div class="rb-range-wrap">
-                <div class="slider-container">
-                    <input type="range" class="filled" id="rb-range-val" min="${def.min}" max="${def.max}" value="${def.default}" style="--fill:${pct}">
-                    <span class="slider-label" id="rb-range-lbl">${def.default}${def.max===2?'':' %'}</span>
-                </div>
-            </div>
-            <div class="rb-value-btns">
-                <button class="rb-footer-cancel" id="rv-cancel">Cancelar</button>
-                <button class="rb-footer-save" id="rv-ok">Añadir</button>
-            </div>
-        </div>`,
-        ()=>cb(null)
-    );
-    const s=ov.querySelector('#rb-range-val'),lbl=ov.querySelector('#rb-range-lbl');
-    s.addEventListener('input',()=>{const p=((s.value-s.min)/(s.max-s.min))*100;s.style.setProperty('--fill',p+'%');lbl.textContent=s.value+(def.max===2?'':' %');});
-    ov.querySelector('#rv-cancel').addEventListener('click',()=>{ov.remove();cb(null);});
-    ov.querySelector('#rv-ok').addEventListener('click',()=>{const v=s.value;ov.remove();cb(v);});
-}
-
-function showSelectInput(def,cb){
-    const {ov}=rbPickerDialog(def.label,
-        `<div class="rb-pick-list">${def.options.map(([val,label])=>`
-            <button class="rb-pick-item" data-val="${esc(val)}">
-                <span class="rb-pick-icon rb-icon-green">${def.svg}</span>
-                <span class="rb-pick-label">${label}</span>
-                ${SVGI.chevronR}
-            </button>`).join('')}</div>`,
-        ()=>cb(null)
-    );
-    ov.querySelectorAll('.rb-pick-item').forEach(item=>item.addEventListener('click',()=>{const v=item.dataset.val;ov.remove();cb(v);}));
-}
-
-export async function renderModos(c){
-    c.innerHTML=renderHeader(t('hdr_modes_routines'))+renderSkeleton(2);
-    let h=renderHeader(t('hdr_modes_routines'));
-
-    // Mode cards — 4-column horizontal row
-    const modes=[
-        {id:'sleep', svg:SVGI.moon,      name:'Descanso',      desc:'Tema oscuro, no molestar', color:'#7b61ff'},
-        {id:'work',  svg:SVGI.briefcase, name:'Trabajo',        desc:'Máximo brillo, enfocado',  color:'#0a84ff'},
-        {id:'movie', svg:SVGI.film,      name:'Cine',           desc:'Tema oscuro, volumen alto',color:'#ff3b30'},
-        {id:'focus', svg:SVGI.target,    name:'Concentración',  desc:'Sin distracciones',        color:'#ff9500'},
-    ];
-    h+=`<div class="modos-grid">`+modes.map(m=>`
-        <div class="modo-card" data-modo="${m.id}">
-            <div class="modo-icon" style="background:${m.color}18;color:${m.color}">${m.svg}</div>
-            <div class="modo-info">
-                <span class="modo-name">${m.name}</span>
-                <span class="modo-desc">${m.desc}</span>
-            </div>
-        </div>`).join('')+`</div>`;
-
-    const routines=getRoutines();
-    h+=renderSection(t('sec_routines'))+`<div id="routines-list">${renderRoutinesList(routines)}</div>`;
-    h+=`<div class="routine-add-wrap">
-        <button class="rb-new-btn" id="btn-create-routine">${SVGI.plus}<span>Nueva rutina</span></button>
-    </div>`;
-    c.innerHTML=h;
-
-    // Restore saved active mode
-    getSetting('active_mode','').then(am=>{
-        if(am)document.querySelector(`.modo-card[data-modo="${am}"]`)?.classList.add('active');
-    });
-
-    document.querySelectorAll('.modo-card').forEach(btn=>{
-        btn.addEventListener('click',async()=>{
-            const id=btn.dataset.modo;
-            // Use the user's configured light/dark schemes (theme schedule) so
-            // modes don't yank a BookOS-themed desktop over to Breeze.
-            let lightScheme='BreezeLight',darkScheme='BreezeDark';
-            try{
-                const s=JSON.parse(await tauriInvoke('get_theme_schedule'));
-                if(s.light_theme)lightScheme=s.light_theme;
-                if(s.dark_theme)darkScheme=s.dark_theme;
-            }catch(e){}
-            let theme=lightScheme,dnd=false,brightness=50;
-            if(id==='sleep'){theme=darkScheme;dnd=true;brightness=20;}
-            if(id==='work'){theme=lightScheme;dnd=true;brightness=90;}
-            if(id==='movie'){theme=darkScheme;dnd=true;brightness=60;}
-            if(id==='focus'){theme=lightScheme;dnd=true;brightness=70;}
-            document.querySelectorAll('.modo-card').forEach(x=>x.classList.remove('active'));
-            btn.classList.add('active');
-            btn.style.opacity='0.6';
-            try{
-                await Promise.all([
-                    tauriInvoke('set_color_scheme',{scheme:theme}).catch(()=>{}),
-                    tauriInvoke('toggle_dnd',{enable:dnd}).catch(()=>{}),
-                    tauriInvoke('set_brightness',{value:brightness}).catch(()=>{}),
-                ]);
-                document.documentElement.className=/dark/i.test(theme)?'dark-mode':'light-mode';
-            }finally{btn.style.opacity='';}
-            setSetting('active_mode',id);
-            toast(`Modo ${btn.querySelector('.modo-name').textContent} activado`,'✓');
-        });
-    });
-
-    bindRoutineEvents(c);
-    document.getElementById('btn-create-routine')?.addEventListener('click',()=>openRoutineBuilder(null,c));
-}
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Aplicaciones Predeterminadas (NEW) ─────────────────────────────────
@@ -3945,7 +3589,7 @@ async function _renderBudsDetail(c, device){
             // propia página (sppError, más abajo), donde se puede reintentar.
             try{
                 const r = JSON.parse(await tauriInvoke('buds_connect',{mac:device.mac}));
-                if(r.connected){status=r;sppConnected=true;localStorage.setItem('buds_last_mac',device.mac);}
+                if(r.connected){status=r;sppConnected=true;tauriInvoke('set_bookos_setting',{key:'BudsLastMac',value:device.mac}).catch(e=>console.error('No se pudo anotar los Buds para el reparto de audio',e));}
             }catch(e){
                 sppError=String(e);console.warn('[Buds] SPP connect failed:',e);
                 // El error crudo de D-Bus («The name is not activatable») no
@@ -5614,6 +5258,11 @@ export async function renderPantallasBookOS(c,vista='inicio'){
             // como desvío sobre su curva en vez de pisarlo.
             if(cfg?.brillo_automatico_pantalla!==undefined)
                 filas.push(renderRowItem(_tr('Ajustar el brillo automáticamente'),'',renderToggle('bk-brillo-auto',cfg.brillo_automatico_pantalla)));
+            // El táctil es del panel integrado, como el brillo. Con un
+            // compositor que no conoce la clave no se enseña: el interruptor
+            // no haría nada.
+            if(cfg?.pantalla_tactil!==undefined)
+                filas.push(renderRowItem(_tr('Pantalla táctil'),'',renderToggle('bk-tactil',cfg.pantalla_tactil)));
             h+=renderCard(filas);
         }
         if(outs.length>1){
@@ -5626,6 +5275,13 @@ export async function renderPantallasBookOS(c,vista='inicio'){
             const estado=cfg.luz_nocturna==='programada'?`${_tr('Programada')} · ${cfg.luz_nocturna_desde}–${cfg.luz_nocturna_hasta}`
                 :cfg.luz_nocturna==='si'?_tr('Encendida'):_tr('Apagada');
             filas.push(renderNavRow(_tr('Luz nocturna'),'',{id:'bk-nocturna',right:`<span class="disp-valor">${esc(estado)}${chevron()}</span>`}));
+        }
+        if(cfg?.salvapantallas_estilo!==undefined||cfg?.salvapantallas_inactividad!==undefined||!cfg){
+            const estilo=(cfg?.salvapantallas_estilo==='rebote')?_tr('DVD'):_tr('Ondas');
+            const inact=cfg?.salvapantallas_inactividad??1200;
+            const dur=inact===0?_tr('Apagado'):(inact<60?`${inact} s`:inact%3600===0?`${inact/3600} h`:`${Math.round(inact/60)} min`);
+            const estadoSalva=inact===0?_tr('Apagado'):`${estilo} · ${dur}`;
+            filas.push(renderNavRow(_tr('Salvapantallas'),'',{id:'bk-salvapantallas',right:`<span class="disp-valor">${esc(estadoSalva)}${chevron()}</span>`}));
         }
         if(sel.activa)filas.push(renderNavRow(_tr('Avanzado'),'',{id:'bk-avanzado',right:`<span class="disp-valor">${bkRes(m).replace('x','×')} · ${hzTexto}${chevron()}</span>`}));
         if(filas.length)h+=renderCard(filas);
@@ -5669,6 +5325,10 @@ export async function renderPantallasBookOS(c,vista='inicio'){
         try{await tauriInvoke('bookos_apply_config',{config:{brillo_automatico_pantalla:a}});}
         catch(e){toast(String(e),'❌');rerender();}
     });
+    setupToggle('bk-tactil',async a=>{
+        try{await tauriInvoke('bookos_apply_config',{config:{pantalla_tactil:a}});}
+        catch(e){toast(String(e),'❌');rerender();}
+    });
     setupToggle('bk-en',async a=>{
         // La comprobación de aquí es cortesía: quien decide de verdad es el
         // compositor, que rechaza cualquier configuración sin una pantalla
@@ -5686,6 +5346,10 @@ export async function renderPantallasBookOS(c,vista='inicio'){
     document.getElementById('bk-nocturna')?.addEventListener('click',()=>{
         window.pushSubNav?.(rerender);
         desktop.nightLight(c,{disponible:caps.night_light!==false});
+    });
+    document.getElementById('bk-salvapantallas')?.addEventListener('click',()=>{
+        window.pushSubNav?.(rerender);
+        desktop.screensaver(c);
     });
     document.getElementById('bk-avanzado')?.addEventListener('click',()=>{
         window.pushSubNav?.(rerender);

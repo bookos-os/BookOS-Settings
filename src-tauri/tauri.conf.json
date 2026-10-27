@@ -50,7 +50,7 @@
       "rpm"
     ],
     "publisher": "BookOS",
-    "homepage": "https://github.com/Evelynx08/BookOS-Settings",
+    "homepage": "https://github.com/bookos-os/BookOS-Settings",
     "category": "Utility",
     "linux": {
       "deb": {

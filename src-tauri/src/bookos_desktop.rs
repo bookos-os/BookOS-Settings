@@ -351,6 +351,34 @@ pub async fn bookos_apply_config(config: serde_json::Value) -> Result<String, St
     Ok(serde_json::json!({"ok":true}).to_string())
 }
 
+#[tauri::command]
+pub async fn bookos_get_screensaver_preview(estilo: &str) -> Result<String, String> {
+    let conn = zbus::Connection::session()
+        .await
+        .map_err(|e| e.to_string())?;
+    proxy(&conn)
+        .await?
+        .call("GetScreensaverPreview", &(estilo,))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn bookos_preview_screensaver(estilo: &str) -> Result<(), String> {
+    let conn = zbus::Connection::session()
+        .await
+        .map_err(|e| e.to_string())?;
+    let (ok, error): (bool, String) = proxy(&conn)
+        .await?
+        .call("PreviewScreensaver", &(estilo,))
+        .await
+        .map_err(|e| e.to_string())?;
+    if !ok {
+        return Err(error);
+    }
+    Ok(())
+}
+
 pub async fn config_value() -> Result<serde_json::Value,String> {
     serde_json::from_str(&bookos_get_config().await?).map_err(|e|e.to_string())
 }

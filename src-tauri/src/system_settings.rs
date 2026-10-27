@@ -128,6 +128,11 @@ pub async fn forget_wifi(ssid: String) -> String {
 }
 
 #[tauri::command]
+pub async fn set_wifi_autoconnect(ssid: String, enabled: bool) -> String {
+    system_client::perform(serde_json::json!({"operation":"wifi_autoconnect","ssid":ssid,"enabled":enabled})).await
+}
+
+#[tauri::command]
 pub async fn get_wifi_details(ssid: String) -> String {
     let _=ssid;
     system_client::details("wifi").await

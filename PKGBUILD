@@ -4,7 +4,7 @@ pkgver=0.6.0
 pkgrel=2
 pkgdesc="BookOS Settings — native settings for the BookOS desktop"
 arch=('x86_64')
-url="https://github.com/Evelynx08/BookOS-Settings"
+url="https://github.com/bookos-os/BookOS-Settings"
 license=('GPL3')
 install=bookos-settings.install
 # upower: lo consulta refresh_devices_cache() para la tarjeta de bateria

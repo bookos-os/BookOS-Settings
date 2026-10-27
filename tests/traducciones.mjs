@@ -164,17 +164,6 @@ test('Los textos HTML de páginas y ventanas tienen traducción',()=>{
     }
 });
 
-test('Los resúmenes de rutinas traducen cada etiqueta y conservan su valor',()=>{
-    const contexto=contextoIngles();
-    const fuente=readFileSync(new URL('../src/modules/pages.js',import.meta.url),'utf8');
-    contexto.RB_TRIGGERS=[{type:'time',label:'Hora'}];
-    contexto.RB_ACTIONS=[{type:'theme',label:'Tema del sistema',valueType:'select',options:[['BreezeDark','Oscuro']]},{type:'volume',label:'Volumen',valueType:'range'}];
-    vm.runInContext(fuente.slice(fuente.indexOf('function rbTriggerLabel'),fuente.indexOf('function renderRoutinesList')),contexto);
-    assert.equal(contexto.rbTriggerLabel({type:'time',value:'08:35'}),'Time — 08:35');
-    assert.equal(contexto.rbActionLabel({type:'theme',value:'BreezeDark'}),'System theme — Dark');
-    assert.equal(contexto.rbActionLabel({type:'volume',value:'37'}),'Volume — 37%');
-});
-
 for(const lang of ['es','en']){
     test(`El emparejamiento Bluetooth se traduce sin cargar páginas en ${lang}`,async()=>{
         const escuchas=new Map(),dialogos=[];

@@ -113,51 +113,58 @@ pub async fn buds_get_prefs(mac: String) -> Result<String, String> {
     llamar("GetPrefs", &(mac,)).await
 }
 
-// Audio-aware auto-switch: when PC plays audio, grab buds. When PC silent N seconds,
-// release them so phone can take over. Returns one of:
-//   {"action":"connect"}    — caller should connect
-//   {"action":"disconnect"} — caller should disconnect
-//   {"action":"none"}
-#[tauri::command]
-pub async fn buds_audio_switch_check(mac: String) -> String {
-    let Ok(prefs) = llamar::<_, String>("GetPrefs", &(mac.as_str(),)).await else {
-        return r#"{"action":"none"}"#.into();
-    };
-    let auto = serde_json::from_str::<serde_json::Value>(&prefs)
-        .ok()
-        .and_then(|v| v["auto_reconnect"].as_bool())
-        .unwrap_or(false);
-    if !auto { return r#"{"action":"none"}"#.into(); }
+/// Reparte los Buds entre el PC y el móvil según quién suene: si el PC
+/// reproduce algo y no los tiene, los conecta; tras ~30 s en silencio los
+/// suelta para que los coja el móvil. Corre en el servicio (`--hidden`): antes
+/// era un temporizador de la interfaz, que obligaba a tener un WebView vivo.
+pub async fn repartir_por_audio() {
+    const TIC: std::time::Duration = std::time::Duration::from_secs(5);
+    // 6 tics de 5 s.
+    const TICS_DE_SILENCIO: u32 = 6;
+    let mut en_silencio = 0;
+    loop {
+        tokio::time::sleep(TIC).await;
+        // Los últimos Buds que conectó la interfaz. Se relee en cada vuelta
+        // porque se pueden emparejar con el servicio ya en marcha.
+        let ajustes = crate::load_bookos_settings();
+        let Some(mac) = ajustes["BudsLastMac"].as_str().filter(|m| !m.is_empty()) else {
+            // Sin Buds no hay nada que repartir ni prisa por enterarse.
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            continue;
+        };
+        let automatico = llamar::<_, String>("GetPrefs", &(mac,)).await.ok()
+            .and_then(|prefs| serde_json::from_str::<serde_json::Value>(&prefs).ok())
+            .is_some_and(|v| v["auto_reconnect"] == true);
+        if !automatico {
+            continue;
+        }
 
-    // PipeWire/PulseAudio: any active sink-input means something is playing.
-    // No stable system-bus API for this without module-dbus-protocol loaded
-    // (not on by default), so this one stays a subprocess call.
-    let playing = std::process::Command::new("pactl")
-        .args(["list", "sink-inputs", "short"])
-        .output()
-        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-        .unwrap_or(false);
+        // PipeWire/PulseAudio: any active sink-input means something is playing.
+        // No stable system-bus API for this without module-dbus-protocol loaded
+        // (not on by default), so this one stays a subprocess call.
+        let sonando = tokio::process::Command::new("pactl")
+            .args(["list", "sink-inputs", "short"])
+            .output()
+            .await
+            .is_ok_and(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty());
+        let conectados = crate::bluez_profile::is_device_connected(mac).await;
 
-    // BlueZ Connected state for our buds — via DBus, no subprocess.
-    let connected = crate::bluez_profile::is_device_connected(&mac).await;
-
-    // State tracked across calls (idle counter).
-    use std::sync::Mutex as StdMutex;
-    static IDLE_COUNT: StdMutex<u32> = StdMutex::new(0);
-    let mut idle = IDLE_COUNT.lock().unwrap();
-
-    if playing {
-        *idle = 0;
-        if !connected { return r#"{"action":"connect"}"#.into(); }
-    } else {
-        *idle += 1;
-        // 6 ticks = ~30s with 5s polling
-        if *idle >= 6 && connected {
-            *idle = 0;
-            return r#"{"action":"disconnect"}"#.into();
+        if sonando {
+            en_silencio = 0;
+            if !conectados {
+                crate::system_settings::connect_bluetooth(mac.to_string()).await;
+            }
+        } else {
+            en_silencio += 1;
+            if en_silencio >= TICS_DE_SILENCIO && conectados {
+                en_silencio = 0;
+                if let Err(e) = buds_disconnect().await {
+                    eprintln!("[buds] no se pudieron soltar: {e}");
+                }
+                crate::system_settings::disconnect_bluetooth(mac.to_string()).await;
+            }
         }
     }
-    r#"{"action":"none"}"#.into()
 }
 
 // ── GalaxyBudsClient DBus proxy (fallback when SPP fails) ────────────────────

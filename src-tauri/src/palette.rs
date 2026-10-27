@@ -148,18 +148,27 @@ pub fn scheme_from_seed(seed_hex: &str, style: Style) -> Scheme {
     // Una semilla casi gris no tiene tono utilizable: el atan2 devuelve ruido.
     // El matiz de referencia es estable; el croma de la semilla conserva el gris.
     let h = if seed_c < 0.001 { 250.0 } else { seed_h };
-    let saturacion = (seed_c / 0.16).min(1.0);
+    // Cuánto tono utilizable tiene la semilla: 0 en un gris, 1 desde un beige
+    // apagado. Es una rampa y no un corte para que dos fondos casi iguales no
+    // den una paleta gris y otra de color.
+    let presencia = ((seed_c - 0.004) / 0.016).clamp(0.0, 1.0);
 
-    let (pc, sc, tc, nc, nvc, t_rot, s_rot) = match style {
-        Style::Vibrant    => (0.155, 0.075, 0.140, 0.013, 0.030,  60.0,   0.0),
-        Style::Expressive => (0.130, 0.100, 0.140, 0.012, 0.028, 120.0,  35.0),
-        Style::Muted      => (seed_c.min(0.085), 0.042, 0.055, 0.009, 0.020, 60.0, 0.0),
-        Style::Neutral    => (0.030, 0.020, 0.022, 0.005, 0.011,  30.0,   0.0),
+    // El último valor es el suelo de croma del acento. Sin él un fondo beige
+    // (croma 0,028) daba un acento de 0,028 con cualquier estilo, casi gris; el
+    // mismo fondo en un Android da ≈0,076 (medido sobre capturas). La semilla
+    // pone el tono y el estilo la viveza, como en Material.
+    let (pc, sc, tc, nc, nvc, t_rot, s_rot, suelo) = match style {
+        Style::Vibrant    => (0.155, 0.075, 0.140, 0.013, 0.030,  60.0,   0.0, 0.090),
+        Style::Expressive => (0.130, 0.100, 0.140, 0.012, 0.028, 120.0,  35.0, 0.075),
+        Style::Muted      => (0.085, 0.042, 0.055, 0.009, 0.020,  60.0,   0.0, 0.045),
+        Style::Neutral    => (0.030, 0.020, 0.022, 0.005, 0.011,  30.0,   0.0, 0.0),
     };
 
-    let pc = seed_c.min(pc);
-    let sc = sc * saturacion;
-    let tc = tc * saturacion;
+    let pc = seed_c.min(pc).max(suelo * presencia);
+    // Antes se multiplicaban por croma/0,16: con una semilla apagada el
+    // secundario y el terciario giraban de tono pero salían grises (0,017).
+    let sc = sc * presencia;
+    let tc = tc * presencia;
     let nc = seed_c.min(nc);
     let nvc = seed_c.min(nvc);
 
@@ -444,23 +453,22 @@ mod tests {
         }
     }
 
+    /// Un beige apagado tiene que dar un acento con color (más que el del
+    /// propio fondo) pero no chillón: por debajo del techo del estilo.
     #[test]
-    fn un_fondo_apagado_no_genera_acentos_chillones() {
+    fn un_fondo_apagado_da_acento_con_color_sin_chillar() {
         let (_, croma, _) = rgb_to_oklch(121, 113, 92);
-        for estilo in [
-            Style::Vibrant,
-            Style::Expressive,
-            Style::Muted,
-            Style::Neutral,
+        for (estilo, techo) in [
+            (Style::Vibrant, 0.155),
+            (Style::Expressive, 0.130),
+            (Style::Muted, 0.085),
         ] {
             let esquema = scheme_from_seed("#79715C", estilo);
-            for rampa in [esquema.primary, esquema.secondary, esquema.tertiary] {
-                assert!(
-                    rampa.chroma <= croma,
-                    "el acento no debe saturarse más que el fondo"
-                );
-            }
+            assert!(esquema.primary.chroma > croma, "el acento debe ganar color");
+            assert!(esquema.primary.chroma < techo * 0.7, "el acento no debe chillar");
         }
+        let neutro = scheme_from_seed("#79715C", Style::Neutral);
+        assert!(neutro.primary.chroma <= croma, "Neutro no añade color");
     }
 
     #[test]

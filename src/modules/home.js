@@ -4,10 +4,9 @@ export const searchIndex=[
 {id:'recuperacion',title:'Recuperación',subtitle:'Instantáneas · Restaurar',keywords:['recuperacion','recovery','snapshot','captura','revertir','rollback','btrfs','snapper','restaurar','backup']},
 {id:'teclado',title:'Teclado',subtitle:'Repetición · Distribución',keywords:['repetir','retardo','velocidad','teclado','keyboard','distribucion','layout','atajos','shortcuts','teclas','repeticion','xkb']},
 {id:'touchpadmouse',title:'Touchpad y ratón',subtitle:'Sensibilidad · Botones · Velocidad',keywords:['touchpad','raton','mouse','tactil','panel','gestos','tap','scroll','puntero','botones','velocidad','aceleracion']},
-{id:'modos',title:'Modos y rutinas',subtitle:'Modos · Rutinas',keywords:['modo','rutina','modes','routines','automation','automatizacion']},
 {id:'sonido',title:'Sonido',subtitle:'Volumen · Salida',keywords:['sonido','volumen','audio','silencio','salida','sound','volume','mute','output','balance']},
 {id:'notificaciones',title:'Notificaciones',subtitle:'No molestar',keywords:['notificacion','alerta','dnd','notifications','alert','do not disturb']},
-{id:'pantalla',title:'Pantalla',subtitle:'Brillo · Resolución · Escala',keywords:['pantalla','brillo','resolucion','display','blur','efectos','screen','brightness','resolution','escala']},
+{id:'pantalla',title:'Pantalla',subtitle:'Brillo · Resolución · Escala',keywords:['pantalla','brillo','resolucion','display','blur','efectos','screen','brightness','resolution','escala','salvapantallas','screensaver','dvd','ondas']},
 {id:'bateria',title:'Batería',subtitle:'Energía · Carga · Samsung Book',keywords:['bateria','energia','carga','samsung','book','ventilador','rendimiento','battery','power','charge','performance','fan']},
 {id:'bloqueo',title:'Pantalla de bloqueo',subtitle:'Bloqueo · Reloj',keywords:['bloqueo','lock','aod','huella','lockscreen','biometrics','fingerprint']},
 {id:'inicio',title:'Escritorio',subtitle:'Dock · Escritorios virtuales',keywords:['inicio','home','escritorio','homescreen','layout','desktop','dock','escritorios']},
@@ -34,6 +33,7 @@ export const subSearchIndex=[
 {parent:'accesibilidad',title:'Reducir efectos y animaciones',keywords:['efectos','animaciones','reducidos']},
 {parent:'bloqueo',title:'Bloqueo por inactividad',keywords:['inactividad','bloqueo','suspension']},
 // Funciones nuevas (sub-páginas dentro de páginas existentes)
+{parent:'pantalla',title:'Salvapantallas',keywords:['salvapantallas','screensaver','dvd','ondas','estela','rebote','inactividad']},
 {parent:'pantalla',title:'Pantallas externas',keywords:['monitor','externo','hdmi','proyector','multimonitor','duplicar','extender','display']},
 {parent:'bateria',title:'Opciones avanzadas de energía',keywords:['tapa','lid','suspender','suspension','inactividad','critica','energia','apagar']},
 // Páginas fusionadas en Seguridad / Actualización (sin entrada propia en sidebar)
@@ -92,9 +92,6 @@ export const subSearchIndex=[
 // Actualizacion
 {parent:'actualizacion',title:'Actualizaciones del sistema',keywords:['actualizacion','update','paru','pacman']},
 {parent:'actualizacion',title:'Flatpak',keywords:['flatpak','app']},
-// Modos
-{parent:'modos',title:'Modos predefinidos',keywords:['modo','predefinido','perfil']},
-{parent:'modos',title:'Rutinas',keywords:['rutina','automatizacion','disparador','trigger']},
 // Avanzadas
 // Accesibilidad
 // Aplicaciones
@@ -194,7 +191,6 @@ export function renderHome(u){
         <span class="home-more-chevron" aria-hidden="true">›</span>
     </button>
     <div class="home-more-items">
-        ${it('modos','routines.svg','modes_routines')}
         ${it('avanzadas','advanced.svg','advanced')}
         ${it('recuperacion','recovery.svg','recovery')}
         ${it('mantenimiento','maintanance.svg','maintenance')}

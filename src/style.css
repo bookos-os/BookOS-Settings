@@ -361,21 +361,31 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 /* ═══════════════════════════════════════════════════════════ */
 /* ── BATTERY (Samsung Galaxy Style — thin bars) ──────────── */
 /* ═══════════════════════════════════════════════════════════ */
-.bat-page-wrap{max-width:100%}
-.bat-hero{display:flex;flex-direction:column;gap:6px;padding:28px 20px 14px;margin-bottom:0}
+.detail-view:has(.bat-page-wrap){padding-inline:20px}
+.bat-page-wrap{width:100%}
+.bat-hero{display:flex;flex-direction:column;gap:6px;padding:8px 20px 14px;margin-bottom:0}
 .bat-time-big{font-size:28px;font-weight:700;letter-spacing:-.3px;line-height:1.2}
 .bat-time-num{font-size:34px;font-weight:700;letter-spacing:-.5px;font-style:normal}
 .bat-time-label{font-size:22px;font-weight:400;letter-spacing:-.2px}
-.bat-sub{font-size:16px;color:var(--tx2)}
-.bat-sub{display:inline-flex;align-items:center;gap:6px}
+.bat-sub{font-size:16px}
+.bat-sub{line-height:1.5}
 .bat-ico{color:var(--green);flex-shrink:0}
-.bat-level-bar{height:29px;background:#E3E3E3;border-radius:20px;overflow:visible;margin:7px 0 6px;position:relative}
-.dark-mode .bat-level-bar{background:#696969}
-@media(prefers-color-scheme:dark){:root:not(.light-mode) .bat-level-bar{background:#696969}}
-.bat-level-fill{height:100%;border-radius:20px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
-.bat-limit-marker{position:absolute;top:-3px;bottom:-3px;width:5px;background:#30CF00;border-radius:1px;transform:translateX(-50%);opacity:.7}
-.bat-level-fill.green{background:#30CF00}.bat-level-fill.orange{background:#30CF00}.bat-level-fill.red{background:#30CF00}
-.bat-full-info{font-size:13px;color:var(--tx2);padding:0 20px 20px}
+.bat-level-bar{height:29px;background:var(--accent-container,#E3E3E3);border-radius:20px;overflow:hidden;margin:7px 0 6px;position:relative}
+.bat-level-fill{position:relative;height:100%;border-radius:20px 0 0 20px;transition:width 1.2s cubic-bezier(.4,0,.2,1)}
+/* Lo que queda por encima del límite va rayado: es capacidad que la protección
+   no deja cargar. El escudo es siempre verde y sólido, que es lo que dice que
+   la protección está activa, y queda por encima del relleno aunque la carga
+   ya pase del límite. */
+.bat-limit-zone{position:absolute;top:0;bottom:0;right:0;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--bg) 88%,transparent) 0 3px,transparent 3px 7px);display:flex;align-items:center;justify-content:center}
+.bat-limit-zone svg{position:relative;z-index:1;flex-shrink:0}
+.bat-level-fill.green,.bat-level-fill.orange,.bat-level-fill.red{background:var(--blue)}
+/* Títulos, encabezados de sección y kebabs toman el color de la paleta en toda
+   la app, y la batería además su barra y gráfico, en vez de grises fijos; --on-accent-container es el tono legible
+   sobre --bg en claro y oscuro, y --tx es el respaldo sin paleta. */
+.detail-title,.bat-time-big{color:var(--on-accent-container,var(--tx))}
+.section-header,.bat-sub-line{color:color-mix(in srgb,var(--blue) 75%,var(--tx2))}
+.detail-header-actions .icon-btn{background:var(--accent-container,var(--sbg));color:var(--on-accent-container,var(--tx))}
+.bat-sub-line{font-size:16px;line-height:1.5}
 
 /* Battery chart — THIN bars like Samsung */
 .bat-chart{background:var(--card);border-radius:25px;padding:24px 24px 20px;margin-bottom:16px;display:flex;flex-direction:column}
@@ -396,14 +406,17 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .bat-bar-tooltip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;font-size:10px;padding:3px 7px;border-radius:6px;opacity:0;pointer-events:none;transition:.15s;white-space:nowrap;z-index:10}
 .bat-bar-col:hover .bat-bar-tooltip{opacity:1}
 .chart-legend{display:flex;gap:16px;margin-top:10px;font-size:10px;color:var(--tx2)}
-.bat-history{margin-bottom:0;background:transparent;border-radius:0}
+.bat-history{margin-bottom:0;background:transparent;border-radius:0;padding:20px}
+.bat-history-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 20px;flex-wrap:wrap}
+.bat-history-heading .chart-title,.bat-history-heading .chart-subtitle{margin:0}
+.bat-history-heading .chart-subtitle{font-size:12px}
 /* Rejilla a lo macOS: líneas horizontales continuas cada 25 %, verticales
    discontinuas cada 3 h que bajan hasta las etiquetas, y la hora a la derecha
    de su línea. Los 48px de margen son la columna de porcentajes. */
 .bat-history-chart{position:relative;margin:12px 48px 0 0}
 .bat-history-vline{position:absolute;top:0;bottom:0;border-left:1px dashed var(--div);pointer-events:none}
 .bat-history-vline.edge{border-left-style:solid}
-.bat-history-plot{position:relative;height:190px;background-image:linear-gradient(to bottom,var(--div) 1px,transparent 1px);background-size:100% 25%;border-bottom:1px solid var(--div)}
+.bat-history-plot{position:relative;height:132px;background-image:linear-gradient(to bottom,var(--div) 1px,transparent 1px);background-size:100% 25%;border-bottom:1px solid var(--div)}
 .bat-history-bars{position:absolute;inset:1px 0 0;display:grid;grid-template-columns:repeat(96,minmax(0,1fr));gap:2px;padding:0 2px}
 .bat-history-slot{height:100%;display:flex;align-items:flex-end;justify-content:center}
 .bat-history-bar{width:100%;max-width:5px;background:var(--green);border-radius:2px 2px 0 0}
@@ -419,7 +432,7 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .bat-history-hours small{display:block;font-size:11px;margin-top:2px}
 .bat-history-key{width:14px;height:8px;border-radius:4px;background:var(--green);display:inline-block;margin-right:6px;vertical-align:middle}
 @media(max-width:600px){.bat-history-bars{gap:1px;padding:0 1px}}
-.bat-chart-legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:14px;font-size:12px;color:var(--tx2)}
+.bat-chart-legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:8px;font-size:12px;color:var(--tx2)}
 .chart-legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
 /* Battery stats chips row */
 .bat-stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:0 0 14px;padding:0 4px}
@@ -451,18 +464,8 @@ input[type="range"].filled{background:linear-gradient(to right,var(--blue) var(-
 .bat-pop-empty{font-size:13px;color:var(--tx2);padding:10px 14px;background:var(--sbg);border-radius:14px}
 
 /* Perf modes */
-.perf-modes{display:flex;gap:10px;margin-bottom:16px}
-.perf-mode-card{flex:1;background:var(--card);border-radius:18px;padding:14px 10px;text-align:center;cursor:pointer;transition:.15s;border:2px solid transparent}
-.perf-mode-card.active{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 14%,var(--card));box-shadow:0 0 0 1px var(--blue) inset,0 4px 12px -4px var(--blue)}
-.perf-mode-card.active .perf-mode-name{color:var(--blue)}
-.perf-mode-card:hover:not(.active){background:var(--hov)}
-.perf-mode-icon{font-size:20px;margin-bottom:4px}.perf-mode-name{font-size:12px;font-weight:600}.perf-mode-desc{font-size:10px;color:var(--tx2);margin-top:2px}
-/* Performance icons: dark in light mode, white in dark mode */
-.perf-icon-img{transition:filter .2s;display:block;margin:0 auto}
-.light-mode .perf-icon-img,:root:not(.dark-mode) .perf-icon-img{filter:brightness(0) opacity(.35)}
-.light-mode .perf-mode-card.active .perf-icon-img,:root:not(.dark-mode) .perf-mode-card.active .perf-icon-img{filter:none}
-.dark-mode .perf-icon-img{filter:brightness(0) invert(1) opacity(.5)}
-.dark-mode .perf-mode-card.active .perf-icon-img{filter:brightness(0) invert(1)}
+.bat-profile-error{margin:0 20px 14px;color:var(--red);font-size:13px}
+
 .buds-model-icon{transition:filter .2s}
 .dark-mode .buds-model-icon:not(.buds-keep-color){filter:brightness(0) invert(1)}
 @media(prefers-color-scheme:dark){:root:not(.light-mode) .buds-model-icon:not(.buds-keep-color){filter:brightness(0) invert(1)}}
@@ -711,119 +714,6 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 
 
 /* ═══════════════════════════════════════════════════════════ */
-/* ── MODES & ROUTINES ────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════ */
-
-/* Mode cards — 4-column horizontal strip */
-.modos-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
-.modo-card{background:var(--card);border-radius:16px;padding:16px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:background .12s,box-shadow .12s,transform .1s;border:1.5px solid transparent}
-.modo-card:hover{background:var(--hov);box-shadow:0 2px 10px rgba(0,0,0,.07)}
-.modo-card:active{transform:scale(.97)}
-.modo-card.active{border-color:var(--blue);background:rgba(0,122,255,.06)}
-.modo-icon{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.modo-info{display:flex;flex-direction:column;gap:2px;min-width:0}
-.modo-name{font-size:13px;font-weight:700}
-.modo-desc{font-size:11px;color:var(--tx2);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-/* Routine list */
-.routine-item{padding:13px 18px;border-bottom:1px solid var(--div);display:flex;flex-direction:column;gap:7px}
-.routine-item:last-child{border-bottom:none}
-.routine-item-main{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.routine-item-info{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
-.routine-item-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.routine-item-desc{font-size:11px;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.routine-item-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
-.routine-item-chips{display:flex;flex-wrap:wrap;gap:4px}
-.routine-chip{font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;white-space:nowrap}
-.routine-chip-trigger{background:rgba(10,132,255,.12);color:var(--blue)}
-.routine-chip-action{background:rgba(48,209,88,.12);color:var(--green)}
-.routine-add-wrap{padding:10px 0 4px}
-
-/* Icon buttons (run / edit / delete in routine row) */
-.rb-icon-btn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;border:none;background:transparent;cursor:pointer;color:var(--tx2);transition:background .1s,color .1s}
-.rb-icon-btn:hover{background:var(--sbg);color:var(--tx)}
-.rb-btn-run:hover{color:var(--green)}
-.rb-btn-delete:hover{background:rgba(255,59,48,.1);color:var(--red)}
-
-/* "Nueva rutina" button */
-.rb-new-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;background:var(--blue);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .12s}
-.rb-new-btn:hover{opacity:.88}
-.rb-new-btn svg{flex-shrink:0}
-
-/* ── Routine builder — desktop centered dialog ─────────────── */
-.rb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:flex;align-items:center;justify-content:center;animation:fadeIn .15s ease}
-.rb-dialog{background:var(--bg);border-radius:18px;width:680px;max-width:calc(100vw - 32px);max-height:calc(100vh - 48px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.3);animation:rbDialogIn .18s cubic-bezier(.32,1.1,.5,1)}
-@keyframes rbDialogIn{from{opacity:0;transform:scale(.96) translateY(6px)}to{opacity:1;transform:none}}
-.rb-dialog-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid var(--div);flex-shrink:0}
-.rb-dialog-title{font-size:16px;font-weight:700}
-.rb-dialog-close{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:var(--sbg);border:none;cursor:pointer;color:var(--tx2);transition:background .1s,color .1s}
-.rb-dialog-close:hover{background:var(--act);color:var(--tx)}
-.rb-dialog-namebar{padding:14px 20px 10px;border-bottom:1px solid var(--div);flex-shrink:0}
-.rb-name-input{width:100%;padding:9px 14px;background:var(--card);border:1.5px solid transparent;border-radius:10px;font-size:14px;font-weight:600;color:var(--tx);outline:none;box-sizing:border-box;transition:border-color .15s}
-.rb-name-input:focus{border-color:var(--blue)}
-.rb-dialog-body{display:grid;grid-template-columns:1fr auto 1fr;gap:0;flex:1;overflow:hidden;min-height:0}
-.rb-col{display:flex;flex-direction:column;overflow:hidden}
-.rb-col-header{padding:14px 18px 8px;flex-shrink:0}
-.rb-col-label{font-size:19px;font-weight:800;letter-spacing:-.4px;display:block}
-.rb-col-label-if{color:var(--blue)}
-.rb-col-label-then{color:var(--green)}
-.rb-col-hint{font-size:11px;color:var(--tx2);display:block;margin-top:1px}
-.rb-col-items{padding:4px 14px 14px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;flex:1}
-.rb-col-divider{width:1px;background:var(--div);margin:14px 0;flex-shrink:0}
-/* Items inside builder columns */
-.rb-item{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:10px;padding:10px 12px;animation:rbItemIn .12s ease}
-@keyframes rbItemIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-.rb-item-trigger{border-left:2.5px solid var(--blue)}
-.rb-item-action{border-left:2.5px solid var(--green)}
-.rb-item-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.rb-icon-blue{background:rgba(10,132,255,.12);color:var(--blue)}
-.rb-icon-green{background:rgba(48,209,88,.12);color:var(--green)}
-.rb-item-label{font-size:12px;font-weight:500;flex:1;line-height:1.3}
-.rb-item-rm{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:transparent;border:none;cursor:pointer;color:var(--tx2);transition:background .1s,color .1s;flex-shrink:0}
-.rb-item-rm:hover{background:rgba(255,59,48,.1);color:var(--red)}
-/* Add row button */
-.rb-add-row{display:flex;align-items:center;gap:7px;width:100%;padding:9px 12px;background:transparent;border:1.5px dashed var(--brd);border-radius:10px;font-size:12px;color:var(--tx2);cursor:pointer;transition:border-color .12s,color .12s,background .12s}
-.rb-add-row:hover{border-color:var(--blue);color:var(--blue);background:rgba(10,132,255,.05)}
-.rb-add-row svg{flex-shrink:0;opacity:.7}
-/* Dialog footer */
-.rb-dialog-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--div);flex-shrink:0}
-.rb-footer-cancel{padding:7px 16px;background:var(--sbg);color:var(--tx2);border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;transition:background .1s}
-.rb-footer-cancel:hover{background:var(--act)}
-.rb-footer-save{padding:7px 18px;background:var(--blue);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .12s}
-.rb-footer-save:hover{opacity:.88}
-/* Undo/revert toggle */
-.rb-undo-section{padding:10px 20px;border-top:1px solid var(--div);flex-shrink:0}
-.rb-undo-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.rb-undo-info{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
-.rb-undo-icon{width:28px;height:28px;border-radius:8px;background:rgba(255,149,0,.12);color:#ff9500;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.rb-undo-label{font-size:13px;font-weight:600}
-.rb-undo-hint{font-size:11px;color:var(--tx2);line-height:1.3}
-
-/* ── Picker dialog (centered, compact) ────────────────────── */
-.rb-picker-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:3100;display:flex;align-items:center;justify-content:center;animation:fadeIn .12s ease}
-.rb-picker-dialog{background:var(--bg);border-radius:16px;width:360px;max-width:calc(100vw - 32px);max-height:480px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 56px rgba(0,0,0,.28);animation:rbDialogIn .15s cubic-bezier(.32,1.1,.5,1)}
-.rb-picker-header{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;border-bottom:1px solid var(--div);flex-shrink:0}
-.rb-picker-title{font-size:14px;font-weight:700}
-.rb-picker-body{overflow-y:auto;flex:1}
-.rb-pick-list{display:flex;flex-direction:column;padding:4px 0}
-.rb-pick-item{display:flex;align-items:center;gap:10px;padding:10px 16px;background:transparent;border:none;cursor:pointer;text-align:left;color:var(--tx);transition:background .1s;width:100%}
-.rb-pick-item:hover{background:var(--hov)}
-.rb-pick-item:active{background:var(--sbg)}
-.rb-pick-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.rb-pick-label{font-size:13px;font-weight:500;flex:1}
-.rb-pick-item>svg:last-child{color:var(--tx2);flex-shrink:0;opacity:.5}
-/* Category headers in picker */
-.rb-pick-cat{font-size:11px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px;padding:12px 16px 4px;user-select:none}
-.rb-pick-cat:first-child{padding-top:8px}
-/* Value input body (time / range) */
-.rb-value-body{padding:16px}
-.rb-range-wrap{padding:4px 0 12px}
-.rb-time-input{width:100%;padding:10px 14px;background:var(--card);border:1.5px solid transparent;border-radius:10px;font-size:20px;font-weight:600;color:var(--tx);outline:none;box-sizing:border-box;margin-bottom:14px;transition:border-color .15s}
-.rb-time-input:focus{border-color:var(--blue)}
-.rb-value-btns{display:flex;gap:8px;justify-content:flex-end}
-.rb-value-btns .rb-footer-cancel,.rb-value-btns .rb-footer-save{padding:7px 16px}
-
-/* ═══════════════════════════════════════════════════════════ */
 /* ── ACCOUNTS HERO & SYSTEM USERS ────────────────────────── */
 /* ═══════════════════════════════════════════════════════════ */
 .sys-users-list{display:flex;flex-direction:column}
@@ -920,8 +810,8 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
    hace el compositor sin animaciones de ventana. El origen es el dock visto
    desde la caja de la ventana: (50%-14%)/62% y (88%-22%)/54%. */
 .cristal .ap-ventana,.solido .ap-ventana{transform-origin:58% 122%}
-.ap-opcion:is(:hover,:focus-visible) .cristal .ap-ventana{animation:ap-abrir 2.4s cubic-bezier(.3,.7,.3,1) infinite}
-.ap-opcion:is(:hover,:focus-visible) .solido .ap-ventana{animation:ap-corte 2.4s linear infinite}
+.ap-opcion:is(:hover,:focus-visible) .cristal:not(.avisa,.calla) .ap-ventana{animation:ap-abrir 2.4s cubic-bezier(.3,.7,.3,1) infinite}
+.ap-opcion:is(:hover,:focus-visible) .solido:not(.avisa,.calla) .ap-ventana{animation:ap-corte 2.4s linear infinite}
 @keyframes ap-abrir{0%{transform:scale(.08);opacity:0}22%,62%{transform:none;opacity:1}82%,100%{transform:scale(.08);opacity:0}}
 @keyframes ap-corte{0%,21.9%{opacity:0}22%,81.9%{opacity:1}82%,100%{opacity:0}}
 /* Minimizar: el mismo ciclo (irse al dock y volver) en las tres fichas, con
@@ -1011,9 +901,16 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 /* Punto blanco con borde: Arena es casi blanco y sin borde no se veía. */
 .ap-color[aria-checked=true]::after{content:'';position:absolute;inset:9px;border-radius:50%;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
 .ap-opciones.iconos{margin-bottom:6px}
+.ap-opciones.iconos .ap-nombre{position:relative}
+.ap-seleccion{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);color:var(--blue);visibility:hidden}
+.ap-opcion[aria-checked=true] .ap-seleccion{visibility:visible}
+.ap-opcion:disabled{cursor:wait}
 .ap-icono{width:72px;height:72px;border-radius:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px var(--brd),0 2px 8px rgba(0,0,0,.12)}
 .ap-glifo{width:46px;height:46px;border-radius:30%;display:flex;align-items:center;justify-content:center}
 .ap-horas{margin-top:10px}
+/* El SVG conserva la geometría y el movimiento que genera el compositor. */
+.sp-mini{background:#000;display:flex;align-items:center;justify-content:center;position:relative;width:100%;aspect-ratio:16/10;border-radius:14px;overflow:hidden;box-shadow:0 0 0 1px var(--brd);color:var(--tx2);font-size:13px}
+.sp-mini img{width:100%;height:100%;display:block;object-fit:contain}
 .mode-radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--brd);transition:.15s}
 .mode-radio.on{border-color:var(--blue);background:var(--blue);box-shadow:inset 0 0 0 3px var(--card)}
 /* Paleta de colores (estilo Android): maquetas, tiras de color y fichas */
@@ -1098,12 +995,17 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 /* Tinted icons sub-page */
 .ti-page-block{padding:22px 18px}
 .ti-preview-row{display:flex;gap:40px;justify-content:center;margin-bottom:22px}
-.ti-preview-swatch{display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer}
-.ti-preview-tile{width:96px;height:96px;border-radius:22px;display:flex;align-items:center;justify-content:center;border:2px solid transparent;transition:.15s;box-shadow:0 3px 10px rgba(0,0,0,.18)}
+.ti-preview-swatch{display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;background:none;border:0;padding:0;font:inherit;color:inherit}
+.ti-preview-tile{width:96px;height:96px;border-radius:22px;display:flex;align-items:center;justify-content:center;border:2px solid transparent;box-shadow:0 3px 10px rgba(0,0,0,.18)}
 .ti-preview-swatch.active .ti-preview-tile{border-color:var(--blue)}
 .ti-preview-glyph{width:58px;height:58px;border-radius:30%;display:flex;align-items:center;justify-content:center;transition:background .08s linear}
-.ti-preview-label{font-size:14px;font-weight:500;color:var(--tx2)}
-.ti-preview-swatch.active .ti-preview-label{color:var(--blue)}
+.ti-preview-label{position:relative;font-size:14px;font-weight:500;color:var(--tx2)}
+.ti-preview-swatch.active .ti-preview-label{color:var(--tx);font-weight:600}
+.ti-seleccion{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);color:var(--blue);visibility:hidden}
+.ti-preview-swatch.active .ti-seleccion{visibility:visible}
+.ti-preview-swatch:focus-visible{outline:none}
+.ti-preview-swatch:focus-visible .ti-preview-tile{outline:2px solid var(--blue);outline-offset:3px}
+:root.dark-mode .ti-preview-tile{box-shadow:none}
 /* Tinted icon settings */
 .ti-settings .ti-slider,.ti-page-block .ti-slider{margin:14px 0}
 .ti-slider input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:8px;border-radius:6px;outline:none;cursor:pointer}
@@ -1739,7 +1641,7 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 
 /* Unified corner radii: one radius for surfaces, one for controls */
 .card,.detail-card,.skeleton{border-radius:var(--r-card)}
-.search-bar,.sel,.wifi-dialog input,.sudo-input,.rb-name-input,.rb-time-input,
+.search-bar,.sel,.wifi-dialog input,.sudo-input,
 .channel-dialog-actions button{border-radius:var(--r-control)}
 
 /* Texto secundario: 11px se queda corto en HiDPI, el suelo cómodo es ~12 */
@@ -1768,11 +1670,6 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 /* Toggles are now real <button>s: reset chrome, keep the switch look, add focus ring */
 button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;appearance:none}
 .toggle-switch:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-
-/* Routine empty state with CTA */
-.routine-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:36px 24px;text-align:center}
-.routine-empty-title{font-size:15px;font-weight:600}
-.routine-empty-sub{font-size:12.5px;color:var(--tx2);max-width:320px;margin-bottom:10px}
 
 
 /* Swipe preview: clipping frame pinned to the content area (so the card

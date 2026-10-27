@@ -4,7 +4,7 @@ A native system settings application for the BookOS compositor, designed for Sam
 
 Built with Tauri 2 and vanilla JavaScript. Lightweight, fast, hardware-aware.
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/Evelynx08/BookOS-Settings/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue?style=flat-square)](https://github.com/bookos-os/BookOS-Settings/releases)
 [![Platform](https://img.shields.io/badge/platform-Arch%20%7C%20Debian%20%7C%20Ubuntu-1793D1?style=flat-square)](#installation)
 [![License](https://img.shields.io/badge/license-GPLv3-green?style=flat-square)](LICENSE)
 
@@ -92,7 +92,7 @@ Compatible with Debian 12 and newer, and Ubuntu 22.04 and newer. The repository 
 
 ### Standalone packages
 
-Download the appropriate file from [Releases](https://github.com/Evelynx08/BookOS-Settings/releases):
+Download the appropriate file from [Releases](https://github.com/bookos-os/BookOS-Settings/releases):
 
 | Distribution | File |
 |---|---|
@@ -117,7 +117,7 @@ sudo pacman -S colord inotify-tools python python-dbus python-gobject
 Clone and build:
 
 ```bash
-git clone https://github.com/Evelynx08/BookOS-Settings
+git clone https://github.com/bookos-os/BookOS-Settings
 cd BookOS-Settings
 cargo tauri build
 ```
@@ -274,7 +274,7 @@ Desktop controls require a BookOS session. Hardware-specific features (fan contr
 
 ## Contributing
 
-Issues and pull requests are welcome at [github.com/Evelynx08/BookOS-Settings](https://github.com/Evelynx08/BookOS-Settings).
+Issues and pull requests are welcome at [github.com/bookos-os/BookOS-Settings](https://github.com/bookos-os/BookOS-Settings).
 
 ---
 

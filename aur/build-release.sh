@@ -37,6 +37,6 @@ echo "==> SHA256:"
 sha256sum "$OUT_DIR/$TARBALL"
 echo
 echo "Next steps:"
-echo "  1. Upload $TARBALL to: https://github.com/Evelynx08/BookOS-Settings/releases/tag/v$VERSION"
+echo "  1. Upload $TARBALL to: https://github.com/bookos-os/BookOS-Settings/releases/tag/v$VERSION"
 echo "  2. Copy the SHA256 above into PKGBUILD's sha256sums array"
 echo "  3. Regenerate .SRCINFO:  cd aur && makepkg --printsrcinfo > .SRCINFO"

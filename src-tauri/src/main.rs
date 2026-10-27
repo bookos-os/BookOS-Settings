@@ -2053,27 +2053,43 @@ const DEDOS: [&str; 10] = [
     serde_json::json!({"available": available, "fingers": fingers, "stages": stages}).to_string()
 }
 
-#[tauri::command] async fn delete_fingerprint(finger: String) -> Result<(), String> {
-    if !DEDOS.contains(&finger.as_str()) { return Err("dedo desconocido".into()); }
+/// `fprintd-enroll`/`fprintd-delete` como root con la contraseña del diálogo de
+/// Ajustes. Llamados como el usuario, fprintd pide a polkit
+/// `net.reactivated.fprint.device.enroll` (`auth_self_keep`), y polkit solo
+/// puede preguntar a través de un agente de sesión que BookOS no tiene: lo
+/// deniega al instante («Not Authorized» en `journalctl -u fprintd`).
+/// Root no pasa por esa pregunta. Mismo camino que `set_adaptive_charging`.
+async fn fprintd_root(programa: &str, finger: &str, password: &str) -> Result<tokio::process::Child, String> {
+    use tokio::io::AsyncWriteExt;
+    if !DEDOS.contains(&finger) { return Err("dedo desconocido".into()); }
     let user = run("whoami",&[]).await;
-    let out = Command::new("fprintd-delete").args([&user, "-f", &finger]).output().await.map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stdout).trim().to_string()) }
-}
-
-#[tauri::command] async fn enroll_fingerprint(app: tauri::AppHandle, finger: String) -> Result<String, String> {
-    use tauri::Emitter;
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    if !DEDOS.contains(&finger.as_str()) { return Err("dedo desconocido".into()); }
-    let user = run("whoami",&[]).await;
-    let mut child = Command::new("fprintd-enroll")
-        .args([&user, "-f", &finger])
-        .stdin(std::process::Stdio::null())
+    let mut child = Command::new("sudo")
+        .args(["-k", "-S", "-p", "", "--", programa, &user, "-f", finger])
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
+    let mut sin = child.stdin.take().expect("stdin pedido como pipe");
+    sin.write_all(format!("{}\n", password).as_bytes()).await.map_err(|e| e.to_string())?;
+    Ok(child)
+}
+
+#[tauri::command] async fn delete_fingerprint(finger: String, password: String) -> Result<(), String> {
+    let out = fprintd_root("fprintd-delete", &finger, &password).await?.wait_with_output().await.map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err.trim().to_string() })
+    }
+}
+
+#[tauri::command] async fn enroll_fingerprint(app: tauri::AppHandle, finger: String, password: String) -> Result<String, String> {
+    use tauri::Emitter;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    let mut child = fprintd_root("fprintd-enroll", &finger, &password).await?;
 
     let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut stderr = child.stderr.take().ok_or("no stderr")?;
     let mut reader = BufReader::new(stdout).lines();
     let mut stages: u32 = 0;
     let mut full_output = String::new();
@@ -2093,9 +2109,62 @@ const DEDOS: [&str; 10] = [
             let _ = app.emit("fp-progress", serde_json::json!({"stage": stages, "retry": true}));
         }
     }
+    let mut errores = String::new();
+    let _ = stderr.read_to_string(&mut errores).await;
+    full_output.push_str(&errores);
     let status = child.wait().await.map_err(|e| e.to_string())?;
     let ok = full_output.contains("enroll-completed") || status.success();
     Ok(format!(r#"{{"ok":{},"output":"{}","stages":{}}}"#, ok, esc(&full_output), stages))
+}
+
+// ── PIN del bloqueo ──────────────────────────────────────────────────────
+/// Un hash por usuario, de root y legible por el grupo del usuario: el
+/// compositor (que corre como el usuario) lo compara en la pantalla de bloqueo,
+/// pero cambiarlo pide la contraseña. Solo vale para desbloquear; sudo y
+/// polkit siguen pidiendo la contraseña, como el PIN de Windows.
+const DIR_PIN: &str = "/etc/bookos/pin";
+
+#[tauri::command] async fn get_pin() -> String {
+    let user = run("whoami",&[]).await;
+    serde_json::json!({"pin": std::path::Path::new(DIR_PIN).join(user.trim()).is_file()}).to_string()
+}
+
+/// `pin: None` lo quita.
+#[tauri::command] async fn set_pin(pin: Option<String>, password: String) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    let user = run("whoami",&[]).await;
+    // `install` y `chown` reciben el usuario como argumento posicional, nunca
+    // pegado al guion.
+    let (guion, hash) = match pin {
+        Some(pin) => {
+            if !(4..=12).contains(&pin.len()) || !pin.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("el PIN son de 4 a 12 cifras".into());
+            }
+            // SHA-512 crypt: lo genera openssl (siempre presente) y lo comprueba
+            // `crypt_ra` de libxcrypt en el compositor. Por stdin, no en argv,
+            // para que no se vea en `ps`.
+            let mut o = Command::new("openssl").args(["passwd", "-6", "-stdin"])
+                .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
+                .spawn().map_err(|e| e.to_string())?;
+            o.stdin.take().expect("stdin pedido como pipe").write_all(format!("{}\n", pin).as_bytes()).await.map_err(|e| e.to_string())?;
+            let out = o.wait_with_output().await.map_err(|e| e.to_string())?;
+            let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !out.status.success() || !hash.starts_with("$6$") { return Err("openssl no generó el hash".into()); }
+            (r#"install -d -m 755 /etc/bookos/pin && t=$(mktemp /etc/bookos/pin/.XXXXXX) && cat > "$t" && chown root:"$1" "$t" && chmod 640 "$t" && mv -f "$t" "/etc/bookos/pin/$1""#, hash)
+        }
+        None => (r#"rm -f "/etc/bookos/pin/$1""#, String::new()),
+    };
+    let mut child = Command::new("sudo")
+        .args(["-k", "-S", "-p", "", "--", "sh", "-c", guion, "sh", user.trim()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn().map_err(|e| e.to_string())?;
+    // sudo lee la contraseña carácter a carácter hasta el salto de línea; lo
+    // que sigue le llega a `cat`.
+    child.stdin.take().expect("stdin pedido como pipe").write_all(format!("{}\n{}\n", password, hash).as_bytes()).await.map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
 }
 
 // ── Updates (separated: system, flatpak) ─────────────────────────────────
@@ -4815,7 +4884,7 @@ fn open_updates_page() {
 }
 
 /// Called once at startup — re-applies battery limit and performance mode from saved settings.
-#[tauri::command] async fn restore_startup_settings() -> String {
+async fn restore_startup_settings() -> String {
     let cfg = load_bookos_settings();
     let bprot = cfg.get("BatteryProtection").and_then(|v|v.as_str()).unwrap_or("false") == "true";
     if bprot {
@@ -5109,6 +5178,11 @@ fn lock_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
     format!("{}/bookos-settings.lock", dir)
 }
+/// El candado del servicio (`--hidden`), aparte del de la interfaz: corren a la vez.
+fn servicio_lock_path() -> String {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    format!("{}/bookos-settings-servicio.lock", dir)
+}
 /// Por donde otra instancia le pide cosas a la que ya corre.
 fn socket_path() -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
@@ -5155,17 +5229,86 @@ fn encajar_en_pantalla(window: &tauri::WebviewWindow) {
     let _ = window.center();
 }
 
-fn acquire_instance_lock() -> bool {
-    let lock = lock_path();
-    if let Ok(contents) = std::fs::read_to_string(&lock) {
+/// Arranca el servicio si no corre ya: con el arranque automático quitado, o
+/// tras actualizar, abrir Ajustes es lo que lo pone en marcha.
+fn lanzar_servicio() {
+    use std::os::unix::process::CommandExt;
+    let vivo = fs::read_to_string(servicio_lock_path()).ok()
+        .and_then(|pid| pid.trim().parse().ok())
+        .is_some_and(pid_alive);
+    if vivo {
+        return;
+    }
+    let lanzado = std::env::current_exe().and_then(|yo| {
+        use std::process::Stdio;
+        StdCommand::new(yo).arg("--hidden")
+            // Grupo propio: con Ajustes lanzado desde una terminal, Ctrl+C va
+            // a todo el grupo y se llevaría el servicio con la interfaz.
+            .process_group(0)
+            // Sin heredar la salida: el servicio sobrevive a la interfaz, y
+            // quien la lanzó leyendo de una tubería se quedaría esperando un
+            // fin que no llega (visto: una prueba colgada hasta matarlo).
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn()
+    });
+    if let Err(e) = lanzado {
+        eprintln!("[servicio] no se pudo arrancar: {e}");
+    }
+}
+
+/// Hay algo a medias que moriría con este proceso: una actualización del
+/// sistema, una transferencia de Book Share o cualquier programa que lanzamos
+/// y cuya salida estamos leyendo (`pkexec`, `snapper`, el selector de
+/// archivos…). Los hijos se miran en /proc y no llevando la cuenta en cada
+/// orden: son decenas y la que se olvidara cortaría su operación al cerrar.
+fn ocupado(app: &tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    let servicio = fs::read_to_string(servicio_lock_path()).unwrap_or_default();
+    let hijos_trabajando = || fs::read_dir("/proc/self/task").into_iter().flatten().flatten()
+        .filter_map(|hilo| fs::read_to_string(hilo.path().join("children")).ok())
+        .any(|hijos| hijos.split_whitespace().any(|pid| {
+            // El servicio y los procesos de WebKit son hijos de toda la vida,
+            // no trabajo pendiente.
+            pid != servicio.trim()
+                && pid.parse().is_ok_and(pid_alive)
+                && !fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|nombre| nombre.starts_with("WebKit"))
+        }));
+    app.state::<UpdateState>().lock().is_ok_and(|u| u.running)
+        || isla::hay_transferencia()
+        || hijos_trabajando()
+}
+
+/// Con la ventana oculta por `ocupado`, sale en cuanto deja de estarlo.
+fn salir_al_terminar(app: tauri::AppHandle) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tauri::Manager;
+    // Cerrar dos veces durante la misma operación no pone dos vigilantes.
+    static VIGILANDO: AtomicBool = AtomicBool::new(false);
+    if VIGILANDO.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        while ocupado(&app) {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        VIGILANDO.store(false, Ordering::SeqCst);
+        // Se pudo reabrir mientras tanto: entonces se queda.
+        if app.get_webview_window("main").is_some_and(|w| !w.is_visible().unwrap_or(true)) {
+            app.exit(0);
+        }
+    });
+}
+
+fn acquire_instance_lock(lock: &str) -> bool {
+    if let Ok(contents) = std::fs::read_to_string(lock) {
         if let Ok(pid) = contents.trim().parse::<u32>() {
             if pid_alive(pid) {
                 return false;
             }
         }
-        let _ = std::fs::remove_file(&lock);
+        let _ = std::fs::remove_file(lock);
     }
-    let _ = std::fs::write(&lock, std::process::id().to_string());
+    let _ = std::fs::write(lock, std::process::id().to_string());
     true
 }
 
@@ -5291,6 +5434,214 @@ async fn elegir_ruta(eleccion: Eleccion) -> Result<Option<Vec<String>>, String> 
     .map_err(|e| e.to_string())?
 }
 
+/// El servicio de fondo: `bookos-settings --hidden`, lo que arranca con la
+/// sesión. Avisos de batería y de actualizaciones, y las cachés que
+/// lee la pantalla de bloqueo.
+///
+/// Es un proceso aparte de la interfaz y no arranca Tauri, ni GTK ni WebKit:
+/// antes todo esto colgaba de una ventana oculta —107,5 MB en reposo, medido,
+/// 63,5 de ellos en los dos procesos de WebKit—, y una ventana cerrada no
+/// devolvía esa memoria. La interfaz es otro proceso que sale al cerrarse.
+fn servicio() -> ! {
+    if !acquire_instance_lock(&servicio_lock_path()) {
+        std::process::exit(0);
+    }
+    // Battery alerts and the lock-screen caches only work while this
+    // process is alive, so ensure the hidden autostart entry exists — unless the user
+    // explicitly disabled it (opt-out marker from the settings toggle).
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let desktop_path = format!("{}/.config/autostart/bookos-settings.desktop", home);
+        if !std::path::Path::new(&autostart_optout_path()).exists() {
+            // (Re)write when missing OR stale — old installs lacked
+            // `--hidden` in Exec, so autostart opened the window instead
+            // of starting as a background service.
+            let stale = std::fs::read_to_string(&desktop_path)
+                .map(|cur| cur != AUTOSTART_DESKTOP)
+                .unwrap_or(true);
+            if stale {
+                let _ = std::fs::create_dir_all(format!("{}/.config/autostart", home));
+                let _ = std::fs::write(&desktop_path, AUTOSTART_DESKTOP);
+            }
+        }
+    }
+    system_client::start(None);
+    // Caché del tiempo para el widget de la pantalla de bloqueo. Va aquí
+    // y no en el greeter porque no tiene red propia ni
+    // sitio donde guardar nada: solo lee el fichero.
+    tauri::async_runtime::spawn(async move { weather_refresh_loop().await; });
+    tauri::async_runtime::spawn(async move { devices_refresh_loop().await; });
+    // Re-apply hardware settings saved from previous session (battery limit, perf mode)
+    tauri::async_runtime::spawn(async { restore_startup_settings().await; });
+    tauri::async_runtime::spawn(buds::repartir_por_audio());
+
+    // ── Background battery check thread ───────────────────────
+    std::thread::spawn(|| {
+        // Sync helper — runs upower via StdCommand (can't use async in std::thread)
+        let battery_sync = || -> String {
+            let devices = StdCommand::new("upower").args(["--enumerate"])
+                .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+            let path = devices.lines()
+                .find(|l| l.contains("battery_BAT") || (l.contains("battery_") && !l.contains("mouse") && !l.contains("keyboard") && !l.contains("headset") && !l.contains("buds")))
+                .unwrap_or("/org/freedesktop/UPower/devices/battery_BAT0").trim().to_string();
+            let info = StdCommand::new("upower").args(["-i", &path])
+                .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+            if info.is_empty() {
+                return r#"{"percentage":"0","state":"unknown"}"#.into();
+            }
+            parse_upower(&info)
+        };
+
+        let mut warned_15 = false;
+        let mut warned_5 = false;
+        let mut ultimo_perfil = fs::read_to_string(perfil_energia_log()).unwrap_or_default()
+            .lines().last().and_then(|l| l.split_once(' ')).map(|(_, p)| p.to_string()).unwrap_or_default();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let perfil = perfil_energia_actual();
+            if !perfil.is_empty() && perfil != ultimo_perfil {
+                let ruta = perfil_energia_log();
+                if let Some(dir) = std::path::Path::new(&ruta).parent() { let _ = fs::create_dir_all(dir); }
+                let marca = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                use std::io::Write;
+                match fs::OpenOptions::new().create(true).append(true).open(&ruta)
+                    .and_then(|mut f| writeln!(f, "{marca} {perfil}")) {
+                    Ok(()) => ultimo_perfil = perfil,
+                    Err(e) => eprintln!("[perfil] no se pudo anotar en {ruta}: {e}"),
+                }
+            }
+            let b = battery_sync();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&b) {
+                let pct = v.get("percentage").and_then(|p| p.as_str()).and_then(|p| p.parse::<u32>().ok()).unwrap_or(100);
+                let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("");
+                if state.contains("discharging") {
+                    if pct <= 5 && !warned_5 {
+                        let _ = StdCommand::new("notify-send")
+                            .args(["-u", "critical", "-A", "OK=Aceptar", "-i", "battery-empty", "Batería Muy Baja", &format!("{}% restante. Conecta el cargador.", pct)])
+                            .spawn();
+                        warned_5 = true;
+                        warned_15 = true;
+                    } else if pct <= 15 && pct > 5 && !warned_15 {
+                        let _ = StdCommand::new("notify-send")
+                            .args(["-u", "normal", "-A", "OK=Aceptar", "-i", "battery-low", "Batería Baja", &format!("{}% restante.", pct)])
+                            .spawn();
+                        warned_15 = true;
+                    }
+                } else if state.contains("charging") {
+                    warned_15 = false;
+                    warned_5 = false;
+                }
+            }
+        }
+    });
+
+    // ── Automatic Update Daemon ──────────────────────────────
+    // Pending updates are reported through desktop notifications.
+    // A tray badge is intentionally not used: it pulled in the
+    // deprecated libayatana-appindicator backend on Linux.
+    std::thread::spawn(move || {
+        // Wait 5 minutes after start to not saturate CPU
+        std::thread::sleep(std::time::Duration::from_secs(300));
+        loop {
+            let cfg = load_bookos_settings();
+            let auto_upd = cfg.get("AutoUpdate").and_then(|v| v.as_str()).unwrap_or("false") == "true";
+            
+            if auto_upd {
+                // Count pending updates, cross-distro.
+                let total = match detect_pkg_mgr() {
+                    "pacman" => {
+                        // `pacman -Sy` needs root and silently failed here,
+                        // leaving stale DBs. checkupdates (pacman-contrib)
+                        // refreshes a private temp DB without root.
+                        let pac = StdCommand::new("checkupdates").output()
+                            .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
+                            .unwrap_or_else(|_| StdCommand::new("pacman").arg("-Qu").output()
+                                .map(|o| String::from_utf8_lossy(&o.stdout).lines().count()).unwrap_or(0));
+                        let aur = StdCommand::new("paru").arg("-Qua").output().map(|o| String::from_utf8_lossy(&o.stdout).lines().count()).unwrap_or(0);
+                        pac + aur
+                    }
+                    "dnf5" | "dnf" => {
+                        let mgr = detect_pkg_mgr();
+                        StdCommand::new(mgr).args(["check-update","--quiet"]).output()
+                            .map(|o| String::from_utf8_lossy(&o.stdout).lines()
+                                .filter(|l| !l.is_empty() && !l.starts_with("Last") && !l.starts_with("Obsoleting")).count())
+                            .unwrap_or(0)
+                    }
+                    "apt" => {
+                        let _ = StdCommand::new("apt").args(["update","-qq"]).output();
+                        StdCommand::new("apt").args(["list","--upgradable"]).output()
+                            .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter(|l| l.contains('/')).count())
+                            .unwrap_or(0)
+                    }
+                    "zypper" => {
+                        StdCommand::new("zypper").args(["--non-interactive","list-updates"]).output()
+                            .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter(|l| l.starts_with("v ")||l.starts_with("| ")).count())
+                            .unwrap_or(0)
+                    }
+                    _ => 0,
+                };
+
+                // UpdateNotifications=false silences the popup.
+                let notify_on = load_bookos_settings().get("UpdateNotifications")
+                    .and_then(|v| v.as_str()).unwrap_or("true") != "false";
+                if total > 0 && notify_on {
+                    // Pretty, branded notification — matches the timer notification.
+                    let icon = if std::path::Path::new("/usr/share/icons/hicolor/scalable/apps/bookos-settings.svg").exists()
+                        { "bookos-settings" } else { "software-update-available" };
+                    let is_es = idioma_interfaz() == "es";
+                    let (title, body) = if is_es {
+                        let t = if total == 1 { "1 actualización disponible".to_string() }
+                                else { format!("{} actualizaciones disponibles", total) };
+                        (t, "Abre BookOS Settings para revisar e instalar.".to_string())
+                    } else {
+                        let t = if total == 1 { "1 update available".to_string() }
+                                else { format!("{} updates available", total) };
+                        (t, "Open BookOS Settings to review and install.".to_string())
+                    };
+                    let action_label = if is_es { "Abrir" } else { "Open" };
+                    // Clickable notification: notify-send --wait blocks until the
+                    // user clicks the action (or the body). When it returns the
+                    // action key, open the Updates page. Run in its own thread so
+                    // the 6h check loop isn't blocked waiting for interaction.
+                    let icon_s = icon.to_string();
+                    let (t_s, b_s, act_s) = (title.clone(), body.clone(), action_label.to_string());
+                    std::thread::spawn(move || {
+                        let out = StdCommand::new("notify-send")
+                            .args([
+                                "-u", "normal",
+                                "-a", "BookOS",
+                                "-i", &icon_s,
+                                "-c", "system.software-update",
+                                "-h", "string:desktop-entry:bookos-settings",
+                                "--wait",
+                                "-A", &format!("default={}", act_s),
+                                "-A", &format!("open={}", act_s),
+                                &t_s, &b_s,
+                            ])
+                            .output();
+                        // If the user activated the notification, notify-send prints
+                        // the action key ("default" / "open") on stdout.
+                        let activated = out.as_ref().map(|o| {
+                            let s = String::from_utf8_lossy(&o.stdout);
+                            let s = s.trim();
+                            s == "default" || s == "open"
+                        }).unwrap_or(false);
+                        if activated {
+                            open_updates_page();
+                        }
+                    });
+                }
+            }
+            // Wait 6 hours for next check
+            std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+        }
+    });
+
+    // Todo lo de arriba son hilos y tareas; este hilo solo mantiene vivo el
+    // proceso.
+    loop { std::thread::park(); }
+}
+
 fn main() {
 
 
@@ -5307,40 +5658,51 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
 
-    // ── Single-instance guard ─────────────────────────────────────────────
-    if !acquire_instance_lock() {
-        // A live instance is already running. Forward intent via /tmp/bookos-toggle:
-        //   "1" → toggle (show if hidden, hide if visible)
-        //   "show" → always show + focus (used when launched without --toggle)
-        let modo = if args.iter().any(|a| a == "--toggle") { "toggle" } else { "show" };
-        // `--share-url URL` (el botón de compartir del navegador): la URL va
-        // en el sitio de la página, con su propio modo. No lleva espacios.
-        if let Some(url) = argumento_compartir(&args) {
-            use std::io::Write;
-            if let Ok(mut s) = std::os::unix::net::UnixStream::connect(socket_path()) {
-                let _ = write!(s, "compartir {url}");
-            }
-            std::process::exit(0);
-        }
-        // La página, de `--page` o del fichero que dejan la notificación de
-        // actualizaciones y `open_updates_page` antes de lanzarnos.
-        let pagina = args.iter().position(|a| a == "--page")
-            .and_then(|i| args.get(i + 1).cloned())
-            .or_else(|| {
-                let p = std::fs::read_to_string("/tmp/bookos-start-page").ok()?;
-                let _ = std::fs::remove_file("/tmp/bookos-start-page");
-                Some(p.trim().to_string())
-            })
-            .unwrap_or_default();
-        use std::io::Write;
-        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(socket_path()) {
-            let _ = write!(s, "{modo} {pagina}");
-        }
-        std::process::exit(0);
+    if args.iter().any(|a| a == "--hidden") {
+        servicio();
     }
 
-    let is_hidden = args.iter().any(|a| a == "--hidden");
-    let toggle_only = args.iter().any(|a| a == "--toggle");
+    // ── Single-instance guard ─────────────────────────────────────────────
+    if !acquire_instance_lock(&lock_path()) {
+        use std::io::Write;
+        match std::os::unix::net::UnixStream::connect(socket_path()) {
+            // Hay una instancia viva: se le pasa el encargo y se sale.
+            //   "toggle" → cerrar si está a la vista, traerla si no
+            //   "show" → always show + focus (used when launched without --toggle)
+            Ok(mut s) => {
+                let modo = if args.iter().any(|a| a == "--toggle") { "toggle" } else { "show" };
+                // `--share-url URL` (el botón de compartir del navegador): la URL va
+                // en el sitio de la página, con su propio modo. No lleva espacios.
+                if let Some(url) = argumento_compartir(&args) {
+                    let _ = write!(s, "compartir {url}");
+                    std::process::exit(0);
+                }
+                // La página, de `--page` o del fichero que dejan la notificación de
+                // actualizaciones y `open_updates_page` antes de lanzarnos.
+                let pagina = args.iter().position(|a| a == "--page")
+                    .and_then(|i| args.get(i + 1).cloned())
+                    .or_else(|| {
+                        let p = std::fs::read_to_string("/tmp/bookos-start-page").ok()?;
+                        let _ = std::fs::remove_file("/tmp/bookos-start-page");
+                        Some(p.trim().to_string())
+                    })
+                    .unwrap_or_default();
+                let _ = write!(s, "{modo} {pagina}");
+                std::process::exit(0);
+            }
+            // El PID del candado vive pero nadie escucha: no es Ajustes, es
+            // otro programa al que le tocó el PID de una interfaz ya cerrada.
+            // Ahora la interfaz sale cada vez que se cierra, así que el
+            // candado queda atrás a menudo; sin esto, Ajustes no volvería a
+            // abrirse hasta que ese programa terminara.
+            Err(_) => { let _ = std::fs::write(lock_path(), std::process::id().to_string()); }
+        }
+    }
+    // El socket se abre ya, antes de arrancar Tauri: lo que pida otra
+    // instancia mientras esta arranca espera en la cola en vez de encontrarse
+    // el candado puesto y nadie escuchando.
+    let _ = std::fs::remove_file(socket_path());
+    let escucha = std::os::unix::net::UnixListener::bind(socket_path());
 
     tauri::Builder::default()
         .on_page_load(desactivar_zoom_por_pellizco)
@@ -5348,53 +5710,28 @@ fn main() {
         .manage(UpdateState::default())
         .manage(quickshare::QsState::default())
         .manage(p2p::P2PState::default())
-        // Close-to-background: hiding the main window (instead of quitting) keeps
-        // the routines alive "with the app closed".
+        // Cerrar la ventana termina este proceso —lo que sigue «con la app
+        // cerrada» es cosa del servicio— salvo con una operación a medias:
+        // entonces solo se oculta, y sale cuando acabe.
         .on_window_event(|window, event| {
-            if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use tauri::Manager;
+                if ocupado(window.app_handle()) {
                     api.prevent_close();
                     let _ = window.hide();
                     let _ = window.set_skip_taskbar(true);
+                    salir_al_terminar(window.app_handle().clone());
                 }
             }
         })
         .setup(move |app| {
-            system_client::start(app.handle().clone());
+            system_client::start(Some(app.handle().clone()));
             use tauri::Manager;
-            // Routines/automation only work while this process is alive, so
-            // ensure the hidden autostart entry exists — unless the user
-            // explicitly disabled it (opt-out marker from the settings toggle).
-            {
-                let home = std::env::var("HOME").unwrap_or_default();
-                let desktop_path = format!("{}/.config/autostart/bookos-settings.desktop", home);
-                if !std::path::Path::new(&autostart_optout_path()).exists() {
-                    // (Re)write when missing OR stale — old installs lacked
-                    // `--hidden` in Exec, so autostart opened the window instead
-                    // of starting as a background service.
-                    let stale = std::fs::read_to_string(&desktop_path)
-                        .map(|cur| cur != AUTOSTART_DESKTOP)
-                        .unwrap_or(true);
-                    if stale {
-                        let _ = std::fs::create_dir_all(format!("{}/.config/autostart", home));
-                        let _ = std::fs::write(&desktop_path, AUTOSTART_DESKTOP);
-                    }
-                }
-            }
-            // Caché del tiempo para el widget de la pantalla de bloqueo. Va aquí
-                            // y no en el greeter porque no tiene red propia ni
-            // sitio donde guardar nada: solo lee el fichero.
-            tauri::async_runtime::spawn(async move { weather_refresh_loop().await; });
-            tauri::async_runtime::spawn(async move { devices_refresh_loop().await; });
+            lanzar_servicio();
             if let Some(window) = app.get_webview_window("main") {
                 encajar_en_pantalla(&window);
-                if is_hidden || toggle_only {
-                    let _ = window.set_skip_taskbar(true);
-                    // Stay hidden — launched as background service
-                } else {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                let _ = window.show();
+                let _ = window.set_focus();
                 // Lo que pide otra instancia (`bookos-settings`, `--toggle`,
                 // `--page X`) llega por un socket. Antes era un fichero que
                 // este hilo miraba cada 400 ms, y la página, otro que la
@@ -5403,8 +5740,7 @@ fn main() {
                 // pasa unas pocas veces al día. Bloqueado en `accept()` no
                 // despierta nunca.
                 let win = window.clone();
-                let _ = std::fs::remove_file(socket_path());
-                match std::os::unix::net::UnixListener::bind(socket_path()) {
+                match escucha {
                 Err(e) => eprintln!("[instancia] no se pudo abrir el socket: {e}"),
                 Ok(escucha) => { std::thread::spawn(move || {
                     use std::io::Read;
@@ -5441,15 +5777,16 @@ fn main() {
                                 // el menú no debe devolverle a Batería. Con la ventana ya
                                 // visible no se toca la página — solo se trae al frente.
                                 //
-                                // La X no cierra el proceso (close-to-background, arriba),
-                                // así que "cerrado" para el usuario == ventana no visible.
+                                // La X solo deja la ventana oculta mientras termina una
+                                // operación a medias (`ocupado`); para el usuario eso ya
+                                // es «cerrado».
                                 if !visible || minimized {
                                     use tauri::Emitter;
                                     let _ = win.emit("reset-to-home", ());
                                 }
                                 raise();
                             } else if visible && !minimized {
-                                let _ = win.hide();
+                                let _ = win.close();
                             } else {
                                 raise();
                             }
@@ -5465,248 +5802,6 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
             }
-            // Removed dynamic creation of bookos-settings-dev.desktop.
-            
-            // ── Background battery check thread ───────────────────────
-            std::thread::spawn(|| {
-                // Sync helper — runs upower via StdCommand (can't use async in std::thread)
-                let battery_sync = || -> String {
-                    let devices = StdCommand::new("upower").args(["--enumerate"])
-                        .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-                    let path = devices.lines()
-                        .find(|l| l.contains("battery_BAT") || (l.contains("battery_") && !l.contains("mouse") && !l.contains("keyboard") && !l.contains("headset") && !l.contains("buds")))
-                        .unwrap_or("/org/freedesktop/UPower/devices/battery_BAT0").trim().to_string();
-                    let info = StdCommand::new("upower").args(["-i", &path])
-                        .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-                    if info.is_empty() {
-                        return r#"{"percentage":"0","state":"unknown"}"#.into();
-                    }
-                    parse_upower(&info)
-                };
-
-                let mut warned_15 = false;
-                let mut warned_5 = false;
-                let mut ultimo_perfil = fs::read_to_string(perfil_energia_log()).unwrap_or_default()
-                    .lines().last().and_then(|l| l.split_once(' ')).map(|(_, p)| p.to_string()).unwrap_or_default();
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(60));
-                    let perfil = perfil_energia_actual();
-                    if !perfil.is_empty() && perfil != ultimo_perfil {
-                        let ruta = perfil_energia_log();
-                        if let Some(dir) = std::path::Path::new(&ruta).parent() { let _ = fs::create_dir_all(dir); }
-                        let marca = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                        use std::io::Write;
-                        match fs::OpenOptions::new().create(true).append(true).open(&ruta)
-                            .and_then(|mut f| writeln!(f, "{marca} {perfil}")) {
-                            Ok(()) => ultimo_perfil = perfil,
-                            Err(e) => eprintln!("[perfil] no se pudo anotar en {ruta}: {e}"),
-                        }
-                    }
-                    let b = battery_sync();
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&b) {
-                        let pct = v.get("percentage").and_then(|p| p.as_str()).and_then(|p| p.parse::<u32>().ok()).unwrap_or(100);
-                        let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("");
-                        if state.contains("discharging") {
-                            if pct <= 5 && !warned_5 {
-                                let _ = StdCommand::new("notify-send")
-                                    .args(["-u", "critical", "-A", "OK=Aceptar", "-i", "battery-empty", "Batería Muy Baja", &format!("{}% restante. Conecta el cargador.", pct)])
-                                    .spawn();
-                                warned_5 = true;
-                                warned_15 = true;
-                            } else if pct <= 15 && pct > 5 && !warned_15 {
-                                let _ = StdCommand::new("notify-send")
-                                    .args(["-u", "normal", "-A", "OK=Aceptar", "-i", "battery-low", "Batería Baja", &format!("{}% restante.", pct)])
-                                    .spawn();
-                                warned_15 = true;
-                            }
-                        } else if state.contains("charging") {
-                            warned_15 = false;
-                            warned_5 = false;
-                        }
-                    }
-                }
-            });
-
-            // ── Routine trigger monitor ──────────────────────────────
-            let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                use tauri::Emitter;
-                let wifi_enabled = || system_client::snapshot()["network"]["enabled"] == true;
-                let bt_enabled = || system_client::snapshot()["bluetooth"]["enabled"] == true;
-                // Check if AC adapter is physically online via sysfs (most reliable)
-                let ac_online = || -> bool {
-                    for p in &[
-                        "/sys/class/power_supply/ACAD/online",
-                        "/sys/class/power_supply/AC/online",
-                        "/sys/class/power_supply/AC0/online",
-                        "/sys/class/power_supply/ADP1/online",
-                        "/sys/class/power_supply/adp1/online",
-                    ] {
-                        if let Ok(s) = fs::read_to_string(p) {
-                            return s.trim() == "1";
-                        }
-                    }
-                    false
-                };
-                let bat_charging = || -> (bool, u32) {
-                    let charging = ac_online();
-                    // Get percentage from sysfs or upower
-                    let pct_sysfs = || -> Option<u32> {
-                        for p in &["/sys/class/power_supply/BAT0/capacity", "/sys/class/power_supply/BAT1/capacity"] {
-                            if let Ok(s) = fs::read_to_string(p) { return s.trim().parse().ok(); }
-                        }
-                        None
-                    };
-                    let pct = pct_sysfs().unwrap_or_else(|| {
-                        let devices = StdCommand::new("upower").args(["--enumerate"])
-                            .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-                        let path = devices.lines()
-                            .find(|l| l.contains("battery_BAT") || (l.contains("battery_") && !l.contains("mouse") && !l.contains("keyboard")))
-                            .unwrap_or("/org/freedesktop/UPower/devices/battery_BAT0").trim().to_string();
-                        let info = StdCommand::new("upower").args(["-i", &path])
-                            .output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-                        let b = parse_upower(&info);
-                        serde_json::from_str::<serde_json::Value>(&b).ok()
-                            .and_then(|v| v.get("percentage").and_then(|p| p.as_str()).and_then(|p| p.parse::<u32>().ok()))
-                            .unwrap_or(100)
-                    });
-                    (charging, pct)
-                };
-
-                let emit = |trigger: &str| {
-                    let payload = serde_json::json!({ "trigger_type": trigger });
-                    let _ = app_handle.emit("routine-trigger", payload);
-                };
-
-                let mut prev_wifi = wifi_enabled();
-                let mut prev_bt   = bt_enabled();
-                let (c, p) = bat_charging();
-                let mut prev_charging = c;
-                let mut prev_pct      = p;
-                let mut low_bat_fired = false;
-
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    let cur_wifi = wifi_enabled();
-                    if cur_wifi != prev_wifi { emit(if cur_wifi { "wifi_on" } else { "wifi_off" }); prev_wifi = cur_wifi; }
-                    let cur_bt = bt_enabled();
-                    if cur_bt != prev_bt { emit(if cur_bt { "bt_on" } else { "bt_off" }); prev_bt = cur_bt; }
-                    let (cur_charging, cur_pct) = bat_charging();
-                    if cur_charging != prev_charging {
-                        emit(if cur_charging { "power_connected" } else { "power_disconnected" });
-                        prev_charging = cur_charging;
-                        if cur_charging { low_bat_fired = false; }
-                    }
-                    if !cur_charging && cur_pct < 20 && prev_pct >= 20 && !low_bat_fired {
-                        emit("low_battery");
-                        low_bat_fired = true;
-                    }
-                    prev_pct = cur_pct;
-                }
-            });
-
-            // ── Automatic Update Daemon ──────────────────────────────
-            // Pending updates are reported through desktop notifications.
-            // A tray badge is intentionally not used: it pulled in the
-            // deprecated libayatana-appindicator backend on Linux.
-            std::thread::spawn(move || {
-                // Wait 5 minutes after start to not saturate CPU
-                std::thread::sleep(std::time::Duration::from_secs(300));
-                loop {
-                    let cfg = load_bookos_settings();
-                    let auto_upd = cfg.get("AutoUpdate").and_then(|v| v.as_str()).unwrap_or("false") == "true";
-                    
-                    if auto_upd {
-                        // Count pending updates, cross-distro.
-                        let total = match detect_pkg_mgr() {
-                            "pacman" => {
-                                // `pacman -Sy` needs root and silently failed here,
-                                // leaving stale DBs. checkupdates (pacman-contrib)
-                                // refreshes a private temp DB without root.
-                                let pac = StdCommand::new("checkupdates").output()
-                                    .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
-                                    .unwrap_or_else(|_| StdCommand::new("pacman").arg("-Qu").output()
-                                        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count()).unwrap_or(0));
-                                let aur = StdCommand::new("paru").arg("-Qua").output().map(|o| String::from_utf8_lossy(&o.stdout).lines().count()).unwrap_or(0);
-                                pac + aur
-                            }
-                            "dnf5" | "dnf" => {
-                                let mgr = detect_pkg_mgr();
-                                StdCommand::new(mgr).args(["check-update","--quiet"]).output()
-                                    .map(|o| String::from_utf8_lossy(&o.stdout).lines()
-                                        .filter(|l| !l.is_empty() && !l.starts_with("Last") && !l.starts_with("Obsoleting")).count())
-                                    .unwrap_or(0)
-                            }
-                            "apt" => {
-                                let _ = StdCommand::new("apt").args(["update","-qq"]).output();
-                                StdCommand::new("apt").args(["list","--upgradable"]).output()
-                                    .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter(|l| l.contains('/')).count())
-                                    .unwrap_or(0)
-                            }
-                            "zypper" => {
-                                StdCommand::new("zypper").args(["--non-interactive","list-updates"]).output()
-                                    .map(|o| String::from_utf8_lossy(&o.stdout).lines().filter(|l| l.starts_with("v ")||l.starts_with("| ")).count())
-                                    .unwrap_or(0)
-                            }
-                            _ => 0,
-                        };
-
-                        // UpdateNotifications=false silences the popup.
-                        let notify_on = load_bookos_settings().get("UpdateNotifications")
-                            .and_then(|v| v.as_str()).unwrap_or("true") != "false";
-                        if total > 0 && notify_on {
-                            // Pretty, branded notification — matches the timer notification.
-                            let icon = if std::path::Path::new("/usr/share/icons/hicolor/scalable/apps/bookos-settings.svg").exists()
-                                { "bookos-settings" } else { "software-update-available" };
-                            let is_es = idioma_interfaz() == "es";
-                            let (title, body) = if is_es {
-                                let t = if total == 1 { "1 actualización disponible".to_string() }
-                                        else { format!("{} actualizaciones disponibles", total) };
-                                (t, "Abre BookOS Settings para revisar e instalar.".to_string())
-                            } else {
-                                let t = if total == 1 { "1 update available".to_string() }
-                                        else { format!("{} updates available", total) };
-                                (t, "Open BookOS Settings to review and install.".to_string())
-                            };
-                            let action_label = if is_es { "Abrir" } else { "Open" };
-                            // Clickable notification: notify-send --wait blocks until the
-                            // user clicks the action (or the body). When it returns the
-                            // action key, open the Updates page. Run in its own thread so
-                            // the 6h check loop isn't blocked waiting for interaction.
-                            let icon_s = icon.to_string();
-                            let (t_s, b_s, act_s) = (title.clone(), body.clone(), action_label.to_string());
-                            std::thread::spawn(move || {
-                                let out = StdCommand::new("notify-send")
-                                    .args([
-                                        "-u", "normal",
-                                        "-a", "BookOS",
-                                        "-i", &icon_s,
-                                        "-c", "system.software-update",
-                                        "-h", "string:desktop-entry:bookos-settings",
-                                        "--wait",
-                                        "-A", &format!("default={}", act_s),
-                                        "-A", &format!("open={}", act_s),
-                                        &t_s, &b_s,
-                                    ])
-                                    .output();
-                                // If the user activated the notification, notify-send prints
-                                // the action key ("default" / "open") on stdout.
-                                let activated = out.as_ref().map(|o| {
-                                    let s = String::from_utf8_lossy(&o.stdout);
-                                    let s = s.trim();
-                                    s == "default" || s == "open"
-                                }).unwrap_or(false);
-                                if activated {
-                                    open_updates_page();
-                                }
-                            });
-                        }
-                    }
-                    // Wait 6 hours for next check
-                    std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
-                }
-            });
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -5714,6 +5809,7 @@ fn main() {
             open_printers,open_teclas,system_client::system_answer_pairing, system_client::system_set_volume, system_client::system_set_mute, system_client::pair_bluetooth, system_client::forget_bluetooth, system_client::set_audio_profile,
             bookos_desktop::bookos_get_config,bookos_desktop::bookos_apply_config,bookos_desktop::bookos_desktop_available,bookos_desktop::bookos_get_capabilities,
             bookos_desktop::bookos_get_outputs,bookos_desktop::bookos_apply_output_config,
+            bookos_desktop::bookos_get_screensaver_preview,bookos_desktop::bookos_preview_screensaver,
             bookos_desktop::bookos_reload_config,
             system_extras::list_keymaps_pretty,
             system_extras::set_avatar_data,
@@ -5727,7 +5823,7 @@ fn main() {
             get_battery_status,get_battery_sysfs,get_battery_history,get_power_profile_history,get_battery_csv_data,get_adaptive_predictions,set_adaptive_charging,
             get_current_theme,get_available_themes,set_color_scheme,get_theme_schedule,set_theme_schedule,set_icon_style,get_icon_style,resolver_iconos,
             get_dnd_status,toggle_dnd,probar_notificacion,
-            get_lock_timeout,set_lock_timeout,check_fingerprint,list_fingerprints,delete_fingerprint,enroll_fingerprint,verify_password,verify_fingerprint,
+            get_lock_timeout,set_lock_timeout,check_fingerprint,list_fingerprints,delete_fingerprint,enroll_fingerprint,get_pin,set_pin,verify_password,verify_fingerprint,
             get_locale_info,get_available_locales,set_locale,get_available_keymaps,set_keymap,
             get_datetime_info,list_timezones,set_timezone,set_ntp,
             check_system_updates,check_aur_updates,check_flatpak_updates,run_system_update,run_pacman_update_silent,get_update_progress,cancel_update,run_flatpak_update,run_aur_update,get_pkg_mgr,has_flatpak,logout_session,
@@ -5738,23 +5834,21 @@ fn main() {
             get_firewall_status,run_sudo_command,get_system_users,
             get_autostart_bookos,toggle_autostart_bookos,get_autostart_apps,toggle_autostart_app,export_settings,import_settings,
             change_password,set_avatar,create_user,delete_user,get_autologin_status,set_autologin,
-            system_settings::forget_wifi,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
+            system_settings::forget_wifi,system_settings::set_wifi_autoconnect,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
             wallpaper_preview::wallpaper_preview,get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
             refresh_weather_cache,refresh_devices_cache,
             dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,sync_desktop_accent,
             dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_lockscreen,
             get_default_apps,list_apps_for_role,set_default_app,
-            get_bookos_setting,set_bookos_setting,get_settings_batch,configure_auto_update,restore_startup_settings,get_startup_page,write_ipc_state,read_ipc_state,
+            get_bookos_setting,set_bookos_setting,get_settings_batch,configure_auto_update,get_startup_page,write_ipc_state,read_ipc_state,
             get_bt_device_battery,get_kdeconnect_devices,
             system_settings::get_audio_devices,system_settings::set_default_sink,system_settings::set_default_source,system_settings::get_app_audio,system_settings::set_app_volume,system_settings::get_sink_descriptions,
             launch_app,which_app,open_external_url,
             hardware_control::aplicar_perfil_termico,
-            hardware_control::set_fan_mode,
-            hardware_control::check_book_hw,
             hardware_control::set_brillo,
             hardware_control::obtener_estado_pantalla,
             buds::buds_connect,buds::buds_disconnect,buds::buds_get_status,
-            buds::buds_set_auto_reconnect,buds::buds_get_prefs,buds::buds_audio_switch_check,
+            buds::buds_set_auto_reconnect,buds::buds_get_prefs,
             buds::buds_fit_test_start,buds::buds_fit_test_stop,buds::buds_set_easy_pairing,buds::buds_request_info,
             buds::buds_set_anc,buds::buds_set_eq,buds::buds_set_touch_lock,
             buds::gbc_is_available,buds::gbc_get_device,

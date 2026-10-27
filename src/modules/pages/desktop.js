@@ -1,5 +1,5 @@
 // Native BookOS controls. Only keys implemented by the compositor are exposed.
-import {tauriInvoke,getAssetUrl,appIconUrl,esc,renderHeader,renderCard,renderRowItem,renderToggle,setupToggle,toast,renderSkeleton,renderInfoItem,promptSudo,invokeWithAuth,renderServiceError,_tr,popoverSelect,renderSection,renderNavRow,getSetting,setSetting} from './_common.js';
+import {tauriInvoke,getAssetUrl,appIconUrl,esc,renderHeader,renderCard,renderRowItem,renderToggle,setupToggle,toast,renderSkeleton,renderInfoItem,promptSudo,invokeWithAuth,renderServiceError,_tr,popoverSelect,renderSection,renderNavRow,getSetting,setSetting,chevron} from './_common.js';
 import {getLang} from '../i18n.js';
 const config=async()=>JSON.parse(await tauriInvoke('bookos_get_config'));
 const parseServiceResult=raw=>{
@@ -168,7 +168,7 @@ const colorAcento=(n,oscuro)=>{const a=ACENTOS.find(x=>x[0]===n)||ACENTOS[0];ret
 // izquierda saturado y hondo, a la derecha lavado hacia blanco.
 export const tinte=(h,s)=>`hsl(${h},${Math.round(90-(s/100)*55)}%,${Math.round(42+(s/100)*38)}%)`;
 const ventana=`<span class="ap-ventana"><span class="ap-puntos"><i></i><i></i><i></i></span><span class="ap-linea"></span><span class="ap-linea corta"></span></span>`;
-const opcion=(grupo,valor,nombre,actual,mini)=>`<button type="button" class="ap-opcion" role="radio" aria-checked="${valor===actual}" data-${grupo}="${valor}">${mini}<span class="ap-nombre">${esc(_tr(nombre))}</span></button>`;
+const opcion=(grupo,valor,nombre,actual,mini)=>`<button type="button" class="ap-opcion" role="radio" aria-checked="${valor===actual}" data-${grupo}="${valor}">${mini}<span class="ap-nombre">${esc(_tr(nombre))}${grupo==='iconos'?'<svg class="ap-seleccion" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg>':''}</span></button>`;
 const marcar=(c,grupo,valor)=>c.querySelectorAll(`[data-${grupo}]`).forEach(b=>b.setAttribute('aria-checked',String(b.dataset[grupo]===String(valor))));
 async function guardar(d,clave,valor){
     await save({[clave]:valor});d[clave]=valor;
@@ -233,7 +233,7 @@ export async function appearance(c,icons){
                 ${opcion('iconos','dark','Oscuro',iconos,icono('#1c1c2e','#2c2c34','#fff'))}
                 ${opcion('iconos','tinted','Tintado',iconos,icono(oscuro?'#1c1c2e':'#fff',tinte(tono,fuerza),'#fff'))}
             </div>
-            ${renderNavRow('Personalizar el tintado','Tono, intensidad y logo de cada app',{id:'native-icons'})}
+            <div id="ap-tint-options"${iconos==='tinted'?'':' hidden'}>${renderNavRow('Personalizar el tintado','Tono e intensidad de los iconos',{id:'native-icons'})}</div>
         </div>
     </div>`;
 
@@ -248,21 +248,29 @@ export async function appearance(c,icons){
         catch(e){el.value=d[clave];toast(String(e),'❌');}
     }));
     let iconoActual=iconos;
+    const opcionesTinte=c.querySelector('#ap-tint-options');
+    const botonesIconos=c.querySelectorAll('[data-iconos]');
     c.querySelectorAll('[data-iconos]').forEach(b=>b.addEventListener('click',async()=>{
         const modo=b.dataset.iconos,antes=iconoActual;
         if(modo===antes)return;
         marcar(c,'iconos',modo);iconoActual=modo;
+        opcionesTinte.hidden=true;
+        botonesIconos.forEach(b=>{b.disabled=true;});
         toast(_tr('Aplicando iconos…'),'🔄');
         // El tintado reescribe ~8k SVG: tarda unos segundos y se hace con los
         // ajustes que dejó la subpágina para el tema que esté puesto.
         const extra=modo==='tinted'?{hue:tono,strength:fuerza,dark:oscuro,
-            tintBase:localStorage.getItem('bookos_tint_base')!=='0',tintLogo:localStorage.getItem('bookos_tint_logo')==='1',logoHue:ls('logohue',tono)}:{};
+            tintBase:localStorage.getItem('bookos_tint_base')!=='0',tintLogo:false,logoHue:tono}:{};
         try{
             const r=JSON.parse(await tauriInvoke('set_icon_style',{mode:modo,...extra}));
             if(!r.ok)throw new Error(r.error||'');
             localStorage.setItem('bookos_icon_style',modo);
             toast(_tr('Iconos aplicados'),'✅');
         }catch(e){marcar(c,'iconos',antes);iconoActual=antes;toast(_tr('No se pudieron aplicar los iconos')+(e.message?': '+e.message:''),'❌');}
+        finally{
+            opcionesTinte.hidden=iconoActual!=='tinted';
+            botonesIconos.forEach(b=>{b.disabled=false;});
+        }
     }));
     c.querySelector('#native-icons').addEventListener('click',()=>{window.pushSubNav?.(()=>appearance(c,icons));icons?.();});
 }
@@ -288,6 +296,126 @@ export async function nightLight(c,{disponible=true}={}){
         ...(disponible?[]:[['',[renderInfoItem('Esta sesión no puede teñir la pantalla','Solo funciona en una sesión de BookOS iniciada desde la pantalla de acceso. Lo que elijas se guarda igualmente.')]]]),
     ]);
 }
+
+export async function screensaver(c){
+    c.innerHTML = renderHeader('Salvapantallas') + renderSkeleton(2);
+    let d;
+    try {
+        d = await config();
+    } catch(e) {
+        c.innerHTML = renderHeader('Salvapantallas') + renderInfoItem('No se pudo leer la configuración de BookOS', esc(String(e)));
+        return;
+    }
+    if(d.salvapantallas_estilo === undefined) d.salvapantallas_estilo = 'estela';
+    if(d.salvapantallas_inactividad === undefined) d.salvapantallas_inactividad = 1200;
+
+    const nombreEstilo = v => v === 'rebote' ? _tr('DVD') : _tr('Ondas');
+    const inact = d.salvapantallas_inactividad ?? 1200;
+    const activo = inact > 0;
+    const duraciones = [60, 120, 300, 600, 900, 1200, 1800, 3600];
+
+    const mini = estilo => `<span class="ap-mini sp-mini" data-sp-mini="${estilo}" aria-hidden="true"><span class="ds">${_tr('Cargando…')}</span></span>`;
+
+    c.innerHTML = renderHeader('Salvapantallas') + `<div class="theme-block">
+        <div class="ap-cab">
+            <span class="dt">${_tr('Estilo')}</span>
+            <span class="ap-valor" id="sp-estilo-nombre">${esc(nombreEstilo(d.salvapantallas_estilo))}</span>
+        </div>
+        <div class="ap-opciones" role="radiogroup" aria-label="${esc(_tr('Estilo de salvapantallas'))}">
+            ${opcion('salva-estilo', 'estela', 'Ondas', d.salvapantallas_estilo, mini('estela'))}
+            ${opcion('salva-estilo', 'rebote', 'DVD', d.salvapantallas_estilo, mini('rebote'))}
+        </div>
+    </div>
+    ${renderSection('Inactividad')}
+    ${renderCard([
+        renderRowItem('Activar salvapantallas', 'Mostrar animaciones sobre fondo negro al estar inactivo', renderToggle('sp-toggle', activo)),
+        `<div id="sp-tiempo-row"${activo ? '' : ' style="display:none"'}>${duration('salvapantallas_inactividad', 'Iniciar tras', inact || 1200, duraciones)}</div>`,
+        renderNavRow('Vista previa', 'Mueve el ratón o pulsa una tecla para salir de la vista previa', { id: 'sp-probar', right: `<span class="disp-valor" style="color:var(--blue);font-weight:600">${_tr('Probar')}${chevron()}</span>` })
+    ])}
+    ${renderCard([
+        renderInfoItem('Atajo de teclado', 'Puedes iniciar o quitar el salvapantallas en cualquier momento pulsando Super + Alt + S.')
+    ])}`;
+
+    elegir(c, d, 'salva-estilo', 'salvapantallas_estilo', v => {
+        const nom = c.querySelector('#sp-estilo-nombre');
+        if(nom) nom.textContent = nombreEstilo(v);
+    });
+
+    // El SVG viene del compositor para que una mejora de las ondas no deje
+    // otra animación distinta en Ajustes. Al navegar se descarta la respuesta.
+    c.querySelectorAll('[data-sp-mini]').forEach(async mini => {
+        try {
+            const svg = await tauriInvoke('bookos_get_screensaver_preview', {estilo: mini.dataset.spMini});
+            if(!mini.isConnected) return;
+            const img = document.createElement('img');
+            img.alt = '';
+            img.onload = () => { if(mini.isConnected) mini.replaceChildren(img); };
+            img.onerror = () => { if(mini.isConnected) mini.textContent = _tr('Vista previa no disponible'); };
+            img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        } catch(e) {
+            if(mini.isConnected){
+                mini.textContent = _tr('Vista previa no disponible');
+                mini.title = String(e);
+            }
+        }
+    });
+
+    setupToggle('sp-toggle', async active => {
+        const anterior = d.salvapantallas_inactividad;
+        const nuevo = active ? d._ultimoInact || 1200 : 0;
+        const row = c.querySelector('#sp-tiempo-row');
+        await guardar(d, 'salvapantallas_inactividad', nuevo);
+        if(anterior > 0) d._ultimoInact = anterior;
+        if(!row.isConnected) return;
+        row.style.display = active ? '' : 'none';
+        if(active){
+            const btn = row.querySelector('.bk-select');
+            const nom = nuevo < 60 ? `${nuevo} s` : nuevo % 3600 === 0 ? `${nuevo / 3600} h` : `${Math.round(nuevo / 60)} min`;
+            btn.dataset.value = String(nuevo);
+            btn.title = nom;
+            btn.querySelector('span').textContent = nom;
+        }
+    });
+
+    c.querySelectorAll('[data-choice]').forEach(el => el.addEventListener('click', () => {
+        const key = el.dataset.choice, options = JSON.parse(el.dataset.options), row = el.closest('.detail-item');
+        popoverSelect(row, {
+            title: row.querySelector('.dt').textContent,
+            options: options.map(([val, name]) => ({ val, label: esc(name) })),
+            current: el.dataset.value,
+            onSelect: async val => {
+                const opt = options.find(([id]) => String(id) === val);
+                const id = Number(val);
+                const name = opt ? opt[1] : String(val);
+                el.disabled = true;
+                try {
+                    await guardar(d, key, id);
+                    el.dataset.value = String(id);
+                    el.title = name;
+                    el.querySelector('span').textContent = name;
+                } catch(e) {
+                    toast(String(e), '❌');
+                } finally {
+                    el.disabled = false;
+                }
+            },
+        });
+    }));
+
+    const probar = c.querySelector('#sp-probar');
+    probar.addEventListener('click', async () => {
+        if(probar.getAttribute('aria-busy') === 'true') return;
+        probar.setAttribute('aria-busy', 'true');
+        try {
+            await tauriInvoke('bookos_preview_screensaver', {estilo: d.salvapantallas_estilo});
+        } catch(e) {
+            toast(String(e), '❌');
+        } finally {
+            probar.removeAttribute('aria-busy');
+        }
+    });
+}
+
 // ── Pantalla de bloqueo ────────────────────────────────────────────────────
 // La de bookos-desktop, la que pinta bookos-shell (bloqueo.rs) con las claves
 // `bloqueo_*`. El editor de SDDM ya no cuelga de aquí: aquel tema QML era el

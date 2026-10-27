@@ -72,18 +72,20 @@ pub async fn forget_bluetooth(mac:String) -> String {
 pub async fn set_audio_profile(card:String, profile:String) -> String {
     perform(json!({"operation":"audio_profile","card":card,"profile":profile})).await
 }
-pub fn start(app: tauri::AppHandle) {
+/// `app` es la interfaz a la que avisar de cada cambio. El servicio
+/// (`--hidden`) no tiene: solo mantiene `snapshot()` al día.
+pub fn start(app: Option<tauri::AppHandle>) {
     tauri::async_runtime::spawn(async move {
         loop {
-            if let Err(e) = listen(&app).await {
+            if let Err(e) = listen(app.as_ref()).await {
                 *storage().write().unwrap_or_else(|e| e.into_inner()) = Value::Null;
-                let _ = app.emit("bookos-system-error",e);
+                if let Some(app) = &app { let _ = app.emit("bookos-system-error",e); }
             }
             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     });
 }
-async fn listen(app:&tauri::AppHandle) -> Result<(),String> {
+async fn listen(app:Option<&tauri::AppHandle>) -> Result<(),String> {
     let c = zbus::Connection::session().await.map_err(|e|e.to_string())?;
     let p = proxy(&c).await?;
     let mut changes = p.receive_signal("StateChanged").await.map_err(|e|e.to_string())?;
@@ -92,7 +94,7 @@ async fn listen(app:&tauri::AppHandle) -> Result<(),String> {
     let initial: String = p.call("GetState",&()).await.map_err(|e|e.to_string())?;
     publish(app,&initial)?;
     let prompt:String = p.call("GetPairing",&()).await.map_err(|e|e.to_string())?;
-    if prompt != "null" { let _ = app.emit("bookos-pairing",&prompt); }
+    if prompt != "null" { if let Some(app) = app { let _ = app.emit("bookos-pairing",&prompt); } }
     loop {
         tokio::select! {
             msg = changes.next() => {
@@ -102,17 +104,17 @@ async fn listen(app:&tauri::AppHandle) -> Result<(),String> {
             msg = pairing.next() => {
                 let msg = msg.ok_or("Servicio desconectado")?;
                 let s:String = msg.body().deserialize().map_err(|e|e.to_string())?;
-                let _ = app.emit("bookos-pairing",s);
+                if let Some(app) = app { let _ = app.emit("bookos-pairing",s); }
             },
             _ = owners.next() => return Err("Servicio reiniciado".into()),
         }
     }
 }
-fn publish(app:&tauri::AppHandle, text:&str)->Result<(),String> {
+fn publish(app:Option<&tauri::AppHandle>, text:&str)->Result<(),String> {
     let s:Value = serde_json::from_str(text).map_err(|e|e.to_string())?;
     *storage().write().unwrap_or_else(|e|e.into_inner()) = s.clone();
     UPDATED.notify_waiters();
-    app.emit("bookos-system-changed",s).map_err(|e|e.to_string())
+    match app { Some(app) => app.emit("bookos-system-changed",s).map_err(|e|e.to_string()), None => Ok(()) }
 }
 
 #[tauri::command]

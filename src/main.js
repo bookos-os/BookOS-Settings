@@ -1,10 +1,8 @@
 import {startSystemEvents} from './modules/system-events.js';
 import{renderHome,searchIndex,subSearchIndex}from'./modules/home.js';
 import{t,getLang}from'./modules/i18n.js';
-// Routines engine is light and needed at startup (seeding + system-event
-// handlers), so it loads statically. The heavy page renderers in pages.js are
-// dynamically imported on first navigation to keep cold start fast.
-import{getRoutines,executeRoutine,snapshotForRoutine,restoreSnapshot,getRoutineSnapshot,deleteRoutineSnapshot,saveRoutineSnapshot,saveRoutines}from'./modules/routines-engine.js';
+// The heavy page renderers in pages.js are dynamically imported on first
+// navigation to keep cold start fast.
 let _pagesPromise=null;
 const _loadPages=()=>(_pagesPromise||(_pagesPromise=import('./modules/pages.js')));
 import{tauriInvoke,isTauri}from'./tauri-api.js';
@@ -130,8 +128,12 @@ document.addEventListener('DOMContentLoaded',async()=>{
     // antes solo se leía al arrancar y la tarjeta se quedaba con el dato viejo.
     window.refrescarUsuario=()=>tauriInvoke('get_user_info').then(j=>{try{const ui=JSON.parse(j);if(JSON.stringify(ui)!==JSON.stringify(userInfo)){userInfo=ui;if(sb)sb.innerHTML=renderHome(ui);window.updateHomeBudsRow?.();}localStorage.setItem('__user_info__',j);}catch(e){}}).catch(()=>{});
     window.refrescarUsuario();
-    // Re-apply hardware settings saved from previous session (battery limit, perf mode)
-    tauriInvoke('restore_startup_settings').catch(()=>{});
+    // Lo que el servicio de fondo necesita y hasta ahora solo estaba en el
+    // localStorage de esta ventana: los últimos Buds conectados.
+    try{
+        const mac=localStorage.getItem('buds_last_mac');
+        if(mac)tauriInvoke('set_bookos_setting',{key:'BudsLastMac',value:mac}).then(()=>localStorage.removeItem('buds_last_mac')).catch(e=>console.error('No se pudo pasar los Buds al servicio',e));
+    }catch{}
     // Corrige la paleta en caché con la que hay de verdad en disco (puede
     // haberla cambiado otra app, o haberse desactivado).
     syncPalette();
@@ -169,7 +171,6 @@ document.addEventListener('DOMContentLoaded',async()=>{
         teclado:'renderTeclado',
         huella:'renderHuella',
         touchpadmouse:'renderTouchpadMouse',
-        modos:'renderModos',
         avanzadas:'renderAvanzadas',
         accesibilidad:'renderAccesibilidad',
         inicio:'renderPantallaInicio'
@@ -524,7 +525,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     updateHomeBudsRow();
     // Esto solo pinta una fila de la pantalla de inicio, así que no tiene
     // sentido refrescarlo con la ventana oculta — a diferencia de los timers de
-    // auriculares y rutinas de más abajo, que sí deben seguir con la app en la
+    // auriculares de más abajo, que sí deben seguir con la app en la
     // bandeja. Se refresca además al volver a la ventana, para que la fila esté
     // al día en cuanto se mira.
     // Por aviso del servicio del sistema (BlueZ cambia → `bookos-system-changed`)
@@ -843,76 +844,10 @@ document.addEventListener('DOMContentLoaded',async()=>{
         if(e.key==='Enter'&&document.activeElement?.dataset?.page)openPage(document.activeElement.dataset.page);
     });
 
-    // ── Routine automation ──────────────────────────────────────────────
-    // Opposite trigger map: when a trigger fires, which trigger is its "undo" event?
-    const OPPOSITE_TRIGGERS={
-        power_connected:'power_disconnected',
-        power_disconnected:'power_connected',
-        wifi_on:'wifi_off',
-        wifi_off:'wifi_on',
-        bt_on:'bt_off',
-        bt_off:'bt_on',
-        low_battery:'power_connected'
-    };
-    // Built-in battery routine, seeded once: switch to power-saver when the
-    // charger is unplugged; the undo snapshot restores the previous profile on
-    // reconnect. User can edit/disable/delete it like any routine.
-    try{
-        if(!localStorage.getItem('bookos_seeded_battery_routine')){
-            localStorage.setItem('bookos_seeded_battery_routine','1');
-            const rs=getRoutines();
-            if(!rs.some(r=>r.triggers&&r.triggers.some(t=>t.type==='power_disconnected'))){
-                rs.push({id:crypto.randomUUID(),name:'Ahorro al desconectar',enabled:true,undo:true,
-                         triggers:[{type:'power_disconnected'}],
-                         actions:[{type:'performance',value:'power-saver'}]});
-                saveRoutines(rs);
-            }
-        }
-    }catch(e){}
-
-    // Fire all enabled routines that match a given trigger type.
-    // Undo snapshots are persisted (localStorage) so the "switch back to the
-    // previous state" works even if the app was restarted in between, and
-    // regardless of the routine's undo flag (the flag only governs manual
-    // disable-restore in the routines page).
-    async function fireMatchingRoutines(triggerType){
-        const routines=getRoutines();
-
-        // 1) Restore any routine whose opposite trigger just fired
-        for(const r of routines){
-            if(!r.enabled||r.undo===false)continue;
-            const opposites=new Set();
-            for(const t of r.triggers){if(OPPOSITE_TRIGGERS[t.type])opposites.add(OPPOSITE_TRIGGERS[t.type]);}
-            if(!opposites.has(triggerType))continue;
-            const snap=getRoutineSnapshot(r.id);
-            if(!snap)continue;
-            try{
-                await restoreSnapshot(snap);
-                deleteRoutineSnapshot(r.id);
-                if(window.toast)window.toast(`"${r.name||'Rutina'}" restaurada`,'↩️');
-            }catch(e){}
-        }
-
-        // 2) Then fire matching routines (snapshot current state first)
-        const matching=routines.filter(r=>r.enabled&&r.triggers.some(t=>t.type===triggerType));
-        for(const r of matching){
-            try{
-                if(r.undo!==false&&r.triggers.some(t=>OPPOSITE_TRIGGERS[t.type]))
-                    await saveRoutineSnapshot(r);
-                await executeRoutine(r);
-                if(window.toast)window.toast(`Rutina "${r.name}" ejecutada automáticamente`,'⚙️');
-            }catch(e){}
-        }
-    }
-
     // Listen for system events emitted by the Rust backend
     if(isTauri()){
         const listenFn=window.__TAURI__?.event?.listen||window.__TAURI__?.core?.listen;
         if(listenFn){
-            listenFn('routine-trigger',(ev)=>{
-                const trigger_type=ev?.payload?.trigger_type;
-                if(trigger_type)fireMatchingRoutines(trigger_type);
-            });
             // El backend lo emite justo antes de mostrar una ventana que estaba
             // oculta, para que reabrir desde el menú empiece en blanco.
             listenFn('reset-to-home',()=>{ try{ resetToHome(); }catch(e){} });
@@ -923,57 +858,4 @@ document.addEventListener('DOMContentLoaded',async()=>{
             listenFn('compartir-url',e=>{ const u=e?.payload; if(u)_loadPages().then(m=>m.abrirHojaCompartir(u)); });
         }
     }
-
-    // Buds audio-aware switch: every 5s check if PC is playing audio. If yes + buds
-    // not on PC → connect (steal from phone). If silent ~30s + buds on PC → disconnect
-    // (let phone take them).
-    setInterval(async()=>{
-        const mac = localStorage.getItem('buds_last_mac');
-        if(!mac) return;
-        try{
-            const r = JSON.parse(await tauriInvoke('buds_audio_switch_check',{mac}));
-            if(r.action==='connect'){
-                await tauriInvoke('connect_bluetooth',{mac}).catch(()=>{});
-            } else if(r.action==='disconnect'){
-                await tauriInvoke('buds_disconnect').catch(()=>{});
-                await tauriInvoke('disconnect_bluetooth',{mac}).catch(()=>{});
-            }
-        }catch(e){}
-    },5000);
-
-    // Watchdog: time-based routines. Window-based comparison instead of exact
-    // HH:MM equality — interval drift or webview timer throttling used to skip
-    // minutes entirely, so scheduled routines (e.g. backlight at a set hour)
-    // silently never fired. Now any trigger time that fell inside the window
-    // since the last check fires exactly once.
-    let _lastTimeCheck=Date.now();
-    setInterval(async()=>{
-        const now=Date.now();
-        const from=_lastTimeCheck;
-        _lastTimeCheck=now;
-        // Cap the window at 6h so a laptop waking from a long suspend doesn't
-        // replay a whole day of routines.
-        const windowStart=Math.max(from,now-6*3600*1000);
-        const routines=getRoutines();
-        for(const r of routines){
-            if(!r.enabled)continue;
-            for(const t of r.triggers){
-                if(t.type!=='time'||!t.value)continue;
-                const m=/^(\d{1,2}):(\d{2})$/.exec(t.value);
-                if(!m)continue;
-                // Today's occurrence of the trigger time (and yesterday's, for
-                // windows that span midnight)
-                const d=new Date(now);d.setHours(parseInt(m[1]),parseInt(m[2]),0,0);
-                for(const ts of [d.getTime(),d.getTime()-86400000]){
-                    if(ts>windowStart&&ts<=now){
-                        try{
-                            await executeRoutine(r);
-                            if(window.toast)window.toast(`Rutina "${r.name}" ejecutada (${t.value})`,'⏰');
-                        }catch(e){}
-                        break;
-                    }
-                }
-            }
-        }
-    },20000);
 });

@@ -35,6 +35,10 @@ struct Muestra {
 static ACTUAL: Mutex<Option<String>> = Mutex::new(None);
 static MUESTRAS: Mutex<Option<HashMap<String, Muestra>>> = Mutex::new(None);
 
+pub fn hay_transferencia() -> bool {
+    ACTUAL.lock().expect("bloqueo de la transferencia viva").is_some()
+}
+
 async fn conexion() -> Result<zbus::Connection, String> {
     zbus::Connection::session().await.map_err(|e| e.to_string())
 }
