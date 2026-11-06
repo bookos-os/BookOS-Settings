@@ -5,6 +5,7 @@ export const searchIndex=[
 {id:'teclado',title:'Teclado',subtitle:'Repetición · Distribución',keywords:['repetir','retardo','velocidad','teclado','keyboard','distribucion','layout','atajos','shortcuts','teclas','repeticion','xkb']},
 {id:'touchpadmouse',title:'Touchpad y ratón',subtitle:'Sensibilidad · Botones · Velocidad',keywords:['touchpad','raton','mouse','tactil','panel','gestos','tap','scroll','puntero','botones','velocidad','aceleracion']},
 {id:'sonido',title:'Sonido',subtitle:'Volumen · Salida',keywords:['sonido','volumen','audio','silencio','salida','sound','volume','mute','output','balance']},
+{id:'asistente',title:'Asistente de voz',subtitle:'Nombre · Tu voz · Activación',keywords:['asistente','voz','zenith','oye','okey','voice','assistant','microfono','escucha','jarvis','hotword','wake']},
 {id:'notificaciones',title:'Notificaciones',subtitle:'No molestar',keywords:['notificacion','alerta','dnd','notifications','alert','do not disturb']},
 {id:'pantalla',title:'Pantalla',subtitle:'Brillo · Resolución · Escala',keywords:['pantalla','brillo','resolucion','display','blur','efectos','screen','brightness','resolution','escala','salvapantallas','screensaver','dvd','ondas']},
 {id:'bateria',title:'Batería',subtitle:'Energía · Carga · Samsung Book',keywords:['bateria','energia','carga','samsung','book','ventilador','rendimiento','battery','power','charge','performance','fan']},
@@ -16,7 +17,7 @@ export const searchIndex=[
 {id:'seguridad',title:'Seguridad y privacidad',subtitle:'Firewall · Permisos',keywords:['seguridad','privacidad','permiso','firewall','ufw','security','privacy','permissions','camera','microphone']},
 {id:'cuentas',title:'Cuentas',subtitle:'Perfil · Nombre · Nombre del equipo',keywords:['cuenta','perfil','nombre','hostname','account','profile','name','password','user']},
 {id:'avanzadas',title:'Funciones avanzadas',subtitle:'Actividades dinámicas',keywords:['avanzado','labs','advanced','experimental','compositor','effects']},
-{id:'mantenimiento',title:'Mantenimiento',subtitle:'Almacenamiento · Caché',keywords:['mantenimiento','limpiar','cache','espacio','disk','almacenamiento','memoria','maintenance','clean','storage','space']},
+{id:'mantenimiento',title:'Mantenimiento',subtitle:'Almacenamiento · Memoria · Diagnóstico',keywords:['mantenimiento','diagnostico','papelera','limpiar','cache','espacio','disk','almacenamiento','memoria','maintenance','clean','storage','space']},
 {id:'aplicaciones',title:'Aplicaciones',subtitle:'Apps predeterminadas',keywords:['aplicacion','app','predeterminada','navegador','browser','apps','default','pdf','image','video','imagenes','correo','email']},
 {id:'general',title:'Administración general',subtitle:'Idioma · Teclado · Fecha',keywords:['idioma','teclado','fecha','hora','keyboard','general','language','date','time','locale','shortcuts','atajos','autostart']},
 {id:'accesibilidad',title:'Accesibilidad',subtitle:'Efectos · Animaciones',keywords:['accesibilidad','vision','zoom','accessibility','cursor','font','invert','contrast']},
@@ -52,6 +53,10 @@ export const subSearchIndex=[
 {parent:'sonido',title:'Silenciar',keywords:['silenciar','mute','silencio']},
 {parent:'sonido',title:'Salida de audio',keywords:['salida','output','altavoz','auriculares','speaker']},
 {parent:'sonido',title:'Entrada de micrófono',keywords:['microfono','mic','entrada','input']},
+// Asistente
+{parent:'asistente',title:'Nombre del asistente',keywords:['nombre','llamar','zenith','jarvis','paco']},
+{parent:'asistente',title:'Registrar mi voz',keywords:['registrar','voz','perfil','frases','reconocer']},
+{parent:'asistente',title:'Activar por voz',keywords:['activar','escucha','oye','okey','manos libres','hands free']},
 // Conexiones
 {parent:'conexiones',title:'WiFi',keywords:['wifi','wireless','red','redes']},
 {parent:'conexiones',title:'Bluetooth',keywords:['bluetooth','bt']},
@@ -81,14 +86,15 @@ export const subSearchIndex=[
 {parent:'general',title:'Página de inicio',keywords:['inicio','startup','arranque','default']},
 // Mantenimiento
 {parent:'mantenimiento',title:'Almacenamiento',keywords:['almacenamiento','disco','disk','espacio']},
-{parent:'mantenimiento',title:'Logs del sistema',keywords:['logs','registros','journal']},
+{parent:'mantenimiento',title:'Registros antiguos del sistema',keywords:['logs','registros','journal']},
 // Acerca
 {parent:'acerca',title:'Modelo del equipo',keywords:['modelo','equipo','samsung','book','galaxy']},
 {parent:'acerca',title:'Procesador',keywords:['cpu','procesador','intel','amd']},
 {parent:'acerca',title:'Memoria RAM',keywords:['ram','memoria','gb']},
 {parent:'acerca',title:'GPU',keywords:['gpu','grafica','video','intel','nvidia']},
+{parent:'acerca',title:'Número de serie',keywords:['serie','serial','bios','garantia']},
 {parent:'acerca',title:'Kernel',keywords:['kernel','linux','version']},
-{parent:'acerca',title:'Escritorio BookOS',keywords:['bookos','escritorio','version']},
+{parent:'acerca',title:'BookUI',keywords:['bookui','bookos','escritorio','desktop','version']},
 // Actualizacion
 {parent:'actualizacion',title:'Actualizaciones del sistema',keywords:['actualizacion','update','paru','pacman']},
 {parent:'actualizacion',title:'Flatpak',keywords:['flatpak','app']},
@@ -118,8 +124,9 @@ export const subSearchIndex=[
 {parent:'aplicaciones',title:'Gestor de archivos',keywords:['archivos','files','gestor','dolphin']},
 {parent:'aplicaciones',title:'Archivos comprimidos',keywords:['comprimido','zip','rar','7z','archive']},
 // Mantenimiento
-{parent:'mantenimiento',title:'Limpiar caché',keywords:['cache','limpiar','clean','basura','temporal']},
-{parent:'mantenimiento',title:'Limpiar Flatpak',keywords:['flatpak','limpiar','huerfanos','unused']},
+{parent:'mantenimiento',title:'Caché de aplicaciones',keywords:['cache','limpiar','clean','basura','temporal']},
+{parent:'mantenimiento',title:'Flatpak sin uso',keywords:['flatpak','limpiar','huerfanos','unused']},
+{parent:'mantenimiento',title:'Archivos grandes',keywords:['archivos','grandes','descargas','target','node_modules','compilaciones']},
 ];
 
 import{t}from'./i18n.js';
@@ -130,7 +137,7 @@ const ic=s=>`<div class="item-icon"><img src="assets/${s}" alt=""></div>`;
 // Como máscara y no como <img>: los SVG son trazo oscuro y en tema oscuro no
 // se veían. Así toman el color del texto.
 const BUDS_SVG=`<span class="home-buds-pair"><i style="--src:url(assets/budsleft.svg)"></i><i style="--src:url(assets/budsright.svg)"></i></span>`;
-const it=(page,icon,key)=>`<div class="item" data-page="${page}" tabindex="0" role="button">${ic(icon)}<div class="item-texts"><span class="title">${t(key)}</span><span class="subtitle">${t(key+'_sub')}</span></div></div>`;
+const it=(page,icon,key)=>`<div class="item" data-page="${page}" tabindex="0" role="button" title="${t(key)}" aria-label="${t(key)}">${ic(icon)}<div class="item-texts"><span class="title">${t(key)}</span><span class="subtitle">${t(key+'_sub')}</span></div></div>`;
 
 export function renderHome(u){
     const name=u?.display_name||t('user');
@@ -143,7 +150,7 @@ export function renderHome(u){
         :`<div class="profile-avatar-placeholder">${ini}</div>`;
     return `
 <div class="card card-profile">
-    <div class="item" data-page="cuentas" tabindex="0" role="button">
+    <div class="item" data-page="cuentas" tabindex="0" role="button" title="${name}" aria-label="${name}">
         ${av}<div class="profile-left"><span class="title">${name}</span><span class="subtitle">${t('bookos_account')}</span></div>
     </div>
     <div class="item home-buds-row" id="home-buds" tabindex="0" role="button" style="display:none">
@@ -158,7 +165,12 @@ export function renderHome(u){
 </div>
 
 <div class="card">
+    ${it('asistente','assistant.svg','assistant')}
     ${it('sonido','sound.svg','sound')}
+    ${it('notificaciones','notification.svg','notifications')}
+</div>
+
+<div class="card">
     ${it('pantalla','brightness.svg','display')}
     ${it('bateria','battery.svg','battery')}
 </div>
@@ -174,7 +186,6 @@ export function renderHome(u){
     ${it('general','general.svg','general')}
     ${it('teclado','keyboard.svg','kb_page')}
     ${it('touchpadmouse','touchpad.svg','tpm_page')}
-    ${it('notificaciones','notification.svg','notifications')}
     ${it('accesibilidad','accesibility.svg','accessibility')}
 </div>
 

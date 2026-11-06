@@ -13,6 +13,29 @@ pub async fn wallpaper_preview(path: String, hero: bool) -> Result<String, Strin
     create_preview(path, hero, cache).await
 }
 
+/// Ancho y alto reales: la previa viene reducida y «Normal» los necesita para
+/// enseñar la imagen a su tamaño frente a la pantalla.
+#[tauri::command]
+pub async fn wallpaper_size(path: String) -> Result<(u32, u32), String> {
+    let _permit = PREVIEWS.acquire().await.map_err(|e| e.to_string())?;
+    let input = format!("{path}[0]");
+    let args = ["-format", "%w %h", input.as_str()];
+    let result = tokio::time::timeout(Duration::from_secs(20), async {
+        match Command::new("magick").arg("identify").args(args).kill_on_drop(true).output().await {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Command::new("identify").args(args).kill_on_drop(true).output().await
+            }
+            other => other,
+        }
+    }).await.map_err(|_| "La medida tardó demasiado".to_string())?
+        .map_err(|e| e.to_string())?;
+    if !result.status.success() { return Err("No se pudo medir la imagen".into()); }
+    let text = String::from_utf8_lossy(&result.stdout);
+    text.split_once(' ')
+        .and_then(|(w, h)| Some((w.parse().ok()?, h.trim().parse().ok()?)))
+        .ok_or_else(|| format!("Medida ilegible: {text}"))
+}
+
 async fn create_preview(path: String, hero: bool, cache: PathBuf) -> Result<String, String> {
     let _permit = PREVIEWS.acquire().await.map_err(|e| e.to_string())?;
     let source = tokio::fs::canonicalize(&path).await.map_err(|e| e.to_string())?;

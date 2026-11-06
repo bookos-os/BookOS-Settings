@@ -11,6 +11,23 @@ async function save(value,restart=false){
     await tauriInvoke('bookos_apply_config',{config:value});
     toast(restart?'Guardado. Se aplicará al volver a iniciar sesión.':'Guardado');
 }
+// Los widgets que el compositor sabe poner en la barra superior (los nombres
+// son los de `widgets_disponibles` de GetConfig) y cómo se llaman aquí.
+const WIDGETS_BARRA={
+    escritorios:['Escritorios','Los puntos del escritorio activo'],
+    bateria:['Batería','Carga y tiempo restante'],
+    'bateria-simple':['Batería (trazo simple)','La misma, con el icono de los demás widgets'],
+    bluetooth:['Bluetooth',''],
+    red:['Red',''],
+    volumen:['Volumen',''],
+    brillo:['Brillo',''],
+    notificaciones:['Notificaciones','La campana'],
+    control:['Centro de control',''],
+    reloj:['Reloj','Fecha y hora'],
+    monitor:['Monitor del sistema','CPU, memoria y temperatura'],
+    trafico:['Tráfico de red','Bajada y subida'],
+    consumo:['Consumo','Vatios que gasta o carga la batería']
+};
 // Menú y deslizador propios en vez de <select> e <input type=number>: el menú
 // nativo de WebKitGTK es un GtkMenu sin tema y la casilla numérica sale blanca
 // y corta decimales («0,0799» en la posición del reloj).
@@ -692,7 +709,7 @@ const GESTOS=[
     ['vista','Vista de escritorios','Cuatro dedos hacia arriba'],
     ['escritorio','Cambiar de escritorio','Cuatro dedos hacia los lados'],
     ['despejar','Ver el escritorio','Cuatro dedos hacia abajo'],
-    ['launchpad','Abrir el launchpad','Pellizca con cuatro dedos'],
+    ['launchpad','Abrir el launchpad','Pellizca con cinco dedos'],
 ];
 export async function input(c){
     // Con extremos en palabras, como los del teclado y el dock.
@@ -881,13 +898,43 @@ export async function home(c){
     // Lo que no se encuentre sale como inicial sobre un color.
     const cols=['var(--blue)','var(--green)','var(--orange)','var(--red)','var(--yellow)'];
     const tiles=(pinned.length?pinned.slice(0,7):[{},{},{},{},{}]).map((l,i)=>{
-        const url=l.app_id==='launchpad'?'./assets/apps/launchpad.svg':appIconUrl(l.app_id,rutas[i]);
+        const url=l.app_id==='launchpad'?`./assets/apps/launchpad-${oscuro?'oscuro':'claro'}.svg`:appIconUrl(l.app_id,rutas[i]);
         return url?`<i class="con-icono"><img src="${esc(url)}" alt=""></i>`
             :`<i style="background:${cols[i%cols.length]}">${esc((l.etiqueta||'').trim().charAt(0).toUpperCase())}</i>`;
     }).join('');
     const dots=Array.from({length:5},(_,i)=>`<b${i<n?'':' hidden'}${i===0?' class="on"':''}></b>`).join('');
     const seg=[1,2,3,4,5].map(v=>`<button type="button" class="bk-seg-btn${v===n?' active':''}" data-desk="${v}" aria-pressed="${v===n}">${v}</button>`).join('');
     const tamano=range('dock_tamano','Tamaño',size,32,80,1,'px');
+    // Tres tamaños y no un deslizador: el alto final lo ajusta el compositor
+    // al alto de la pantalla, y un número en px no se cumpliría.
+    let panelTam=d.panel_tamano||'mediano';
+    const altosPanel={pequeno:28,mediano:34,grande:40};
+    const segPanel=[['pequeno','Pequeña'],['mediano','Mediana'],['grande','Grande']].map(([v,t])=>`<button type="button" class="bk-seg-btn${v===panelTam?' active':''}" data-panel-tam="${v}" aria-pressed="${v===panelTam}">${esc(_tr(t))}</button>`).join('');
+    // Los widgets de la barra: la lista es de izquierda a derecha y el último
+    // queda pegado a la esquina. Ocultar es sacarlo de la lista; añadir, meterlo
+    // al final.
+    // El compositor no publica su orden de fábrica, solo el catálogo; este es el
+    // de `Config::default` en bookos-shell/src/config.rs y hay que mantenerlos
+    // a la par.
+    const WIDGETS_DEFECTO=['escritorios','bateria','bluetooth','red','volumen','brillo','notificaciones','control','reloj'];
+    let widgetsBarra=Array.isArray(d.derecha)?[...d.derecha]:[];
+    const hayWidgets=Array.isArray(d.widgets_disponibles);
+    const nombreWidget=w=>_tr((WIDGETS_BARRA[w]||[w])[0]);
+    const textosWidget=w=>{
+        const desc=(WIDGETS_BARRA[w]||[])[1];
+        return `<div class="detail-texts"><span class="dt">${esc(nombreWidget(w))}</span>${desc?`<span class="ds">${esc(_tr(desc))}</span>`:''}</div>`;
+    };
+    const chipWidget=w=>{
+        const desc=(WIDGETS_BARRA[w]||[])[1];
+        return `<button type="button" class="pw-chip" data-w="${esc(w)}"${desc?` title="${esc(_tr(desc))}"`:''}>${esc(nombreWidget(w))}</button>`;
+    };
+    const htmlWidgets=()=>{
+        const libres=d.widgets_disponibles.filter(w=>!widgetsBarra.includes(w));
+        const porDefecto=widgetsBarra.length===WIDGETS_DEFECTO.length&&widgetsBarra.every((w,i)=>w===WIDGETS_DEFECTO[i]);
+        return `<div class="detail-item detail-item-row pw-cab"><div class="detail-texts"><span class="dt">${esc(_tr('Widgets'))}</span><span class="ds">${esc(_tr('Arrastra los widgets para ordenarlos en la barra, de izquierda a derecha; el último queda pegado a la esquina. Suéltalos en la caja de abajo para quitarlos y arrástralos de ahí a la barra para añadirlos.'))}</span></div><button type="button" class="btn btn-secondary" id="pw-restablecer"${porDefecto?' disabled':''}>${esc(_tr('Restablecer'))}</button></div>
+            <div class="esc-vista pw-vista ${oscuro?'oscuro':'claro'}"><div class="esc-panel pw-zona pw-zona-barra" data-zona="barra" style="--alto:${altosPanel[panelTam]}px">${widgetsBarra.map(chipWidget).join('')}<span class="pw-pista">${esc(_tr('La barra no lleva ningún widget. Arrastra uno aquí.'))}</span></div></div>
+            <div class="pw-zona" data-zona="libres">${libres.map(chipWidget).join('')}<span class="pw-pista">${esc(_tr('Todos los widgets están en la barra.'))}</span></div>`;
+    };
     const ejes=`<div class="bk-temp-ejes" aria-hidden="true"><span>${esc(_tr('Pequeño'))}</span><span>${esc(_tr('Grande'))}</span></div>`;
     const escritorios=names.map((nm,i)=>`<div class="esc-escritorio"${i<n?'':' hidden'}>
         ${escritorioMini(tono,false)}
@@ -895,7 +942,7 @@ export async function home(c){
     </div>`).join('');
     c.innerHTML=renderHeader('Escritorio')+`<div class="ap esc" style="--ap-acento:${colorAcento(d.acento,oscuro)}${fondo?`;--ap-fondo:url('${esc(fondo)}')`:''}">
         <div class="esc-vista ${oscuro?'oscuro':'claro'}" aria-hidden="true">
-            <div class="esc-panel"><div class="dock-desks">${dots}</div><span class="dock-desk-name">${esc(names[0])}</span></div>
+            <div class="esc-panel" style="height:${altosPanel[panelTam]}px"><div class="dock-desks">${dots}</div><span class="dock-desk-name">${esc(names[0])}</span></div>
             <div class="dock-bar" style="--dock:${size}px">${tiles}</div>
         </div>
         ${renderSection('Dock')}
@@ -911,6 +958,12 @@ export async function home(c){
             ${toggle('dock_esquiva','Ocultar el dock automáticamente',d.dock_esquiva,'Se aparta cuando una ventana llega a él y vuelve al llevar el puntero abajo · Meta+Alt+D')}
             ${toggle('panel_esquiva','Ocultar la barra superior automáticamente',d.panel_esquiva,'Igual que el dock, pero arriba · Meta+Alt+B')}`:''}
         </div>
+        ${d.panel_tamano!==undefined?`${renderSection('Barra superior')}
+        <div class="theme-block">
+            ${renderRowItem('Tamaño','Se adapta también al alto de la pantalla',`<div class="bk-seg" data-seg-panel role="group" aria-label="${esc(_tr('Tamaño de la barra superior'))}">${segPanel}</div>`)}
+            ${hayWidgets?`<div id="pw-lista">${htmlWidgets()}</div>`
+                :renderInfoItem('Elegir los widgets de la barra necesita el escritorio actualizado','El escritorio que está corriendo no los ofrece. Actualízalo y vuelve a iniciar sesión.')}
+        </div>`:''}
         ${renderSection('Escritorios')}
         <div class="theme-block">
             <div class="ap-cab esc-cab"><span class="dt">${_tr('Número de escritorios')}</span><div class="bk-seg" role="group" aria-label="${esc(_tr('Número de escritorios'))}">${seg}</div></div>
@@ -941,7 +994,83 @@ export async function home(c){
         }
     });
     if(enVivo)['dock_esquiva','panel_esquiva'].forEach(k=>setupToggle(k,async v=>{await save({[k]:v});}));
-    const segEl=c.querySelector('.bk-seg');
+    c.querySelector('[data-seg-panel]')?.addEventListener('click',async e=>{
+        const btn=e.target.closest('[data-panel-tam]');if(!btn)return;
+        const v=btn.dataset.panelTam;if(v===panelTam)return;
+        try{
+            await save({panel_tamano:v});
+            panelTam=d.panel_tamano=v;
+            c.querySelectorAll('[data-panel-tam]').forEach(x=>{const on=x===btn;x.classList.toggle('active',on);x.setAttribute('aria-pressed',String(on));});
+            c.querySelectorAll('.esc-panel').forEach(p=>{p.style.height=`${altosPanel[v]}px`;p.style.setProperty('--alto',`${altosPanel[v]}px`);});
+        }catch(err){toast(String(err),'❌');}
+    });
+    // Cada cambio guarda la lista entera y, si el compositor la rechaza, la
+    // deja como estaba: el panel y esta lista no pueden discrepar. Se arrastra
+    // con eventos de puntero y no con el DnD de HTML5: en WebKitGTK dentro de
+    // Tauri el arrastre nativo depende del gestor de ventanas y no da posición
+    // fiable mientras dura.
+    const lista=c.querySelector('#pw-lista');
+    const aplicarWidgets=async nueva=>{
+        const igual=nueva.length===widgetsBarra.length&&nueva.every((w,i)=>w===widgetsBarra[i]);
+        try{
+            if(!igual){await save({derecha:nueva});widgetsBarra=d.derecha=nueva;}
+        }catch(err){toast(String(err),'❌');}
+        // Se repinta siempre: limpia el hueco y el widget oculto del arrastre.
+        lista.innerHTML=htmlWidgets();
+    };
+    lista?.addEventListener('click',e=>{
+        if(e.target.closest('#pw-restablecer'))aplicarWidgets(WIDGETS_DEFECTO);
+    });
+    if(hayWidgets)c.querySelector('.esc').addEventListener('pointerdown',e=>{
+        const chip=e.target.closest('.pw-chip');if(!chip||e.button!==0)return;
+        const w=chip.dataset.w,x0=e.clientX,y0=e.clientY,rect=chip.getBoundingClientRect();
+        const hueco=document.createElement('span');hueco.className='pw-hueco';
+        let fantasma=null,zona=null;
+        const ponerHueco=(z,x,y)=>{
+            const otros=[...z.querySelectorAll('.pw-chip:not(.pw-arrastrando)')];
+            const antes=otros.find(o=>{const r=o.getBoundingClientRect();return y<r.top||(y<=r.bottom&&x<r.left+r.width/2);});
+            z.insertBefore(hueco,antes||z.querySelector('.pw-pista'));
+        };
+        const mover=ev=>{
+            if(!fantasma){
+                if(Math.hypot(ev.clientX-x0,ev.clientY-y0)<5)return;
+                fantasma=chip.cloneNode(true);fantasma.classList.add('pw-fantasma');
+                fantasma.style.width=`${rect.width}px`;
+                document.body.appendChild(fantasma);
+                chip.classList.add('pw-arrastrando');
+            }
+            fantasma.style.transform=`translate(${ev.clientX-rect.width/2}px,${ev.clientY-rect.height/2}px)`;
+            const z=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.pw-zona');
+            if(z!==zona){zona?.classList.remove('pw-sobre');zona=z;zona?.classList.add('pw-sobre');}
+            if(z)ponerHueco(z,ev.clientX,ev.clientY);else hueco.remove();
+        };
+        const soltar=ev=>{
+            window.removeEventListener('pointermove',mover);
+            window.removeEventListener('pointerup',soltar);
+            window.removeEventListener('pointercancel',soltar);
+            if(!fantasma){
+                // Sin arrastre es un clic: pasa el widget al otro lado, que es
+                // también la vía con teclado.
+                const nueva=widgetsBarra.includes(w)?widgetsBarra.filter(x=>x!==w):[...widgetsBarra,w];
+                aplicarWidgets(nueva);return;
+            }
+            fantasma.remove();
+            // Soltar fuera de las dos cajas deja el widget donde estaba.
+            let nueva=widgetsBarra;
+            if(ev.type==='pointerup'&&zona){
+                if(zona.dataset.zona==='libres')nueva=widgetsBarra.filter(x=>x!==w);
+                else{
+                    const orden=[...zona.children].filter(n=>n===hueco||(n.classList.contains('pw-chip')&&!n.classList.contains('pw-arrastrando')));
+                    nueva=orden.map(n=>n===hueco?w:n.dataset.w);
+                }
+            }
+            aplicarWidgets(nueva);
+        };
+        window.addEventListener('pointermove',mover);
+        window.addEventListener('pointerup',soltar);
+        window.addEventListener('pointercancel',soltar);
+    });
+    const segEl=c.querySelector('.bk-seg:not([data-seg-panel])');
     segEl.addEventListener('click',async e=>{
         const btn=e.target.closest('[data-desk]');if(!btn)return;
         const v=Number(btn.dataset.desk);if(v===n)return;

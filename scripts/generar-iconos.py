@@ -14,7 +14,7 @@ NOMBRES = """
 settings alarm-clock hourglass rotate-cw loader globe mail folder image film music
 file-text notepad-text archive battery battery-medium triangle-alert arrow-up-right
 check x arrow-left circle bell cloud-sun calendar calendar-days skip-back skip-forward
-play zap
+play zap hard-drive memory-stick cpu monitor pencil eye eye-off copy fingerprint mic mic-off
 """.split()
 
 CABECERA = """// Iconos de Lucide (ISC) copiados de BookOS-HIG/lucide/icons.

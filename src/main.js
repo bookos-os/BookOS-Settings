@@ -170,6 +170,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
         dispositivos:'renderDispositivos',
         teclado:'renderTeclado',
         huella:'renderHuella',
+        asistente:'renderAsistente',
         touchpadmouse:'renderTouchpadMouse',
         avanzadas:'renderAvanzadas',
         accesibilidad:'renderAccesibilidad',
@@ -515,6 +516,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
             }catch{}
             const sub=row.querySelector('.home-buds-bat');
             if(sub)sub.textContent=bat;
+            // En la barra compacta el texto no se ve: queda en el nombre accesible y al pasar el ratón.
+            row.title=`${dev.name||'Buds'} · ${bat}`;row.setAttribute('aria-label',row.title);
         }else{
             row.style.display='none';
         }
@@ -613,18 +616,39 @@ document.addEventListener('DOMContentLoaded',async()=>{
         noR.style.display=any?'none':'block';
     }
 
-    // ── Sidebar collapse toggle ──
-    // The sidebar is always visible on launch; it only hides when the user
-    // presses the toggle (or Ctrl+B) within the session — no persistence.
+    // ── Barra compacta (solo iconos) ──
+    // El botón y Ctrl+B la alternan. Con la ventana estrecha se compacta sola y
+    // al ensancharla se abre: cada cruce del umbral manda sobre lo último que se
+    // pulsó, y lo pulsado manda hasta el siguiente cruce. Sin persistencia.
     {
-        document.getElementById('sidebar-toggle')?.addEventListener('click',()=>{
-            mc?.classList.toggle('sidebar-collapsed');
-        });
-        // Keyboard shortcut: Ctrl+B
+        const panel=document.getElementById('sidebar-panel');
+        const detalle=document.querySelector('.detail-view');
+        const quieto=matchMedia('(prefers-reduced-motion:reduce)');
+        const curva={duration:250,easing:'cubic-bezier(.4,0,.2,1)'};
+        // FLIP: el ancho cambia de golpe (una sola recolocación) y lo que se
+        // anima es transform y clip-path. Animar `width` recolocaba la página en
+        // cada fotograma, que es lo que el HIG prohíbe y lo que iba a saltos a 2×.
+        const compactar=(si,animar=true)=>{
+            if(!mc||!panel||mc.classList.contains('sidebar-collapsed')===si)return;
+            const antes=panel.getBoundingClientRect().width;
+            mc.classList.toggle('sidebar-collapsed',si);
+            const salto=antes-panel.getBoundingClientRect().width;
+            if(!animar||quieto.matches||!salto)return;
+            detalle?.animate([{transform:`translateX(${salto}px)`},{transform:'none'}],curva);
+            // Al abrirse la barra se descubre hacia la derecha a la par que la página se aparta.
+            if(salto<0)panel.animate([{clipPath:`inset(0 ${-salto}px 0 0)`},{clipPath:'inset(0 0 0 0)'}],curva);
+            panel.animate([{opacity:.55},{opacity:1}],{duration:140,easing:'ease-out'});
+        };
+        window.compactarBarra=compactar;
+        // 300 px de barra mínima más ~560 de detalle legible.
+        const estrecha=matchMedia('(max-width:860px)');
+        compactar(estrecha.matches,false);
+        estrecha.addEventListener('change',e=>compactar(e.matches));
+        document.getElementById('sidebar-toggle')?.addEventListener('click',()=>compactar(!mc?.classList.contains('sidebar-collapsed')));
         document.addEventListener('keydown',e=>{
             if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='b'&&!e.target?.matches?.('input,textarea')){
                 e.preventDefault();
-                mc?.classList.toggle('sidebar-collapsed');
+                compactar(!mc?.classList.contains('sidebar-collapsed'));
             }
         });
     }
@@ -827,7 +851,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     document.addEventListener('keydown',e=>{
         // El buscador vive en la barra lateral: si está plegada, desplegarla
         // antes de enfocar o el foco iría a un elemento con pointer-events:none.
-        if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();mc?.classList.remove('sidebar-collapsed');sIn?.focus();sIn?.select();}
+        if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();window.compactarBarra?.(false);sIn?.focus();sIn?.select();}
         // Escape no navega atrás si hay un diálogo/popover abierto (cada uno
         // gestiona el suyo) ni mientras se escribe en un campo — antes se iba
         // hacia atrás dejando el diálogo huérfano encima de la página nueva.

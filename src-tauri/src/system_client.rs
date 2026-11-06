@@ -72,6 +72,21 @@ pub async fn forget_bluetooth(mac:String) -> String {
 pub async fn set_audio_profile(card:String, profile:String) -> String {
     perform(json!({"operation":"audio_profile","card":card,"profile":profile})).await
 }
+/// Sin plazo: buscar por `$HOME` o borrar una carpeta de compilación de decenas
+/// de gigas puede tardar mucho más que cualquier otra operación del servicio.
+#[tauri::command]
+pub async fn mantenimiento(metodo:String, carga:Option<String>) -> Result<String,String> {
+    let c = zbus::Connection::session().await.map_err(|e|e.to_string())?;
+    let p = proxy(&c).await?;
+    match (metodo.as_str(),carga) {
+        ("resumen",None) => p.call("MaintenanceOverview",&()).await,
+        ("tamanos",None) => p.call("MaintenanceSizes",&()).await,
+        ("escanear",None) => p.call("MaintenanceScan",&()).await,
+        ("limpiar",Some(carga)) => p.call("MaintenanceClean",&(carga,)).await,
+        ("papelera",Some(carga)) => p.call("MaintenanceTrash",&(carga,)).await,
+        _ => return Err("Método de mantenimiento desconocido".into()),
+    }.map_err(|e|e.to_string())
+}
 /// `app` es la interfaz a la que avisar de cada cambio. El servicio
 /// (`--hidden`) no tiene: solo mantiene `snapshot()` al día.
 pub fn start(app: Option<tauri::AppHandle>) {

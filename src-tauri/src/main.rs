@@ -21,6 +21,7 @@ async fn upower_bat_path() -> String {
 }
 
 mod hardware_control;
+mod asistente;
 mod buds;
 mod bluez_profile;
 mod isla;
@@ -137,8 +138,6 @@ fn find_avatar(home: &str, user: &str) -> (String, String) {
     let _ = fs::write(&p, serde_json::to_string_pretty(&c).unwrap_or_default());
     r#"{"ok":true}"#.to_string()
 }
-#[tauri::command] async fn set_hostname(name: String) -> String { run("hostnamectl",&["set-hostname",&name]).await; r#"{"ok":true}"#.into() }
-
 fn regex_strip_rev(s: &str) -> String {
     // Remove trailing " (rev XX)" suffix from lspci output
     if let Some(idx) = s.rfind(" (rev ") {
@@ -244,10 +243,10 @@ async fn apply_bookos_release(password: String, state: tauri::State<'_, UpdateSt
         // SnapshotPolicy=never. If snapper isn't present it's a no-op. Run both
         // under one sudo so the password is asked once.
         let snap = if should_snapshot(false) {
-            "snapper -c root create -d 'Antes de actualizar BookOS' 2>/dev/null; "
+            "snapper -c root create -c number -d 'Antes de actualizar BookOS' 2>/dev/null; "
         } else { "" };
         let shell_cmd = format!("{}{}", snap, dnf);
-        let args: Vec<String> = vec!["-k".into(), "-S".into(), "sh".into(), "-c".into(), shell_cmd];
+        let args: Vec<String> = vec![sudo_k(&password).into(), "-S".into(), "sh".into(), "-c".into(), shell_cmd];
 
         let mut child = match StdCommand::new("sudo")
             .args(&args)
@@ -265,8 +264,7 @@ async fn apply_bookos_release(password: String, state: tauri::State<'_, UpdateSt
                 }
             };
         if let Some(mut sin) = child.stdin.take() {
-            let _ = sin.write_all(password.as_bytes());
-            let _ = sin.write_all(b"\n");
+            let _ = sin.write_all(pw_line(&password).as_bytes());
         }
         if let Ok(mut s) = state_clone.lock() { s.child_pid = child.id().into(); }
         match child.wait_with_output() {
@@ -320,18 +318,23 @@ async fn get_snapshot_support() -> String {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     let snapper = Command::new("sh").args(["-c","command -v snapper >/dev/null"]).output().await
         .map(|o| o.status.success()).unwrap_or(false);
-    format!(r#"{{"supported":{},"fs":"{}","snapper":{}}}"#, fs=="btrfs" && snapper, esc(&fs), snapper)
+    // Solo sabemos restaurar la distribución de Fedora y BookOS (ver bookos-restaurar).
+    let restaurable = fs=="btrfs" && script_restaurar().is_some() && format!(",{},", run("findmnt",&["-no","OPTIONS","/"]).await.trim()).contains(",subvol=/root,");
+    // Quien activó Recuperación antes de que se encendiera la limpieza la tiene
+    // apagada, y sus puntos nunca caducan: la página debe poder ofrecérselo.
+    let limpieza = run("systemctl",&["is-enabled","snapper-cleanup.timer"]).await.trim()=="enabled";
+    serde_json::json!({"supported":fs=="btrfs" && snapper,"fs":fs,"snapper":snapper,"restaurable":restaurable,"limpieza":limpieza}).to_string()
 }
 
 /// List btrfs/snapper snapshots (rollback points).
 /// Returns {"ok":bool,"error":"permission"|"missing"|"error"|"","snapshots":[...]}.
 /// snapper denies listing to non-root users unless ALLOW_USERS is configured
-/// (see enable_snapshot_access), so we surface "permission" distinctly from
+/// (see recuperacion_activar,recuperacion_borrar,recuperacion_restaurar,reiniciar_equipo), so we surface "permission" distinctly from
 /// a genuinely empty list — the old code returned [] for both, which is why
 /// the Recovery page always looked empty.
 #[tauri::command]
 async fn list_bookos_snapshots() -> String {
-    let out = match Command::new("snapper").args(["-c","root","--machine-readable","csv","list"]).output().await {
+    let out = match Command::new("snapper").args(["--machine-readable","csv","-c","root","list","--columns","number,date,description"]).output().await {
         Ok(o) => o,
         Err(_) => return r#"{"ok":false,"error":"missing","snapshots":[]}"#.into(),
     };
@@ -345,43 +348,48 @@ async fn list_bookos_snapshots() -> String {
     let mut items: Vec<String> = Vec::new();
     for (i, line) in body.lines().enumerate() {
         if i == 0 || line.trim().is_empty() { continue; }
-        let cols: Vec<&str> = line.split(',').collect();
-        // snapper csv: config,subvolume,number,default,active,date,user,cleanup,description,...
-        let num  = cols.get(2).map(|s| s.trim()).unwrap_or("");
-        let date = cols.get(5).map(|s| s.trim()).unwrap_or("");
-        let desc = cols.get(8).map(|s| s.trim()).unwrap_or("");
+        // La descripción va la última porque es la única que puede llevar comas.
+        let mut cols = line.splitn(3, ',');
+        let num  = cols.next().unwrap_or("").trim();
+        let date = cols.next().unwrap_or("").trim();
+        let desc = cols.next().unwrap_or("").trim().trim_matches('"');
         if num.is_empty() || num == "0" { continue; }
         items.push(format!(r#"{{"number":"{}","date":"{}","description":"{}"}}"#, esc(num), esc(date), esc(desc)));
     }
     format!(r#"{{"ok":true,"error":"","snapshots":[{}]}}"#, items.join(","))
 }
 
-/// One-time setup: allow the current user to read/create snapshots without root
-/// (snapper ALLOW_USERS + SYNC_ACL). Needs the password once; afterwards listing
-/// and manual snapshots work with no prompt.
+/// Deja snapper listo: el usuario puede leer y crear puntos sin contraseña.
+/// `TIMELINE_CREATE=no` y el límite de 10 porque el valor por defecto crea uno
+/// cada hora, y cada punto retiene espacio que el usuario cree haber liberado.
+/// El límite solo lo aplica `snapper-cleanup.timer`, y solo a los puntos creados
+/// con `-c number`: sin las dos cosas, los puntos no caducan nunca.
+const ACTIVAR: &str = r#"set -eu
+command -v snapper >/dev/null || dnf5 install -y snapper >/dev/null
+snapper -c root get-config >/dev/null 2>&1 || snapper -c root create-config /
+snapper -c root set-config ALLOW_USERS="$1" SYNC_ACL=yes TIMELINE_CREATE=no NUMBER_CLEANUP=yes NUMBER_LIMIT=10
+systemctl enable --now snapper-cleanup.timer >/dev/null"#;
 #[tauri::command]
-async fn enable_snapshot_access(password: String) -> String {
+async fn recuperacion_activar(password: String) -> String {
     let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
     if user.is_empty() || !user.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return r#"{"ok":false,"error":"bad user"}"#.into();
+        return r#"{"ok":false,"error":"Usuario no válido"}"#.into();
     }
-    let cmd = format!("snapper -c root set-config ALLOW_USERS={user} SYNC_ACL=yes");
-    let out = Command::new("sudo").args(["-k","-S","sh","-c",&cmd])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match out { Ok(c) => c, Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())) };
-    if let Some(mut sin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let _ = sin.write_all(format!("{}\n", password).as_bytes()).await;
+    run_sudo_command("sh".into(), vec!["-c".into(), ACTIVAR.into(), "activar".into(), user], password).await
+}
+#[tauri::command]
+async fn recuperacion_borrar(numero: String) -> String {
+    if numero.is_empty() || !numero.chars().all(|c| c.is_ascii_digit()) {
+        return r#"{"ok":false,"error":"Punto no válido"}"#.into();
     }
-    match child.wait_with_output().await {
+    match Command::new("snapper").args(["-c","root","delete",&numero]).output().await {
         Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
-        Ok(o) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(String::from_utf8_lossy(&o.stderr).trim())),
-        Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
+        Ok(o) => serde_json::json!({"ok":false,"error":String::from_utf8_lossy(&o.stderr).trim()}).to_string(),
+        Err(e) => serde_json::json!({"ok":false,"error":e.to_string()}).to_string(),
     }
 }
+#[tauri::command]
+async fn reiniciar_equipo() -> String { run("systemctl",&["reboot"]).await }
 
 /// Create a manual snapshot. Runs as the user (works once ALLOW_USERS is set),
 /// returning {"ok":false,"error":"permission"} if access hasn't been enabled yet.
@@ -391,43 +399,34 @@ async fn create_snapshot(description: String) -> String {
         .filter(|c| !matches!(c, '"' | '\'' | '`' | '$' | ';' | '\n' | '\\'))
         .take(80).collect();
     let desc = if desc.trim().is_empty() { "Punto de restauración manual".to_string() } else { desc };
-    let out = Command::new("snapper").args(["-c","root","create","-d",&desc]).output().await;
+    let out = Command::new("snapper").args(["-c","root","create","-c","number","-d",&desc]).output().await;
     match out {
         Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
         Ok(o) => {
             let err = String::from_utf8_lossy(&o.stderr).to_lowercase();
-            let kind = if err.contains("permis") || err.contains("denied") { "permission" } else { "error" };
-            format!(r#"{{"ok":false,"error":"{}"}}"#, kind)
+            serde_json::json!({"ok":false,"error":err.trim()}).to_string()
         }
         Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     }
 }
 
-/// Roll the system back to a snapshot (needs reboot to take effect).
+/// El script vive en bookos-desktop porque la pantalla de recuperación, que corre
+/// cuando el escritorio no arranca, necesita exactamente lo mismo.
+fn script_restaurar() -> Option<&'static str> {
+    ["/usr/local/libexec/bookos-restaurar", "/usr/libexec/bookos-restaurar"]
+        .into_iter().find(|r| std::path::Path::new(r).exists())
+}
 #[tauri::command]
-async fn rollback_bookos_snapshot(password: String, number: String) -> String {
-    if !number.chars().all(|c| c.is_ascii_digit()) || number.is_empty() {
-        return r#"{"ok":false,"error":"invalid snapshot"}"#.into();
+async fn recuperacion_restaurar(numero: String, password: String) -> String {
+    if numero.is_empty() || !numero.chars().all(|c| c.is_ascii_digit()) {
+        return r#"{"ok":false,"error":"Punto no válido"}"#.into();
     }
-    let cmd = format!("snapper -c root rollback {}", number);
-    let out = Command::new("sudo").args(["-k","-S","sh","-c",&cmd])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match out { Ok(c) => c, Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())) };
-    if let Some(mut sin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let _ = sin.write_all(format!("{}\n", password).as_bytes()).await;
-    }
-    match child.wait_with_output().await {
-        Ok(o) if o.status.success() => r#"{"ok":true,"reboot_required":true}"#.into(),
-        Ok(o) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(String::from_utf8_lossy(&o.stderr).trim())),
-        Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
-    }
+    let Some(script) = script_restaurar() else {
+        return r#"{"ok":false,"error":"Falta bookos-restaurar: actualiza el escritorio"}"#.into();
+    };
+    run_sudo_command(script.into(), vec!["restaurar".into(), numero], password).await
 }
 
-/// Get current update channel ("stable" default).
 #[tauri::command]
 fn get_update_channel() -> String {
     let ch = read_update_conf().get("CHANNEL").cloned()
@@ -779,8 +778,29 @@ fn detect_book_model() -> Option<String> {
     // Commercial model name (Galaxy Book4/5 …) from DMI, else raw product_name.
     let model = detect_book_model()
         .unwrap_or_else(|| { let p = read("/sys/class/dmi/id/product_name").trim().to_string(); if p.is_empty() { "—".into() } else { p } });
-    format!(r#"{{"hostname":"{}","kernel":"{}","distro":"{}","cpu":"{}","ram":"{}","gpu":"{}","desktop":"{}","model":"{}"}}"#,
-        esc(&host),esc(&kern),esc(&distro),esc(&cpu),esc(&ram),esc(&gpu),esc(&desktop),esc(&model))
+    // «Fedora Linux 44 (KDE Plasma Desktop Edition)»: la variante es la de la
+    // imagen de instalación y aquí no corre Plasma.
+    let base = distro.split(" (").next().unwrap_or(&distro);
+    let cpu_corta = cpu.replace("(R)", "").replace("(TM)", "");
+    let gpus: Vec<String> = run("lspci",&[]).await.lines()
+        .filter(|l| l.contains("VGA") || l.contains("3D"))
+        .map(|l| regex_strip_rev(l.split_once(": ").map_or(l, |(_, n)| n)).replace(" Corporation", "").trim().to_string())
+        .collect();
+    // Ya en GiB, como `df -h` y la página de Mantenimiento.
+    let disk = run("df",&["-B1G","--output=size","/"]).await.lines().nth(1)
+        .map(|n| format!("{} GB", n.trim())).unwrap_or_default();
+    // DMI la da en MM/DD/AAAA; basta mes y año para saber si está al día.
+    let bios_date = match read("/sys/class/dmi/id/bios_date").split('/').collect::<Vec<_>>()[..] {
+        [mes, _, anio] => format!("{mes}/{anio}"),
+        _ => String::new(),
+    };
+    serde_json::json!({
+        "hostname":host.trim(),"kernel":kern.trim(),"distro":base,"cpu":cpu_corta.split_whitespace().collect::<Vec<_>>().join(" "),
+        "ram":ram,"gpu":gpu,"gpus":gpus,"desktop":desktop,"model":model,"disk":disk,
+        "product":read("/sys/class/dmi/id/product_name"),"bios":read("/sys/class/dmi/id/bios_version"),"bios_date":bios_date,
+        // 0400 de root salvo la regla 71-bookos-serie.rules: sin ella queda vacío y la fila no sale.
+        "serial":read("/sys/class/dmi/id/product_serial"),
+    }).to_string()
 }
 
 // ── Hardware feature detection (generic Linux — no vendor assumptions) ────
@@ -959,7 +979,7 @@ fn detect_book_model() -> Option<String> {
                 Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
             };
             if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(format!("{}\n{}\n", pw, end_limit).as_bytes()).await;
+                let _ = stdin.write_all(format!("{}{}\n", pw_line(&pw), end_limit).as_bytes()).await;
             }
             return match child.wait_with_output().await {
                 Ok(output) if output.status.success() && accepted() => {
@@ -1028,7 +1048,7 @@ fn detect_book_model() -> Option<String> {
     let p=match path{Some(p)=>p,None=>return r#"{"ok":false,"error":"Función no soportada por el firmware"}"#.into()}; let val=if enabled{"1"}else{"0"};
     if fs::write(&p,val).is_ok()&&read(&p.to_string_lossy()).trim()==val{return r#"{"ok":true}"#.into();}
     let pw=match password.filter(|x|!x.is_empty()){Some(x)=>x,None=>return r#"{"ok":false,"needs_auth":true}"#.into()}; use tokio::io::AsyncWriteExt;
-    let mut c=match Command::new("sudo").args(["-k","-S","tee",p.to_str().unwrap_or("")]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).spawn(){Ok(c)=>c,Err(e)=>return serde_json::json!({"ok":false,"error":e.to_string()}).to_string()}; if let Some(mut i)=c.stdin.take(){let _=i.write_all(format!("{}\n{}\n",pw,val).as_bytes()).await;} let ok=matches!(c.wait().await,Ok(s)if s.success())&&read(&p.to_string_lossy()).trim()==val; serde_json::json!({"ok":ok}).to_string()
+    let mut c=match Command::new("sudo").args([sudo_k(&pw),"-S","tee",p.to_str().unwrap_or("")]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).spawn(){Ok(c)=>c,Err(e)=>return serde_json::json!({"ok":false,"error":e.to_string()}).to_string()}; if let Some(mut i)=c.stdin.take(){let _=i.write_all(format!("{}{}\n",pw_line(&pw),val).as_bytes()).await;} let ok=matches!(c.wait().await,Ok(s)if s.success())&&read(&p.to_string_lossy()).trim()==val; serde_json::json!({"ok":ok}).to_string()
 }
 
 // ── WiFi ─────────────────────────────────────────────────────────────────
@@ -1464,7 +1484,7 @@ fn perfil_energia_actual() -> String {
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", pw).as_bytes()).await;
+        let _ = sin.write_all(pw_line(&pw).as_bytes()).await;
         drop(sin);
     }
     match child.wait_with_output().await {
@@ -1961,11 +1981,12 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
 /// Uses `sudo -k` then `sudo -S -v` so PAM is the source of truth.
 #[tauri::command] async fn verify_password(password: String) -> String {
     use tokio::io::AsyncWriteExt;
-    // Drop the cached sudo timestamp so the test reflects the password actually entered.
-    let _ = tokio::process::Command::new("sudo").arg("-k").status().await;
-
-    let mut child = match tokio::process::Command::new("sudo")
-        .args(["-S", "-p", "", "-v"])
+    // `sudo -v` pasa por system-auth: pam_fprintd espera a la huella y pam_faildelay
+    // añade 2 s si la clave es mala (medido: 4,2 s con clave incorrecta). unix_chkpwd
+    // es el mismo pam_unix sin nada de eso (0,06 s) y vale para el propio usuario.
+    let user = std::env::var("USER").unwrap_or_default();
+    let mut child = match tokio::process::Command::new("/usr/sbin/unix_chkpwd")
+        .args([user.as_str(), "nullok"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -1975,7 +1996,8 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", password).as_bytes()).await;
+        // El protocolo de unix_chkpwd termina la clave con NUL, no con salto de línea.
+        let _ = sin.write_all(format!("{}\0", password).as_bytes()).await;
         drop(sin);
     }
     let ok = matches!(child.wait().await, Ok(s) if s.success());
@@ -1985,42 +2007,27 @@ fn autostart_optout_path() -> String { format!("{}/.config/bookos-settings-autos
 /// Listen for a fingerprint match. Resolves with `{"ok":true}` on a match,
 /// `{"ok":false,"error":"..."}` on failure or timeout. Pairs with the auth dialog.
 #[tauri::command] async fn verify_fingerprint() -> String {
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    let user = run("whoami", &[]).await;
-    let mut child = match tokio::process::Command::new("fprintd-verify")
-        .arg(&user)
+    // El escaneo lo hace el propio `sudo -v` (pam_fprintd va primero en system-auth),
+    // y así deja la credencial en la caché: los comandos que vienen después se
+    // ejecutan sin contraseña (ver `pw_line`/`sudo_k`). Con `fprintd-verify` suelto
+    // el dedo se reconocía pero `sudo` seguía pidiendo contraseña. Antes se borra la
+    // caché: si hubiera una vigente, `-v` acabaría sin pedir el dedo y daría por
+    // buena una huella que nadie puso.
+    let _ = tokio::process::Command::new("sudo").arg("-k").status().await;
+    let mut child = match tokio::process::Command::new("sudo")
+        .args(["-v"])
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
     {
         Ok(c) => c,
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
-
-    let stdout = match child.stdout.take() { Some(s) => s, None => return r#"{"ok":false,"error":"no stdout"}"#.into() };
-    let mut reader = BufReader::new(stdout).lines();
-    let mut matched = false;
-    let mut output = String::new();
-    while let Ok(Some(line)) = reader.next_line().await {
-        output.push_str(&line);
-        output.push('\n');
-        if line.contains("verify-match") || line.contains("Verify result: verify-match") {
-            matched = true;
-        }
-        if line.contains("verify-no-match") || line.contains("verify-disconnected")
-            || line.contains("verify-unknown-error") || line.contains("verify-retry-scan") {
-            // Don't break on retry — let fprintd handle multi-attempt cycle
-            if !line.contains("verify-retry-scan") {
-                break;
-            }
-        }
-    }
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-    if matched { r#"{"ok":true}"#.into() } else {
-        format!(r#"{{"ok":false,"output":"{}"}}"#, esc(output.trim()))
-    }
+    // pam_fprintd se rinde solo a los 30 s sin dedo; se corta antes para no dejar el diálogo colgado.
+    let ok = matches!(tokio::time::timeout(std::time::Duration::from_secs(30), child.wait()).await, Ok(Ok(s)) if s.success());
+    format!(r#"{{"ok":{}}}"#, ok)
 }
 
 #[tauri::command] async fn check_fingerprint() -> String {
@@ -2064,14 +2071,14 @@ async fn fprintd_root(programa: &str, finger: &str, password: &str) -> Result<to
     if !DEDOS.contains(&finger) { return Err("dedo desconocido".into()); }
     let user = run("whoami",&[]).await;
     let mut child = Command::new("sudo")
-        .args(["-k", "-S", "-p", "", "--", programa, &user, "-f", finger])
+        .args([sudo_k(&password), "-S", "-p", "", "--", programa, &user, "-f", finger])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut sin = child.stdin.take().expect("stdin pedido como pipe");
-    sin.write_all(format!("{}\n", password).as_bytes()).await.map_err(|e| e.to_string())?;
+    sin.write_all(pw_line(&password).as_bytes()).await.map_err(|e| e.to_string())?;
     Ok(child)
 }
 
@@ -2155,14 +2162,14 @@ const DIR_PIN: &str = "/etc/bookos/pin";
         None => (r#"rm -f "/etc/bookos/pin/$1""#, String::new()),
     };
     let mut child = Command::new("sudo")
-        .args(["-k", "-S", "-p", "", "--", "sh", "-c", guion, "sh", user.trim()])
+        .args([sudo_k(&password), "-S", "-p", "", "--", "sh", "-c", guion, "sh", user.trim()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
     // sudo lee la contraseña carácter a carácter hasta el salto de línea; lo
     // que sigue le llega a `cat`.
-    child.stdin.take().expect("stdin pedido como pipe").write_all(format!("{}\n{}\n", password, hash).as_bytes()).await.map_err(|e| e.to_string())?;
+    child.stdin.take().expect("stdin pedido como pipe").write_all(format!("{}{}\n", pw_line(&password), hash).as_bytes()).await.map_err(|e| e.to_string())?;
     let out = child.wait_with_output().await.map_err(|e| e.to_string())?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
 }
@@ -2348,31 +2355,31 @@ fn detect_pkg_mgr() -> &'static str {
                 .spawn()
         } else if mgr == "dnf5" || mgr == "dnf" {
             // Snapshot before package upgrade when SnapshotPolicy=packages.
-            let snap = if should_snapshot(true) { "snapper -c root create -d 'Antes de actualizar paquetes' 2>/dev/null; " } else { "" };
+            let snap = if should_snapshot(true) { "snapper -c root create -c number -d 'Antes de actualizar paquetes' 2>/dev/null; " } else { "" };
             let cmd = format!("{}{} upgrade -y", snap, mgr);
             StdCommand::new("sudo")
-                .args(["-k", "-S", "sh", "-c", &cmd])
+                .args([sudo_k(&password), "-S", "sh", "-c", &cmd])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
         } else if mgr == "apt" {
             StdCommand::new("sudo")
-                .args(["-k", "-S", "sh", "-c", "apt update && apt upgrade -y"])
+                .args([sudo_k(&password), "-S", "sh", "-c", "apt update && apt upgrade -y"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
         } else if mgr == "zypper" {
             StdCommand::new("sudo")
-                .args(["-k", "-S", "zypper", "--non-interactive", "update"])
+                .args([sudo_k(&password), "-S", "zypper", "--non-interactive", "update"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
         } else {
             StdCommand::new("sudo")
-                .args(["-k", "-S", "pacman", "-Syu", "--noconfirm"])
+                .args([sudo_k(&password), "-S", "pacman", "-Syu", "--noconfirm"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -2390,7 +2397,7 @@ fn detect_pkg_mgr() -> &'static str {
         // Save child PID so cancel_update can kill it
         { let mut s = state_clone.lock().unwrap(); s.child_pid = Some(child.id()); }
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(format!("{}\n", password).as_bytes());
+            let _ = stdin.write_all(pw_line(&password).as_bytes());
         }
         // Stream stdout lines into shared state so the UI can show live progress
         use std::io::BufRead;
@@ -2606,7 +2613,7 @@ fn detect_pkg_mgr() -> &'static str {
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(format!("{}\n{}", password, conf).as_bytes());
+        let _ = stdin.write_all(format!("{}{}", pw_line(&password), conf).as_bytes());
     }
     let output = match child.wait_with_output() {
         Ok(o) => o,
@@ -3261,8 +3268,7 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
             .stderr(std::process::Stdio::piped())
             .spawn().map_err(|e| e.to_string())?;
         if let Some(mut sin) = child.stdin.take() {
-            let _ = sin.write_all(pw.as_bytes());
-            let _ = sin.write_all(b"\n");
+            let _ = sin.write_all(pw_line(&pw).as_bytes());
             drop(sin);
         }
         let out = child.wait_with_output().map_err(|e| e.to_string())?;
@@ -3271,12 +3277,10 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 
     let mut ok = false;
     let mut last_err = String::new();
-    if !password.is_empty() {
-        match try_sudo(&password) {
-            Ok(true) => ok = true,
-            Ok(false) => last_err = "sudo: autenticación fallida".into(),
-            Err(e) => last_err = e,
-        }
+    match try_sudo(&password) {
+        Ok(true) => ok = true,
+        Ok(false) => last_err = "sudo: autenticación fallida".into(),
+        Err(e) => last_err = e,
     }
     if !ok && std::path::Path::new(&tmp).exists() {
         match StdCommand::new("pkexec").args(["sh", "-c", &script]).status() {
@@ -3365,14 +3369,13 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
     eprintln!("[install_sddm] script:\n{}", script);
 
     let mut child = match StdCommand::new("sudo")
-        .args(["-k", "-S", "-p", "", "--", "sh", "-c", &script])
+        .args([sudo_k(&password), "-S", "-p", "", "--", "sh", "-c", &script])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn() { Ok(c) => c, Err(e) => { let _ = std::fs::remove_file(&tmp_conf); return format!(r#"{{"ok":false,"error":"spawn: {}"}}"#, esc(&e.to_string())); } };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(password.as_bytes());
-        let _ = sin.write_all(b"\n");
+        let _ = sin.write_all(pw_line(&password).as_bytes());
         drop(sin);
     }
     let result = match child.wait_with_output() {
@@ -3392,7 +3395,7 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 #[tauri::command] async fn uninstall_sddm_theme(password: String) -> String {
     use std::io::Write;
     let mut child = match StdCommand::new("sudo")
-        .args(["-k", "-S", "--", "rm", "-f",
+        .args([sudo_k(&password), "-S", "--", "rm", "-f",
                "/etc/sddm.conf.d/zz-bookos-theme.conf",
                // Nombre antiguo: se limpia por si viene de una instalación previa.
                "/etc/sddm.conf.d/bookos-theme.conf"])
@@ -3401,7 +3404,7 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
         .stderr(std::process::Stdio::piped())
         .spawn() { Ok(c) => c, Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())) };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", password).as_bytes());
+        let _ = sin.write_all(pw_line(&password).as_bytes());
     }
     match child.wait_with_output() {
         Ok(o) if o.status.success() => r#"{"ok":true}"#.into(),
@@ -3469,7 +3472,7 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 #[tauri::command] async fn get_available_locales() -> String {
     let l = run("localectl",&["list-locales"]).await;
-    let locs: Vec<String> = l.lines().filter(|l| l.contains("UTF-8")||l.contains("utf8")).take(80).map(|l| format!(r#""{}""#,esc(l.trim()))).collect();
+    let locs: Vec<String> = l.lines().filter(|l| l.contains("UTF-8")||l.contains("utf8")).map(|l| format!(r#""{}""#,esc(l.trim()))).collect();
     format!("[{}]",locs.join(","))
 }
 #[tauri::command] async fn set_locale(locale: String) -> String { run("localectl",&["set-locale",&format!("LANG={}",locale)]).await; r#"{"ok":true}"#.into() }
@@ -3519,32 +3522,25 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 
 // ── Maintenance ────────────────────────────────────────────────────────
-#[tauri::command] async fn run_maintenance(target: String) -> String {
-    let r = match target.as_str() {
-        "flatpak" => run("flatpak", &["uninstall", "--unused", "-y"]).await,
-        "packages" => {
-            // Clean the package-manager cache, per distro. pkexec for root ops.
-            match detect_pkg_mgr() {
-                "pacman" => {
-                    // paru cleans AUR build cache as the user; pacman cache needs root.
-                    let aur = run("paru", &["-Sc", "--noconfirm"]).await;
-                    let sys = run("pkexec", &["paccache", "-r", "-k1"]).await;
-                    format!("{}\n{}", aur.trim(), sys.trim())
-                }
-                "dnf5" => run("pkexec", &["dnf5", "clean", "all"]).await,
-                "dnf"  => run("pkexec", &["dnf", "clean", "all"]).await,
-                "apt"  => run("pkexec", &["sh", "-c", "apt-get clean && apt-get autoclean"]).await,
-                "zypper" => run("pkexec", &["zypper", "clean", "--all"]).await,
-                _ => "Gestor de paquetes no soportado".to_string(),
-            }
-        }
-        "cache" => {
-            let home = std::env::var("HOME").unwrap_or_default();
-            run("sh", &["-c", &format!("rm -rf '{}/.cache/thumbnails/'* 2>/dev/null; true", home)]).await
+/// Lo que necesita root. Pasa por `sudo` con la contraseña del diálogo de Ajustes
+/// porque la sesión no tiene agente de polkit y `pkexec` se deniega sin preguntar:
+/// la versión anterior con `pkexec` nunca limpió estos objetivos.
+#[tauri::command] async fn mantenimiento_root(objetivo: String, password: String) -> String {
+    let (cmd, args): (&str, &[&str]) = match objetivo.as_str() {
+        "paquetes" => match detect_pkg_mgr() {
+            "pacman" => ("paccache", &["-r", "-k1"]),
+            "dnf5" => ("dnf5", &["clean", "all"]),
+            "dnf" => ("dnf", &["clean", "all"]),
+            "apt" => ("apt-get", &["clean"]),
+            "zypper" => ("zypper", &["clean", "--all"]),
+            _ => return r#"{"ok":false,"stderr":"Gestor de paquetes no soportado"}"#.into(),
         },
-        _ => "Invalid target".to_string(),
+        // Mismo valor que `DIARIO_CONSERVADO` en bookos-system/src/mantenimiento.rs.
+        "registros" => ("journalctl", &["--vacuum-size=200M"]),
+        "flatpak" => ("flatpak", &["uninstall", "--unused", "-y"]),
+        _ => return r#"{"ok":false,"stderr":"Objetivo desconocido"}"#.into(),
     };
-    format!(r#"{{"ok":true,"output":"{}"}}"#, esc(&r))
+    run_sudo_command(cmd.to_owned(), args.iter().map(|a| (*a).to_owned()).collect(), password).await
 }
 
 // ── Firewall ───────────────────────────────────────────────────────────
@@ -3554,10 +3550,16 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
 }
 // Note: toggle_firewall was removed here -> handled by run_sudo_command from frontend
 
+/// Con huella, `sudo -v` ya dejó la credencial en caché y la contraseña llega
+/// vacía. Entonces no se escribe línea de contraseña —sudo no la lee y lo que
+/// siga (el contenido de un `tee`) se desplazaría una línea— y `-n` en vez de
+/// `-k` para no tirar la caché que se acaba de ganar.
+fn pw_line(p: &str) -> String { if p.is_empty() { String::new() } else { format!("{p}\n") } }
+fn sudo_k(p: &str) -> &'static str { if p.is_empty() { "-n" } else { "-k" } }
 #[tauri::command] async fn run_sudo_command(cmd: String, args: Vec<String>, password: String) -> String {
     use tokio::io::AsyncWriteExt;
     let mut child = match Command::new("sudo")
-        .arg("-k").arg("-S")
+        .arg(sudo_k(&password)).arg("-S")
         .arg(&cmd)
         .args(&args)
         .stdin(std::process::Stdio::piped())
@@ -3568,7 +3570,7 @@ fn morph(mask: &mut Vec<bool>, w: usize, h: usize, keep_if_at_least: usize) {
         Err(e) => return format!(r#"{{"ok":false,"stdout":"","stderr":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(format!("{}\n", password).as_bytes()).await;
+        let _ = stdin.write_all(pw_line(&password).as_bytes()).await;
     }
     let output = match child.wait_with_output().await {
         Ok(o) => o,
@@ -3594,7 +3596,7 @@ fn list_wallpapers() -> String {
     // galería enseñaba los fondos de Plasma y ninguno de los propios. Uno por
     // pareja, el claro: al elegirlo, `set_wallpaper` escribe los dos.
     let home = std::env::var("HOME").unwrap_or_default();
-    for base in [format!("{home}/Descargas/BookOS/BookOS-Wallpapers/Wallpapers-0.6"), "/usr/share/wallpapers/BookOS".into()] {
+    for base in carpetas_fondos_bookos() {
         let Ok(entries) = fs::read_dir(format!("{base}/Light")) else { continue };
         let mut claros: Vec<_> = entries.flatten().map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|x| ["png","jpg","jpeg","webp"].contains(&x.to_string_lossy().to_lowercase().as_str())))
@@ -3759,15 +3761,52 @@ fn pareja_de_fondo(path: &str) -> Option<(String, String)> {
 /// Ruta del fondo actual, sin envolver en JSON: la usa también el color
 /// dinámico, que necesita el path a secas para leer la imagen.
 
+/// Carpetas de los fondos de BookOS. Sus imágenes están hechas a la medida de
+/// la pantalla y siempre rellenan: no tienen encaje que elegir.
+fn carpetas_fondos_bookos() -> [String; 2] {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [format!("{home}/Descargas/BookOS/BookOS-Wallpapers/Wallpapers-0.6"), "/usr/share/wallpapers/BookOS".into()]
+}
+
+/// La clave de un fondo en `FondoEncajes`. Las dos mitades de una pareja son el
+/// mismo fondo: el escritorio devuelve la del tema en pantalla, y con la ruta
+/// tal cual el encaje se perdía al cambiar de tema.
+fn clave_encaje(path: &str) -> String {
+    pareja_de_fondo(path).map_or_else(|| path.to_owned(), |(claro, _)| claro)
+}
+
+/// El encaje de cada fondo se guarda aquí porque el escritorio solo conoce uno,
+/// el del fondo que pinta. Sin entrada, rellena, igual que un escritorio nuevo.
+fn encaje_de_fondo(ajustes: &serde_json::Value, path: &str) -> String {
+    if carpetas_fondos_bookos().iter().any(|base| std::path::Path::new(path).starts_with(base)) {
+        return "rellenar".into();
+    }
+    ajustes["FondoEncajes"][clave_encaje(path)].as_str().unwrap_or("rellenar").to_owned()
+}
+
+#[tauri::command] async fn set_wallpaper_encaje(path: String, encaje: String) -> Result<(), String> {
+    bookos_desktop::bookos_apply_config(serde_json::json!({"fondo_encaje":encaje})).await?;
+    let mut ajustes = load_bookos_settings();
+    ajustes["FondoEncajes"][clave_encaje(&path)] = encaje.into();
+    save_bookos_settings(&ajustes);
+    Ok(())
+}
+
 #[tauri::command] async fn set_wallpaper(path: String) -> String {
     // La pareja manda sobre `fondo` en el escritorio: escribir solo `fondo`
     // con una pareja puesta no cambiaba nada en pantalla. Un fondo con pareja
     // se guarda como pareja —el cambio de tema se lleva la imagen con él— y
     // uno suelto vacía la pareja para poder verse.
-    let cambio = match pareja_de_fondo(&path) {
+    let mut cambio = match pareja_de_fondo(&path) {
         Some((claro, oscuro)) => serde_json::json!({"fondo":"","fondo_claro":claro,"fondo_oscuro":oscuro}),
         None => serde_json::json!({"fondo":path,"fondo_claro":"","fondo_oscuro":""}),
     };
+    // En la misma orden que el fondo, para que no se vea un instante con el
+    // encaje del anterior. El escritorio rechaza entera una orden con una clave
+    // que no conoce: uno anterior al encaje no debe quedarse sin cambiar de fondo.
+    let encaje = encaje_de_fondo(&load_bookos_settings(), &path);
+    let conoce_encaje = bookos_desktop::config_value().await.is_ok_and(|d| d.get("fondo_encaje").is_some());
+    if conoce_encaje { cambio["fondo_encaje"] = encaje.as_str().into(); }
     if let Err(e)=bookos_desktop::bookos_apply_config(cambio).await {return system_client::failure(e);}
     if let Err(e) = sincronizar_acento_escritorio().await {
         eprintln!("[fondo] no se pudo ajustar el acento del escritorio: {e}");
@@ -3793,7 +3832,7 @@ fn pareja_de_fondo(path: &str) -> Option<(String, String)> {
             Err(e) => eprintln!("[fondo] no se pudieron extraer los colores: {e}"),
         }
     }
-    r#"{"ok":true}"#.into()
+    serde_json::json!({"ok":true,"encaje":encaje}).to_string()
 }
 
 // ── Caché de dispositivos ────────────────────────────────────────────────
@@ -4479,7 +4518,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     use std::io::Write;
     // Use chpasswd: feed "user:newpwd" via stdin, authenticated with sudo -S
     let mut child = match StdCommand::new("sudo")
-        .args(["-k", "-S", "--", "chpasswd"])
+        .args([sudo_k(&old_pwd), "-S", "--", "chpasswd"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -4488,7 +4527,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(format!("{}\n{}:{}\n", old_pwd, esc(&username), esc(&new_pwd)).as_bytes());
+        let _ = stdin.write_all(format!("{}{}:{}\n", pw_line(&old_pwd), esc(&username), esc(&new_pwd)).as_bytes());
     }
     let out = match child.wait_with_output() {
         Ok(o) => o,
@@ -4515,7 +4554,8 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
     sudo_password: String,
 ) -> String {
     use tokio::io::AsyncWriteExt;
-    if username.is_empty() || password.is_empty() || sudo_password.is_empty() {
+    // `sudo_password` llega vacía cuando se autorizó con la huella (ver `pw_line`).
+    if username.is_empty() || password.is_empty() {
         return r#"{"ok":false,"error":"missing_fields"}"#.into();
     }
     // Validate username (POSIX): lowercase letters, digits, underscores, hyphens
@@ -4536,7 +4576,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", sudo_password).as_bytes()).await;
+        let _ = sin.write_all(pw_line(&sudo_password).as_bytes()).await;
         drop(sin);
     }
     let out = child.wait_with_output().await.ok();
@@ -4557,7 +4597,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n{}:{}\n", sudo_password, username, password).as_bytes()).await;
+        let _ = sin.write_all(format!("{}{}:{}\n", pw_line(&sudo_password), username, password).as_bytes()).await;
         drop(sin);
     }
     let _ = child.wait_with_output().await;
@@ -4572,7 +4612,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
             .spawn().ok();
         if let Some(c) = child.as_mut() {
             if let Some(mut sin) = c.stdin.take() {
-                let _ = sin.write_all(format!("{}\n", sudo_password).as_bytes()).await;
+                let _ = sin.write_all(pw_line(&sudo_password).as_bytes()).await;
                 drop(sin);
             }
             let _ = c.wait().await;
@@ -4591,7 +4631,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
                 .spawn().ok();
             if let Some(c) = child.as_mut() {
                 if let Some(mut sin) = c.stdin.take() {
-                    let _ = sin.write_all(format!("{}\n", sudo_password).as_bytes()).await;
+                    let _ = sin.write_all(pw_line(&sudo_password).as_bytes()).await;
                     drop(sin);
                 }
                 let _ = c.wait().await;
@@ -4624,7 +4664,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n", sudo_password).as_bytes()).await;
+        let _ = sin.write_all(pw_line(&sudo_password).as_bytes()).await;
         drop(sin);
     }
     match child.wait_with_output().await {
@@ -4684,7 +4724,7 @@ fn default_app_roles() -> Vec<(&'static str, &'static str, &'static str, &'stati
         Err(e) => return format!(r#"{{"ok":false,"error":"{}"}}"#, esc(&e.to_string())),
     };
     if let Some(mut sin) = child.stdin.take() {
-        let _ = sin.write_all(format!("{}\n{}", sudo_password, body).as_bytes()).await;
+        let _ = sin.write_all(format!("{}{}", pw_line(&sudo_password), body).as_bytes()).await;
         drop(sin);
     }
     match child.wait_with_output().await {
@@ -5101,13 +5141,13 @@ fi'",
 
 /// Launch an external app from a fixed allowlist. Returns {"ok":true} or {"ok":false,"error":"..."}.
 #[tauri::command] async fn launch_app(app: String) -> String {
-    let allowed = ["rquickshare", "quick-share", "gs-connect", "galaxy-buds-client", "GalaxyBudsClient", "kdeconnect-app"];
+    let allowed = ["rquickshare", "quick-share", "gs-connect", "galaxy-buds-client", "GalaxyBudsClient", "kdeconnect-app", "bookos-system-monitor"];
     if !allowed.contains(&app.as_str()) {
         return r#"{"ok":false,"error":"app not allowed"}"#.into();
     }
     match std::process::Command::new(&app).spawn() {
         Ok(_)  => r#"{"ok":true}"#.into(),
-        Err(e) => format!(r#"{{"ok":false,"error":"{}"}}"#, e),
+        Err(e) => serde_json::json!({"ok":false,"error":e.to_string()}).to_string(),
     }
 }
 
@@ -5131,7 +5171,7 @@ fi'",
 }
 
 #[tauri::command] async fn which_app(app: String) -> String {
-    let allowed = ["rquickshare", "quick-share", "gs-connect", "galaxy-buds-client", "GalaxyBudsClient", "kdeconnect-app"];
+    let allowed = ["rquickshare", "quick-share", "gs-connect", "galaxy-buds-client", "GalaxyBudsClient", "kdeconnect-app", "bookos-system-monitor"];
     if !allowed.contains(&app.as_str()) {
         return r#"{"found":false}"#.into();
     }
@@ -5813,7 +5853,7 @@ fn main() {
             bookos_desktop::bookos_reload_config,
             system_extras::list_keymaps_pretty,
             system_extras::set_avatar_data,
-            get_user_info,set_display_name,set_hostname,get_system_info,get_default_hostname,get_bookos_release,refresh_bookos_release,get_update_channel,set_update_channel,apply_bookos_release,list_bookos_snapshots,rollback_bookos_snapshot,get_snapshot_support,enable_snapshot_access,create_snapshot,get_bookos_repo_status,set_bookos_repo,
+            get_user_info,set_display_name,get_system_info,get_default_hostname,get_bookos_release,refresh_bookos_release,get_update_channel,set_update_channel,apply_bookos_release,list_bookos_snapshots,get_snapshot_support,recuperacion_activar,recuperacion_borrar,recuperacion_restaurar,reiniciar_equipo,create_snapshot,get_bookos_repo_status,set_bookos_repo,
             check_hw_features,set_performance_mode,set_charge_limit,set_background_throttle,predict_battery_runtime,get_power_actions,get_firmware_power_controls,set_firmware_power_control,
             system_settings::get_wifi_status,system_settings::toggle_wifi,system_settings::get_wifi_list,system_settings::connect_wifi,system_settings::wifi_rescan,
             system_settings::get_bluetooth_status,system_settings::toggle_bluetooth,system_settings::get_bluetooth_devices,system_settings::connect_bluetooth,system_settings::disconnect_bluetooth,system_settings::bluetooth_scan,
@@ -5830,12 +5870,12 @@ fn main() {
             get_app_power_usage,get_sddm_themes,set_sddm_theme,get_sddm_config,set_sddm_config,
             sddm_accent_from_image,sddm_clock_adapt,sddm_clock_depth,list_login_users,preview_sddm,
             is_sddm_theme_installed,install_sddm_theme,uninstall_sddm_theme,
-            run_maintenance,
+            mantenimiento_root,system_client::mantenimiento,
             get_firewall_status,run_sudo_command,get_system_users,
             get_autostart_bookos,toggle_autostart_bookos,get_autostart_apps,toggle_autostart_app,export_settings,import_settings,
             change_password,set_avatar,create_user,delete_user,get_autologin_status,set_autologin,
             system_settings::forget_wifi,system_settings::set_wifi_autoconnect,system_settings::get_wifi_details,system_settings::get_ethernet_status,system_settings::get_ethernet_details,system_settings::get_wifi_password,
-            wallpaper_preview::wallpaper_preview,get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,
+            wallpaper_preview::wallpaper_preview,wallpaper_preview::wallpaper_size,get_wallpapers,add_wallpapers,get_current_wallpaper,set_wallpaper,set_wallpaper_encaje,
             refresh_weather_cache,refresh_devices_cache,
             dynamic_color_seeds,dynamic_color_preview,dynamic_color_apply,sync_desktop_accent,
             dynamic_color_state,dynamic_color_set_enabled,dynamic_color_set_lockscreen,
@@ -5847,6 +5887,12 @@ fn main() {
             hardware_control::aplicar_perfil_termico,
             hardware_control::set_brillo,
             hardware_control::obtener_estado_pantalla,
+            asistente::get_asistente_estado,asistente::asistente_nombre,asistente::asistente_escucha,
+            asistente::asistente_registro_empezar,asistente::asistente_registro_preparar,
+            asistente::asistente_registro_grabar,asistente::asistente_registro_terminar_toma,
+            asistente::asistente_registro_cancelar_toma,asistente::asistente_registro_repetir,
+            asistente::asistente_registro_guardar,asistente::asistente_registro_cancelar,
+            asistente::asistente_activar_microfono,
             buds::buds_connect,buds::buds_disconnect,buds::buds_get_status,
             buds::buds_set_auto_reconnect,buds::buds_get_prefs,
             buds::buds_fit_test_start,buds::buds_fit_test_stop,buds::buds_set_easy_pairing,buds::buds_request_info,
@@ -5902,7 +5948,17 @@ fn get_available_themes()->String {
 
 #[cfg(test)]
 mod pruebas_fondo {
-    use super::{fondo_efectivo, pareja_de_fondo};
+    use super::{encaje_de_fondo, fondo_efectivo, pareja_de_fondo};
+
+    /// Cada fondo propio recuerda el suyo; los de BookOS rellenan aunque el
+    /// fichero diga otra cosa.
+    #[test]
+    fn el_encaje_es_de_cada_fondo() {
+        let ajustes = serde_json::json!({"FondoEncajes":{"/a.png":"ajustar","/usr/share/wallpapers/BookOS/Light/x.png":"estirar"}});
+        assert_eq!(encaje_de_fondo(&ajustes, "/a.png"), "ajustar");
+        assert_eq!(encaje_de_fondo(&ajustes, "/b.png"), "rellenar");
+        assert_eq!(encaje_de_fondo(&ajustes, "/usr/share/wallpapers/BookOS/Light/x.png"), "rellenar");
+    }
 
     /// Con la pareja puesta, el fondo es el del tema en pantalla, y `fondo`
     /// solo cuenta si no hay pareja: es lo que hace el escritorio.

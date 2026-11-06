@@ -12,6 +12,7 @@ import{
 }from'./pages/_common.js';
 import{ico}from'./pages/iconos.js';
 import{getLang}from'./i18n.js';
+import{HUELLA_TOKEN}from'../tauri-api.js';
 // Re-export shared helpers so existing importers of pages.js keep working.
 export{invalidateHwCache};
 import{installPaletteCss,previewPaletteCss,paletteToCss,syncPalette}from'./dynamic-color.js';
@@ -856,8 +857,10 @@ async function applyChargeLimit(limit){
                 description:'BookOS necesita autorización para escribir el límite de carga del firmware.',
                 confirmLabel:'Autorizar',verifyPassword:false,allowFingerprint:true,
             });
-            if(auth?.method==='password'&&auth.password){_chargeLimitPassword=auth.password;return auth.password;}
-            return null;
+            if(!auth?.password)return null;
+            // Con huella no hay contraseña que recordar: sudo guarda la credencial un rato.
+            if(auth.method==='password')_chargeLimitPassword=auth.password;
+            return auth.password;
         })().finally(()=>{_chargeLimitAuthPromise=null;});
     }
     const password=await _chargeLimitAuthPromise;
@@ -1343,91 +1346,7 @@ return desktop.lockscreen(c);
 // ════════════════════════════════════════════════════════════════════════
 // ── Actualizaciones (Apple + Windows Hybrid — OS card + progress bar) ──
 // ════════════════════════════════════════════════════════════════════════
-// ── Recovery / snapshots sub-page (below Updates) ───────────────────────
-export async function renderSnapshots(c){
-    c.innerHTML=renderHeader('Recuperación')+renderSkeleton(2);
-    const [support,snapRes]=await Promise.all([
-        tauriInvoke('get_snapshot_support').then(JSON.parse).catch(()=>({supported:false,fs:''})),
-        tauriInvoke('list_bookos_snapshots').then(JSON.parse).catch(()=>({ok:false,error:'error',snapshots:[]})),
-    ]);
-    const snaps=snapRes.snapshots||[];
-    const needsAccess=snapRes.error==='permission';
-    const policy=await getSetting('SnapshotPolicy','osupdate');
-    const opt=(val,label,sub)=>`<div class="detail-item detail-item-row" data-snappol="${val}" style="cursor:pointer">
-        <div class="detail-texts"><span class="dt">${_tr(label)}</span><span class="ds">${_tr(sub)}</span></div>
-        ${policy===val?_ckmark():''}
-    </div>`;
-
-    let h=renderHeader('Recuperación');
-    h+=renderSection('Tomar captura al actualizar');
-    h+=renderCard([
-        opt('packages','Al actualizar paquetes','Antes de cada actualización de paquetes'),
-        opt('osupdate','Al actualizar el sistema','Solo antes de subir de versión BookOS'),
-        opt('never','Nunca','No crear capturas automáticamente'),
-    ]);
-    if(!support.supported){
-        // En Btrfs lo que falta es snapper; decir «requiere Btrfs» a quien ya lo tiene confundía.
-        const why=support.fs==='btrfs'
-            ?_tr('Snapper no está instalado. Instálalo y crea la configuración «root» para usar las capturas.')
-            :_tr('Las instantáneas requieren un sistema de archivos Btrfs.')+(support.fs?` (${esc(support.fs)})`:'');
-        h+=`<div class="detail-card" style="padding:16px 20px;margin-top:4px"><span class="ds">${why}</span></div>`;
-    }
-    // Sistema soportado pero snapper no deja leer al usuario todavía
-    if(support.supported && needsAccess){
-        h+=`<div class="detail-card" style="padding:16px 20px;margin-top:4px">
-            <span class="dt" style="display:block;margin-bottom:4px">${_tr('Acceso a instantáneas no habilitado')}</span>
-            <span class="ds" style="display:block;margin-bottom:12px">${_tr('Btrfs y Snapper están listos, pero falta permitir que tu usuario lea los puntos de restauración.')}</span>
-            <button class="btn btn-primary btn-sm" id="snap-enable">${_tr('Habilitar acceso')}</button>
-        </div>`;
-    }
-
-    // Cabecera de puntos de restauración con botón de crear (si hay acceso)
-    if(support.supported && !needsAccess){
-        h+=`<div class="section-header-row"><p class="section-header" style="margin:0">${_tr('Puntos de restauración')}</p>
-            <button class="refresh-btn" id="snap-create">+ ${_tr('Crear ahora')}</button></div>`;
-    }else{
-        h+=renderSection('Puntos de restauración');
-    }
-    if(needsAccess){
-        h+=renderCard([`<div class="detail-item"><span class="ds">${_tr('Habilita el acceso para ver tus puntos de restauración.')}</span></div>`]);
-    }else if(!snaps.length){
-        h+=renderCard([`<div class="detail-item"><span class="ds">${_tr('No hay capturas todavía.')}</span></div>`]);
-    }else{
-        h+=renderCard(snaps.map(s=>`<div class="detail-item detail-item-row">
-            <div class="detail-texts"><span class="dt">#${esc(s.number)} · ${esc(s.description||_tr('Captura'))}</span><span class="ds">${esc(s.date)}</span></div>
-            <button class="upd-recheck" data-rollback="${esc(s.number)}">${_tr('Revertir')}</button>
-        </div>`));
-    }
-    c.innerHTML=h;
-
-    document.getElementById('snap-enable')?.addEventListener('click',async()=>{
-        const pwd=await promptUpdatePassword('BookOS'); if(!pwd)return;
-        const r=JSON.parse(await tauriInvoke('enable_snapshot_access',{password:pwd}).catch(()=>({ok:false})));
-        if(r.ok){toast(_tr('Acceso habilitado'),'✅');renderSnapshots(c);}
-        else toast(_tr('Error')+': '+(r.error||''),'❌');
-    });
-    document.getElementById('snap-create')?.addEventListener('click',async()=>{
-        toast(_tr('Creando punto de restauración…'),'⏳');
-        const r=JSON.parse(await tauriInvoke('create_snapshot',{description:'Punto manual desde Ajustes'}).catch(()=>({ok:false,error:'error'})));
-        if(r.ok){toast(_tr('Punto de restauración creado'),'✅');renderSnapshots(c);}
-        else if(r.error==='permission'){toast(_tr('Habilita el acceso primero'),'ℹ');renderSnapshots(c);}
-        else toast(_tr('Error al crear el punto'),'❌');
-    });
-
-    c.querySelectorAll('[data-snappol]').forEach(el=>el.addEventListener('click',()=>{
-        setSetting('SnapshotPolicy',el.dataset.snappol);
-        renderSnapshots(c);
-        toast(_tr('Política de capturas actualizada'),'✓');
-    }));
-    c.querySelectorAll('[data-rollback]').forEach(btn=>btn.addEventListener('click',()=>{
-        const num=btn.dataset.rollback;
-        showDialog(_tr('Revertir el sistema'),_tr('Se restaurará la captura')+' #'+num+'. '+_tr('Necesitarás reiniciar para aplicarla. ¿Continuar?'),{confirmText:_tr('Revertir'),confirmClass:'danger',onConfirm:async()=>{
-            const pwd=await promptUpdatePassword('BookOS'); if(!pwd)return;
-            const r=JSON.parse(await tauriInvoke('rollback_bookos_snapshot',{password:pwd,number:num}).catch(()=>({ok:false})));
-            toast(r.ok?_tr('Revertido — reinicia para aplicar'):(_tr('Error')+': '+(r.error||'')),r.ok?'✅':'❌');
-        }});
-    }));
-}
+export{renderSnapshots}from'./pages/recuperacion.js';
 
 export async function renderActualizacion(c){
     c.innerHTML=renderHeader(t('hdr_updates'))+
@@ -1615,16 +1534,13 @@ async function promptAuth(opts={}){
         d.className='sudo-modal-overlay';
         const fpHint=fpAvail
             ? `<div class="upd-auth-fp" id="upd-auth-fp">
-                <div class="upd-auth-fp-icon" id="upd-auth-fp-icon">
-                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2 12C2 6.5 6.5 2 12 2s10 4.5 10 10"/>
-                        <path d="M5 19.5C3.7 17.7 3 15.4 3 13"/>
-                        <path d="M21 13c0 4-1 6-2 8"/>
-                        <path d="M8 19c-1-1-2-3-2-6 0-3.3 2.7-6 6-6s6 2.7 6 6c0 4-1 6-2 8"/>
-                        <path d="M11 21c-1-2-1-4-1-7 0-1.1.9-2 2-2s2 .9 2 2c0 3 0 5-1 7"/>
-                    </svg>
+                <div class="upd-auth-fp-icon wait" id="upd-auth-fp-icon" role="img" aria-label="${_tr('Huella')}">
+                    <span class="fp-halo"></span>
+                    ${ico('fingerprint',{size:28,sw:1.75,cls:'fp-base'})}
+                    ${ico('fingerprint',{size:28,sw:1.75,cls:'fp-dibuja'}).replace(/<path /g,'<path pathLength="1" ')}
+                    <span class="fp-badge">${ico('check',{size:12,sw:3})}</span>
                 </div>
-                <span class="upd-auth-fp-text" id="upd-auth-fp-text">O toca el sensor de huella</span>
+                <span class="upd-auth-fp-text" id="upd-auth-fp-text" aria-live="polite">O toca el sensor de huella</span>
               </div>`
             : '';
         d.innerHTML=`
@@ -1697,26 +1613,35 @@ async function promptAuth(opts={}){
             const fpText=document.getElementById('upd-auth-fp-text');
             const setFpState=(state,msg)=>{
                 if(!fpIcon)return;
-                fpIcon.classList.remove('scanning','success','error');
+                fpIcon.classList.remove('wait','ok','fail','off');
                 if(state)fpIcon.classList.add(state);
                 if(fpText&&msg)fpText.textContent=msg;
             };
+            // Tres intentos y se cede a la contraseña: reintentar sin fin dejaba el
+            // sensor ocupado y el aviso de error parpadeando mientras se teclea.
+            let fallos=0;
+            const cedeAContrasena=()=>{
+                setFpState('off','Huella no reconocida: usa tu contraseña');
+                document.getElementById('upd-pwd')?.focus();
+            };
             const startListen=async()=>{
                 if(resolved)return;
-                setFpState('scanning','Toca el sensor…');
+                setFpState('wait','Toca el sensor…');
                 try{
                     const r=JSON.parse(await tauriInvoke('verify_fingerprint'));
                     if(resolved)return;
                     if(r.ok){
-                        setFpState('success','Huella reconocida');
-                        setTimeout(()=>finish({ok:true,method:'fingerprint'}),400);
+                        setFpState('ok','Huella reconocida');
+                        // La animación de éxito dura ~400 ms: cerrar antes la cortaría.
+                        setTimeout(()=>finish({ok:true,method:'fingerprint',password:HUELLA_TOKEN}),600);
                     } else {
-                        setFpState('error','Huella no reconocida — reintentando');
+                        if(++fallos>=3){cedeAContrasena();return;}
+                        setFpState('fail',`Huella no reconocida · intento ${fallos} de 3`);
                         setTimeout(startListen,1200);
                     }
                 }catch(e){
                     if(resolved)return;
-                    setFpState('error','Sensor no disponible');
+                    setFpState('off','Sensor no disponible: usa tu contraseña');
                 }
             };
             startListen();
@@ -1735,7 +1660,7 @@ async function promptUpdatePassword(distro){
         description:`<strong>${esc(distro||'BookOS')}</strong> ${_tr('quiere realizar cambios en el sistema. Introduce tu contraseña para autorizar la acción.')}`,
         verifyPassword:false,  // legacy callers verify themselves via sudo -S
     });
-    return r&&r.method==='password'?r.password:null;
+    return r?r.password:null;
 }
 
 // ── Channel picker dialog (3-dot menu on Updates page) ──────────────────
@@ -2066,64 +1991,7 @@ function _startUpdatePolling(c,bar,text,progressWrap,sysInfo){
 // ════════════════════════════════════════════════════════════════════════
 // ── Acerca ──────────────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════
-export async function renderAcerca(c){
-    c.innerHTML=renderHeader(t('hdr_about'))+renderSkeleton(4);
-    let i={hostname:'--',kernel:'--',distro:'--',cpu:'--',ram:'--',gpu:'--',desktop:'--',model:'--'};
-    try{i=JSON.parse(await tauriInvoke('get_system_info'));}catch(e){}
-
-    // Samsung-style: device image + name + rename + info sections
-    let h=renderHeader(t('hdr_about'));
-
-    h+=`<div class="about-hero">
-        <div class="about-device-img-wrap">
-            <img src="./assets/generic_book2.svg" class="about-device-img" alt="Device">
-        </div>
-        <div class="about-hero-name" id="about-hostname-display">${esc(i.hostname)}</div>
-        ${i.model&&i.model!=='--'?`<div class="about-hero-model">${esc(i.model)}</div>`:''}
-        <button class="about-rename-btn" id="btn-rename-device">Cambiar nombre</button>
-        <div class="about-rename-row" id="about-rename-row" style="display:none">
-            <input type="text" class="about-rename-input" id="about-rename-input" value="${esc(i.hostname)}" placeholder="Nombre del equipo">
-            <button class="btn btn-primary btn-sm" id="about-rename-ok">${_tr("Guardar")}</button>
-            <button class="btn btn-secondary btn-sm" id="about-rename-cancel">Cancelar</button>
-        </div>
-    </div>`;
-
-    // Info rows (Samsung About phone style)
-    h+=renderSection(t('sec_software'));
-    h+=renderCard([
-        renderInfoItem('Sistema operativo','BookOS · '+esc(i.distro)),
-        renderInfoItem('Entorno de escritorio','BookOS'),
-        renderInfoItem('Kernel de Linux',esc(i.kernel)),
-    ]);
-
-    h+=renderSection(t('sec_hardware'));
-    h+=renderCard([
-        renderInfoItem('Modelo',esc(i.model)),
-        renderInfoItem('Procesador',esc(i.cpu)),
-        renderInfoItem('Memoria RAM',esc(i.ram)),
-        renderInfoItem('Tarjeta gráfica',esc(i.gpu)),
-    ]);
-
-
-    c.innerHTML=h;
-
-    // Rename device
-    document.getElementById('btn-rename-device')?.addEventListener('click',()=>{
-        document.getElementById('about-rename-row').style.display='flex';
-        document.getElementById('about-rename-input')?.focus();
-    });
-    document.getElementById('about-rename-cancel')?.addEventListener('click',()=>{
-        document.getElementById('about-rename-row').style.display='none';
-    });
-    document.getElementById('about-rename-ok')?.addEventListener('click',async()=>{
-        const val=document.getElementById('about-rename-input')?.value?.trim();
-        if(!val)return;
-        try{await tauriInvoke('set_hostname',{name:val});}catch(e){}
-        document.getElementById('about-hostname-display').textContent=val;
-        document.getElementById('about-rename-row').style.display='none';
-        toast('Nombre del equipo actualizado');
-    });
-}
+export{renderAcerca}from'./pages/acerca.js';
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Administración General ─────────────────────────────────────────────
@@ -2216,22 +2084,47 @@ export async function renderGeneral(c){
         const btn=document.getElementById(btnId);
         btn?.addEventListener('click',()=>popoverSelect(btn.closest('.detail-item'),{title,options,current,onSelect}));
     };
+    let curLocale=loc.locale;
+    // Una sola ruta para cambiar el idioma del sistema: la usan el menú de
+    // abajo y el idioma de BookOS, que lo arrastra. `false` si se cancela la
+    // contraseña.
+    const cambiarLocale=async v=>{
+        if(v===curLocale)return true;
+        if(!await promptSudo('cambiar el idioma del sistema','localectl',['set-locale',`LANG=${v}`]))return false;
+        curLocale=v;
+        document.querySelector('#pick-lang span').innerHTML=getLangName(v);
+        return true;
+    };
+    // El idioma del sistema que le toca a un idioma de BookOS, o `null` si no
+    // hay que tocar nada: «Automático» no elige, y un es_MX ya es español.
+    const localeDe=app=>{
+        if(app!=='es'&&app!=='en')return null;
+        if(curLocale.startsWith(app+'_'))return null;
+        const preferido=app==='es'?'es_ES.UTF-8':'en_US.UTF-8';
+        return locales.includes(preferido)?preferido:(locales.find(l=>l.startsWith(app+'_'))||null);
+    };
     menu('pick-applang',t('label_app_lang'),_appLangOpts.map(([val,label])=>({val,label:esc(label)})),_curAppLang,async v=>{
         try{
             await tauriInvoke('set_bookos_setting',{key:'AppLanguage',value:v});
         }catch(e){toast(String(e),'❌');return;}
         if(v==='auto')localStorage.removeItem('bookos_lang');else localStorage.setItem('bookos_lang',v);
+        // El del sistema va detrás. Cancelar la contraseña no deshace el de
+        // BookOS: son dos ajustes y solo el segundo pide permiso.
+        const destino=localeDe(v);
+        if(destino){
+            try{await cambiarLocale(destino);}catch(e){toast(String(e),'❌');}
+        }
         toast(t('tst_app_lang_changed'),'🌐');
         // Recargar para que todas las páginas salgan en el idioma nuevo.
         setTimeout(()=>location.reload(),400);
     });
-    let curLocale=loc.locale;
-    menu('pick-lang',t('label_system_lang'),[...locales].sort((x,y)=>prettyLocale(x).localeCompare(prettyLocale(y))).map(l=>({val:l,label:getLangName(l)})),curLocale,async v=>{
+    // Los que Intl sabe nombrar, primero: el resto salen con su código
+    // (`agr_PE.UTF-8`) y no deben ir delante de «Español».
+    const nombrado=l=>prettyLocale(l)!==l;
+    menu('pick-lang',t('label_system_lang'),[...locales].sort((x,y)=>nombrado(y)-nombrado(x)||prettyLocale(x).localeCompare(prettyLocale(y))).map(l=>({val:l,label:getLangName(l)})),curLocale,async v=>{
         if(v===curLocale)return;
         try{
-            if(!await promptSudo('cambiar el idioma del sistema','localectl',['set-locale',`LANG=${v}`]))return;
-            curLocale=v;
-            document.querySelector('#pick-lang span').innerHTML=getLangName(v);
+            if(!await cambiarLocale(v))return;
             toast(t('tst_lang_changed'));
         }catch(e){toast(String(e),'❌');}
     });
@@ -2474,7 +2367,6 @@ export async function renderCuentas(c){
         if(v===null||v===''||v===u.hostname)return;
         const ok=await promptSudo('cambiar el nombre del equipo','hostnamectl',['set-hostname',v]);
         if(ok){
-            tauriInvoke('set_hostname',{name:v}).catch(()=>{});
             u.hostname=v;
             const ds=document.getElementById('acc-hn-cur');if(ds)ds.textContent=v;
             toast('Hostname guardado');
@@ -2491,7 +2383,7 @@ export async function renderCuentas(c){
             confirmLabel: enable?'Activar':'Desactivar',
             allowFingerprint: true,
         });
-        if(!auth || auth.method==='fingerprint' || !auth.password){
+        if(!auth || !auth.password){
             // Roll back UI
             const tg=document.querySelector('[data-toggle="autologin"]');
             if(enable){tg?.classList.remove('active');tg?.setAttribute('aria-checked','false');}
@@ -2520,10 +2412,7 @@ export async function renderCuentas(c){
                         description:`Introduce tu contraseña para borrar la cuenta <strong>${esc(target)}</strong>.`,
                         confirmLabel:'Eliminar',
                     });
-                    if(!auth || !auth.password){
-                        if(auth?.method==='fingerprint')toast('Esta acción requiere contraseña','ℹ');
-                        return;
-                    }
+                    if(!auth || !auth.password)return;
                     const r=JSON.parse(await tauriInvoke('delete_user',{
                         username:target, sudoPassword:auth.password, removeHome:true
                     }));
@@ -2608,10 +2497,7 @@ export async function renderCuentas(c){
                 description:`Introduce tu contraseña de administrador para crear la cuenta <strong>${esc(username)}</strong>.`,
                 confirmLabel:'Crear',
             });
-            if(!auth || !auth.password){
-                if(auth?.method==='fingerprint')toast('Esta acción requiere contraseña','ℹ');
-                return;
-            }
+            if(!auth || !auth.password)return;
             const r=JSON.parse(await tauriInvoke('create_user',{
                 username, fullName:fullname, password:pwd, isAdmin:admin,
                 avatarPath:avatarPath||null, sudoPassword:auth.password
@@ -2643,8 +2529,7 @@ export async function renderHuella(c){
         tauriInvoke('get_pin').then(JSON.parse).then(r=>r.pin).catch(()=>false),
     ]);
     // fprintd solo deja registrar o borrar a root (ver `fprintd_root` en main.rs).
-    // La huella no sirve aquí: no da una contraseña que pasarle a sudo.
-    const pedirClave=desc=>promptAuth({title:'Se requiere autorización',description:_tr(desc),confirmLabel:'Autorizar',allowFingerprint:false}).then(r=>r?.password);
+    const pedirClave=desc=>promptAuth({title:'Se requiere autorización',description:_tr(desc),confirmLabel:'Autorizar'}).then(r=>r?.password);
     // El orden de DEDOS en main.rs: el siguiente libre es el que se registra.
     const libre=Object.keys(NOMBRES_DEDO).find(f=>!fp.fingers.includes(f));
     const dedo=f=>`<button type="button" class="fp-dedo" data-dedo="${f}" title="${esc(_tr('Borrar'))}"><i>${HUELLA_SVG}</i><span>${esc(_tr(NOMBRES_DEDO[f]))}</span></button>`;
@@ -2798,42 +2683,8 @@ function dialogoContrasena(username){
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// ── Mantenimiento ──────────────────────────────────────────────────────
-// ════════════════════════════════════════════════════════════════════════
-export async function renderMantenimiento(c){
-    c.innerHTML=renderHeader(t('hdr_maintenance'))+renderSection(t('sec_cleanup'))+renderCard([
-        renderRowItem('Limpiar Flatpak','Elimina aplicaciones sin uso',`<button class="btn btn-secondary btn-sm" id="m-flat">Limpiar</button>`),
-        renderRowItem('Limpiar caché de paquetes','Limpia archivos de Paru/Pacman',`<button class="btn btn-secondary btn-sm" id="m-pkg">Limpiar</button>`),
-        renderRowItem('Miniaturas temporales','Borra caché de thumbnails',`<button class="btn btn-secondary btn-sm" id="m-cache">Borrar</button>`)
-    ])+renderSection(t('sec_bookos_management'))+renderCard([
-        renderRowItem('Exportar a JSON','Exportar configuración de BookOS',`<button class="btn btn-secondary btn-sm" id="m-exp">Exportar</button>`),
-        renderRowItem('Importar JSON','Importar configuración (requiere elegir archivo)',`<button class="btn btn-secondary btn-sm" id="m-imp">Importar</button>`)
-    ]);
-    const run=(id,target)=>{
-        const b=document.getElementById(id);if(!b)return;
-        b.onclick=async()=>{
-            const origText=b.textContent;
-            b.textContent='…';b.disabled=true;
-            try{await tauriInvoke('run_maintenance',{target});b.innerHTML=ico('check',{size:15});toast('Limpieza completada','🧹');}
-            catch(e){b.textContent='Error';toast('Error en limpieza','❌');}
-            setTimeout(()=>{b.textContent=origText;b.disabled=false;},2000);
-        };
-    };
-    run('m-flat','flatpak');run('m-pkg','packages');run('m-cache','cache');
-    
-    document.getElementById('m-exp')?.addEventListener('click', async()=>{
-        try {
-            const dest = await elegirRuta('save',{defaultPath:'bookos_settings.json', filters:[{name:'JSON',extensions:['json']}]});
-            if(dest) { await tauriInvoke('export_settings', {dest}); toast('Ajustes exportados a '+dest); }
-        } catch(e){ toast('No se pudieron exportar los ajustes','❌'); }
-    });
-    document.getElementById('m-imp')?.addEventListener('click', async()=>{
-        try {
-            const src = await elegirRuta('open',{filters:[{name:'JSON',extensions:['json']}]});
-            if(src) { await tauriInvoke('import_settings', {src}); toast('Ajustes importados'); setTimeout(()=>location.reload(), 1500); }
-        } catch(e){ toast('No se pudieron importar los ajustes','❌'); }
-    });
-}
+export{renderMantenimiento}from'./pages/mantenimiento.js';
+export{renderAsistente}from'./pages/asistente.js';
 
 // ════════════════════════════════════════════════════════════════════════
 // ── Fondo de Pantalla (NEW) ────────────────────────────────────────────
@@ -2850,12 +2701,16 @@ const _ICONO_VIDEO=`<svg viewBox="0 0 24 24" width="11" height="11" fill="curren
 // Se ven los primeros de «Tus fondos»; el resto con «Mostrar todos». Las
 // carpetas de imágenes pueden tener cientos y cada tarjeta es una miniatura.
 const _FONDOS_VISIBLES=11;
+const _ENCAJES=[['rellenar','Rellenar'],['ajustar','Ajustar'],['ancho','A lo ancho'],['estirar','Estirar'],['centrar','Normal']];
 export async function renderFondos(c){
     const pageEpoch=window._navEpoch;
     c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+renderSkeleton(2);
-    const [current,wallpapers]=await Promise.all([
+    const [current,wallpapers,encajeGuardado]=await Promise.all([
         tauriInvoke('get_current_wallpaper').then(r=>JSON.parse(r).path||'').catch(()=>''),
         tauriInvoke('get_wallpapers').then(JSON.parse).catch(()=>null),
+        // Sin escritorio BookOS, o con uno anterior que no conoce la clave, no
+        // hay encaje que elegir y el control no se enseña.
+        tauriInvoke('bookos_get_config').then(r=>JSON.parse(r).fondo_encaje||'').catch(()=>''),
     ]);
     if(window._navEpoch!==pageEpoch)return;
     if(!wallpapers){
@@ -2885,12 +2740,16 @@ export async function renderFondos(c){
     c.innerHTML=renderHeader(t('hdr_wallpaper_style'))+`<div class="fnd-cab">
         <div class="wp-desktop-screen fnd-vista" id="wp-screen" aria-hidden="true">
             <img data-preview-path="${esc(current)}" class="wp-desktop-bg" id="wp-screen-img" alt="" decoding="async" onerror="this.style.opacity='0'">
-            <span class="fnd-panel"></span><span class="fnd-dock"><i></i><i></i><i></i><i></i><i></i></span>
         </div>
-        <div class="theme-block fnd-info">
-            <span class="fnd-nombre" id="fnd-nombre">${esc(nombreFondo(current))}</span>
-            <span class="ds" id="fnd-tipo">${_tr(tipo(wallpapers.find(w=>_mismoFondo(w.path,current))))}</span>
-            <button type="button" class="btn btn-secondary fnd-anadir" data-wp-add>${SVGI.plus}<span>${_tr('Añadir fondo…')}</span></button>
+        <div class="fnd-info">
+            <div class="theme-block fnd-ficha">
+                <div class="fnd-ficha-cab">
+                    <span class="fnd-nombre" id="fnd-nombre">${esc(nombreFondo(current))}</span>
+                    <span class="ds" id="fnd-tipo">${_tr(tipo(wallpapers.find(w=>_mismoFondo(w.path,current))))}</span>
+                </div>
+                ${encajeGuardado?renderRowItem('Encaje en la pantalla','',`<button type="button" class="bk-select" id="fnd-encaje-sel" aria-haspopup="listbox"><span>${esc(_tr(_ENCAJES.find(([v])=>v===encajeGuardado)?.[1]||'Rellenar'))}</span></button>`):''}
+                <button type="button" class="btn btn-secondary fnd-anadir" data-wp-add>${SVGI.plus}<span>${_tr('Añadir fondo…')}</span></button>
+            </div>
         </div>
     </div>
     <div id="wp-grid">
@@ -2920,6 +2779,48 @@ export async function renderFondos(c){
     const updatePreview=setupWallpaperPreviews(c,tauriInvoke,getAssetUrl);
     const grid=c.querySelector('#wp-grid');
 
+    // La maqueta imita al compositor con CSS. «Normal» necesita saber cuánto
+    // mide la imagen de verdad frente a la pantalla: la previa viene reducida.
+    const vista=c.querySelector('#wp-screen');
+    let encaje=encajeGuardado||'rellenar';
+    const esDeBookos=path=>wallpapers.find(w=>_mismoFondo(w.path,path))?.origen==='bookos';
+    // Los de BookOS no se ajustan: sin control, no habría forma de salir de un
+    // encaje puesto cuando el ajuste aún era común a todos los fondos.
+    if(encajeGuardado&&encaje!=='rellenar'&&esDeBookos(current)){
+        try{await tauriInvoke('bookos_apply_config',{config:{fondo_encaje:'rellenar'}});encaje='rellenar';}
+        catch(err){toast('Error al aplicar fondo','❌');}
+        if(window._navEpoch!==pageEpoch)return;
+    }
+    const pintarEncaje=async path=>{
+        const img=vista.querySelector('#wp-screen-img');
+        vista.dataset.encaje=encaje;
+        img.style.removeProperty('--fnd-w');
+        if(encaje!=='centrar'||!path)return;
+        const tam=await tauriInvoke('wallpaper_size',{path}).catch(()=>null);
+        // Sin medida (un vídeo sin delegado) se queda al ancho de la maqueta.
+        if(tam&&img.isConnected)img.style.setProperty('--fnd-w',`${tam[0]/(screen.width*devicePixelRatio)*100}%`);
+    };
+    pintarEncaje(current);
+    const selEncaje=c.querySelector('#fnd-encaje-sel');
+    const textoEncaje=()=>{if(selEncaje)selEncaje.querySelector('span').textContent=_tr(_ENCAJES.find(([v])=>v===encaje)?.[1]||'Rellenar');};
+    const mostrarEncaje=path=>{if(selEncaje)selEncaje.closest('.detail-item').style.display=esDeBookos(path)?'none':'';};
+    textoEncaje();
+    mostrarEncaje(current);
+    selEncaje?.addEventListener('click',()=>popoverSelect(selEncaje.closest('.detail-item'),{
+        title:_tr('Encaje en la pantalla'),
+        current:encaje,
+        options:_ENCAJES.map(([val,label])=>({val,label:_tr(label)})),
+        onSelect:async nuevo=>{
+            if(nuevo===encaje)return;
+            const path=grid.querySelector('.fnd-tarjeta.active')?.dataset.path||current;
+            try{await tauriInvoke('set_wallpaper_encaje',{path,encaje:nuevo});}
+            catch(err){toast('Error al aplicar fondo','❌');return;}
+            encaje=nuevo;
+            textoEncaje();
+            pintarEncaje(path);
+        },
+    }));
+
     // Añadir copia a ~/.local/share/wallpapers y vuelve a pintar la página.
     const anadir=async()=>{
         try{
@@ -2937,7 +2838,7 @@ export async function renderFondos(c){
     const aplicar=async card=>{
         if(aplicando||card.classList.contains('active'))return;
         aplicando=true;
-        try{parseServiceResult(await tauriInvoke('set_wallpaper',{path:card.dataset.path}));}
+        try{encaje=parseServiceResult(await tauriInvoke('set_wallpaper',{path:card.dataset.path})).encaje;}
         catch(e){toast('Error al aplicar fondo','❌');return;}
         finally{aplicando=false;}
         if(!card.isConnected)return;
@@ -2947,6 +2848,9 @@ export async function renderFondos(c){
         c.querySelector('#fnd-nombre').textContent=nombreFondo(card.dataset.path);
         c.querySelector('#fnd-tipo').textContent=_tr(tipo(w));
         updatePreview(document.getElementById('wp-screen-img'),card.dataset.path);
+        textoEncaje();
+        mostrarEncaje(card.dataset.path);
+        pintarEncaje(card.dataset.path);
         c.querySelector('#dyn-body')?.dispatchEvent(new CustomEvent('wallpaper-changed',{detail:{path:card.dataset.path}}));
         toast('Fondo de pantalla aplicado','🖼️');
     };
@@ -3078,6 +2982,7 @@ async function setupDynamicColor(current){
 
     let seeds=[];                       // colores sacados del fondo
     let tab='wall';
+    let pagina=0;                       // página de tiras que se está viendo (4 por página)
     let sel={seed:'',style:'vibrant'};  // elección en curso (aún sin aplicar)
     let applied={seed:'',style:''};     // lo que está puesto de verdad
     // La hoja que está puesta, tal cual está en disco. No se recalcula desde
@@ -3106,7 +3011,49 @@ async function setupDynamicColor(current){
     const repaint=async()=>{
         const list=colors();
         const pals=await Promise.all(list.map(s=>preview(s,sel.style)));
-        stripsEl.innerHTML=list.map((s,i)=>pals[i]?_dynStrip(pals[i],s,s===sel.seed):'').join('');
+        // Cuatro por página, repartidas a todo el ancho: la fila del fondo (4 semillas)
+        // cabe entera y los 8 básicos son dos páginas con su paginador.
+        const paginas=[];
+        for(let i=0;i<list.length;i+=4)paginas.push(list.slice(i,i+4).map((s,j)=>pals[i+j]?_dynStrip(pals[i+j],s,s===sel.seed):'').join(''));
+        stripsEl.innerHTML=`<div class="dyn-pages"><div class="dyn-track">${paginas.map(h=>`<div class="dyn-page">${h}</div>`).join('')}</div></div>`
+            +(paginas.length>1?`<div class="dyn-dots" role="tablist">${paginas.map((_,i)=>`<button type="button" class="dyn-dot${i===pagina?' on':''}" data-pagina="${i}" aria-label="${_tr('Página')} ${i+1}"></button>`).join('')}</div>`:'');
+        const pager=stripsEl.querySelector('.dyn-pages'),pistas=stripsEl.querySelector('.dyn-track');
+        // Cambio de página, no scroll continuo: la pista se desplaza de una página entera a la otra.
+        const ir=n=>{
+            pagina=Math.max(0,Math.min(paginas.length-1,n));
+            pistas.style.transform=`translateX(${-pagina*100}%)`;
+            stripsEl.querySelectorAll('.dyn-dot').forEach((d,i)=>d.classList.toggle('on',i===pagina));
+        };
+        pistas.style.transition='none';ir(pagina);pistas.getBoundingClientRect();pistas.style.transition='';
+        stripsEl.querySelectorAll('.dyn-dot').forEach(d=>d.addEventListener('click',()=>ir(Number(d.dataset.pagina))));
+        if(paginas.length>1){
+            // Gesto: arrastrar más de 40 px cambia de página; el clic que sigue a un arrastre se descarta.
+            let x0=null,arrastre=false;
+            pager.addEventListener('pointerdown',e=>{x0=e.clientX;arrastre=false;});
+            pager.addEventListener('pointermove',e=>{if(x0!==null&&Math.abs(e.clientX-x0)>8)arrastre=true;});
+            pager.addEventListener('pointerup',e=>{
+                if(x0!==null&&Math.abs(e.clientX-x0)>40)ir(pagina+(e.clientX<x0?1:-1));
+                x0=null;
+            });
+            pager.addEventListener('pointercancel',()=>{x0=null;});
+            // Lo mismo con el gesto táctil de dos dedos de main.js.
+            pager.addEventListener('touchstart',e=>e.stopPropagation(),{passive:true});
+            pager.addEventListener('click',e=>{if(arrastre){e.stopPropagation();e.preventDefault();arrastre=false;}},true);
+            // Rueda o trackpad en horizontal: un gesto, una página.
+            let bloqueo=false,finRueda=0;
+            pager.addEventListener('wheel',e=>{
+                if(Math.abs(e.deltaX)<=Math.abs(e.deltaY))return;
+                // main.js escucha la rueda en `document` para el gesto de atrás/adelante entre
+                // páginas: sin cortarlo aquí, el mismo deslizamiento cambiaba de página de Ajustes.
+                e.preventDefault();e.stopPropagation();
+                // El bloqueo dura mientras sigan llegando eventos (la inercia del trackpad
+                // arrastra el gesto casi un segundo) y se suelta tras 150 ms de silencio.
+                clearTimeout(finRueda);finRueda=setTimeout(()=>{bloqueo=false;},150);
+                if(Math.abs(e.deltaX)<20||bloqueo)return;
+                bloqueo=true;
+                ir(pagina+(e.deltaX>0?1:-1));
+            },{passive:false});
+        }
         stripsEl.querySelectorAll('.dyn-strip').forEach(b=>b.addEventListener('click',()=>{
             sel.seed=b.dataset.seed;
             repaint();
@@ -3191,6 +3138,7 @@ async function setupDynamicColor(current){
         appliedCss=st.enabled?(st.css||''):'';
         sel={...applied};
         tab='wall';
+        pagina=0;
         document.querySelectorAll('.dyn-tab').forEach(b=>b.classList.toggle('on',b.dataset.tab==='wall'));
         if(st.enabled&&await loadSeeds())await repaint();
     });
@@ -3225,6 +3173,7 @@ async function setupDynamicColor(current){
         document.querySelectorAll('.dyn-tab').forEach(x=>x.classList.remove('on'));
         b.classList.add('on');
         tab=b.dataset.tab;
+        pagina=0;
         const list=colors();
         if(!list.includes(sel.seed))sel.seed=list[0]||'';
         repaint();
@@ -5263,6 +5212,9 @@ export async function renderPantallasBookOS(c,vista='inicio'){
             // no haría nada.
             if(cfg?.pantalla_tactil!==undefined)
                 filas.push(renderRowItem(_tr('Pantalla táctil'),'',renderToggle('bk-tactil',cfg.pantalla_tactil)));
+            // Sin táctil no sale nunca, así que tampoco se ofrece apagarlo.
+            if(cfg?.teclado_pantalla!==undefined&&cfg.pantalla_tactil!==false)
+                filas.push(renderRowItem(_tr('Teclado en pantalla'),_tr('Al tocar un campo de texto'),renderToggle('bk-teclado-pantalla',cfg.teclado_pantalla)));
             h+=renderCard(filas);
         }
         if(outs.length>1){
@@ -5327,6 +5279,10 @@ export async function renderPantallasBookOS(c,vista='inicio'){
     });
     setupToggle('bk-tactil',async a=>{
         try{await tauriInvoke('bookos_apply_config',{config:{pantalla_tactil:a}});}
+        catch(e){toast(String(e),'❌');rerender();}
+    });
+    setupToggle('bk-teclado-pantalla',async a=>{
+        try{await tauriInvoke('bookos_apply_config',{config:{teclado_pantalla:a}});}
         catch(e){toast(String(e),'❌');rerender();}
     });
     setupToggle('bk-en',async a=>{

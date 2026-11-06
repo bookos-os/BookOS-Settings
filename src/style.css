@@ -1,6 +1,6 @@
 /* BookOS Settings */
-:root{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#8e8e93;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
-:root.light-mode{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#8e8e93;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
+:root{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#6c6c70;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
+:root.light-mode{--bg:#f2f2f7;--card:#FFF;--tx:#000;--tx2:#6c6c70;--div:rgba(0,0,0,.08);--brd:rgba(0,0,0,.1);--hov:rgba(0,0,0,.04);--act:rgba(0,0,0,.08);--blue:#007aff;--sbg:rgba(0,0,0,.06);--toff:#e0e0e0;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--yellow:#ffcc00}
 :root.dark-mode{--bg:#000;--card:#1c1c1e;--tx:#fff;--tx2:#8e8e93;--div:rgba(255,255,255,.08);--brd:rgba(255,255,255,.06);--hov:rgba(255,255,255,.06);--act:rgba(255,255,255,.1);--blue:#0a84ff;--sbg:rgba(255,255,255,.08);--toff:#48484a;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--yellow:#ffd60a}
 @media(prefers-color-scheme:dark){:root:not(.light-mode){--bg:#000;--card:#1c1c1e;--tx:#fff;--tx2:#8e8e93;--div:rgba(255,255,255,.08);--brd:rgba(255,255,255,.06);--hov:rgba(255,255,255,.06);--act:rgba(255,255,255,.1);--blue:#0a84ff;--sbg:rgba(255,255,255,.08);--toff:#48484a;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--yellow:#ffd60a}}
 /* El tinte del acento sobre los grises. Estaba en `.main-container`, que es el
@@ -29,8 +29,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 .controls button svg{display:block}
 .controls button#close:hover{background:#ff3b30;color:#fff}
 /* Sidebar collapse state */
-.sidebar{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1),opacity .2s ease}
-.main-container.sidebar-collapsed .sidebar{width:0;padding-left:0;padding-right:0;opacity:0;pointer-events:none;overflow:hidden}
+/* El ancho no se anima: lo anima main.js con transform y clip-path (FLIP). */
+.main-container.sidebar-collapsed .sidebar{width:84px;padding:0 12px 32px}
+/* Compacta: solo los iconos. Quien los busca por nombre tiene el title y el
+   aria-label de cada fila (home.js); Ctrl+F vuelve a abrirla para buscar. */
+.sidebar-collapsed :is(.sidebar-header,.search-container,.no-results,.item-texts,.profile-left,.home-more-toggle){display:none}
+.sidebar-collapsed .item,.sidebar-collapsed .card-profile .item{justify-content:center;padding:0}
+.sidebar-collapsed .item::after{display:none}
+.sidebar-collapsed .home-more-card.is-collapsed .home-more-items{display:block}
+.sidebar-collapsed #sb{padding-top:6px}
+.sidebar-collapsed .card-profile .item{height:58px}
+.sidebar-collapsed :is(.profile-avatar,.profile-avatar-placeholder){width:40px;height:40px}
+.sidebar-collapsed .card-profile .home-buds-row{height:52px}
+.sidebar-collapsed .home-buds-row .item-icon{width:40px}
+.sidebar-collapsed .home-buds-pair i{width:16px;height:26px}
 .split-view{display:flex;flex:1;min-height:0}
 
 /* Home landing: keep the detail pane useful instead of leaving a blank
@@ -69,7 +81,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
    pintados sobre el título) y content-visibility recalcula cada fila al entrar
    en pantalla, cuando son ~20 filas de 58px que no cuesta nada tener pintadas.
    La vista de detalle nunca los tuvo y es la que va fluida. */
-.sidebar{width:384px;flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none}
+.sidebar{width:clamp(300px,30vw,420px);flex-shrink:0;padding:0 24px 32px;overflow-y:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;user-select:none;-webkit-user-select:none}
 .sidebar::-webkit-scrollbar{display:none}
 .sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:0 2px}
 .header-title{font-size:28px;font-weight:700;letter-spacing:-.4px}
@@ -85,7 +97,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Roboto,
 #sb,#sidebar-container{display:flex;flex-direction:column;gap:18px;align-items:center}
 
 /* Sidebar Cards */
-.card{background:var(--card);width:336px;max-width:336px;min-width:336px;padding:0;overflow:hidden;flex-shrink:0;border-radius:22px;display:flex;flex-direction:column}
+.card{background:var(--card);width:100%;min-width:0;padding:0;overflow:hidden;flex-shrink:0;border-radius:22px;display:flex;flex-direction:column}
 .card-profile{border-radius:20px}
 .item{display:flex;align-items:center;padding:0 16px;cursor:pointer;position:relative;transition:transform .1s;gap:12px;height:58px;flex-shrink:0}
 .item:active{transform:scale(0.98) translateZ(0)}
@@ -914,7 +926,7 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 .mode-radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--brd);transition:.15s}
 .mode-radio.on{border-color:var(--blue);background:var(--blue);box-shadow:inset 0 0 0 3px var(--card)}
 /* Paleta de colores (estilo Android): maquetas, tiras de color y fichas */
-.dyn-label{font-size:12px;font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.4px;margin:14px 2px 8px}
+.dyn-label{font-size:12px;font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.4px;margin:14px 2px 8px;padding:0 8px}
 .dyn-hint{font-size:13px;color:var(--tx2)}
 
 /* Maquetas — tres ventanas en miniatura con la paleta ELEGIDA */
@@ -956,18 +968,31 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
    puedan romperse. Cada tira es un pequeño mazo de fichas redondeadas
    apiladas (banda de arriba encima, tapando el borde de la de debajo), no
    barras planas pegadas. */
-.dyn-strips{display:flex;flex-wrap:wrap;gap:14px;padding:12px 2px 4px}
-.dyn-strip{position:relative;flex:0 0 132px;width:132px;display:flex;flex-direction:column;cursor:pointer;border-radius:18px;transition:transform .15s}
+.dyn-strips{padding:16px 0 4px}
+/* Cada página es una fila de cuatro columnas iguales; la pista salta de una página a otra
+   (no hay scroll continuo) y el tamaño de las tiras sale del ancho, no de un valor fijo. */
+.dyn-pages{overflow:hidden;touch-action:pan-y}
+.dyn-track{display:flex;transition:transform .3s cubic-bezier(.2,0,0,1)}
+@media(prefers-reduced-motion:reduce){.dyn-track{transition:none}}
+.dyn-page{flex:0 0 100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(10px,3%,28px);padding:8px 10px 4px}
+/* Sin borde ni fondo de botón: eran el aro blanco alrededor de cada tira. */
+.dyn-strip{position:relative;display:flex;flex-direction:column;cursor:pointer;border:0;background:none;padding:0;width:46%;max-width:104px;justify-self:center;min-width:0;transition:transform .15s cubic-bezier(.2,0,0,1)}
 .dyn-strip:hover{transform:translateY(-2px)}
-.dyn-strip i{display:block;height:50px;border-radius:18px;box-shadow:0 -3px 6px -3px rgba(0,0,0,.18)}
-.dyn-strip i:not(:first-child){margin-top:-16px}
-.dyn-strip i:nth-child(1){z-index:4}
-.dyn-strip i:nth-child(2){z-index:3}
-.dyn-strip i:nth-child(3){z-index:2}
-.dyn-strip i:nth-child(4){z-index:1}
-.dyn-strip.on{outline:2.5px solid var(--blue);outline-offset:3px}
-.dyn-strip-check{position:absolute;top:7px;right:7px;width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;opacity:0;transform:scale(.6);transition:.15s;box-shadow:0 1px 4px rgba(0,0,0,.35);z-index:5}
+.dyn-strip:focus-visible{outline:2px solid var(--blue);outline-offset:4px;border-radius:16px}
+/* La proporción y el solape van en % del ancho de la tira, para que escale entera. */
+.dyn-strip i{display:block;width:100%;aspect-ratio:1/.68;border-radius:19%/24%}
+.dyn-strip i:not(:first-child){margin-top:-32%}
+/* Cada banda tapa a la de arriba: la última queda al frente y la primera al fondo. */
+.dyn-strip i:nth-child(1){z-index:1}
+.dyn-strip i:nth-child(2){z-index:2}
+.dyn-strip i:nth-child(3){z-index:3}
+.dyn-strip i:nth-child(4){z-index:4}
+.dyn-strip.on{transform:scale(1.04)}
+.dyn-strip-check{position:absolute;top:10%;right:10%;width:20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;opacity:0;transform:scale(.6);transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.25);z-index:5}
 .dyn-strip.on .dyn-strip-check{opacity:1;transform:scale(1)}
+.dyn-dots{display:flex;justify-content:center;gap:6px;padding-top:14px}
+.dyn-dot{width:8px;height:8px;border:0;border-radius:4px;padding:0;background:var(--div);cursor:pointer;transition:width .2s cubic-bezier(.2,0,0,1),background .12s linear}
+.dyn-dot.on{width:22px;background:var(--blue)}
 
 /* Aplicar — a lo ancho, apagado mientras no haya nada nuevo que confirmar */
 .dyn-apply{width:100%;margin-top:18px;height:46px;border:0;border-radius:23px;background:var(--blue);color:#fff;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
@@ -976,11 +1001,11 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 /* Fichas de estilo: chips de color superpuestos sobre una tarjeta neutra,
    como los avatares apilados — de un vistazo se compara la gama de cada
    estilo sin que la ficha sea un bloque de color a lo bestia. */
-.dyn-styles{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;padding:2px}
+.dyn-styles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(10px,3%,28px);padding:2px 6px}
 .dyn-style{background:0;border:0;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px}
-.dyn-style-preview{width:100%;height:64px;border-radius:14px;background:var(--sbg);display:flex;align-items:center;justify-content:center;border:2px solid transparent;transition:.15s}
-.dyn-style-preview i{width:30px;height:30px;border-radius:50%;flex-shrink:0}
-.dyn-style-preview i:not(:first-child){margin-left:-11px}
+.dyn-style-preview{width:100%;height:64px;border-radius:18px;background:var(--sbg);display:flex;align-items:center;justify-content:center;border:2px solid transparent;transition:.15s}
+.dyn-style-preview i{width:26%;max-width:34px;aspect-ratio:1;border-radius:50%;flex-shrink:0}
+.dyn-style-preview i:not(:first-child){margin-left:-6%}
 .dyn-style.on .dyn-style-preview{border-color:var(--blue)}
 .dyn-style-label{font-size:12px;font-weight:500;color:var(--tx2)}
 .dyn-style.on .dyn-style-label{color:var(--blue)}
@@ -1093,16 +1118,24 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 /* La vista previa saca el alto de su ancho: estirada a la altura de la fila,
    aspect-ratio hacía lo contrario y en pantalla completa se quedaba en
    ~430 px de ancho (270 de alto de la tarjeta × 1,6) con un hueco al lado.
-   Su columna para en 520 px para no ocupar media pantalla a lo ancho. */
-.fnd-cab{display:grid;grid-template-columns:minmax(0,520px) minmax(260px,1fr);gap:16px;align-items:start}
-@media(max-width:640px){.fnd-cab{grid-template-columns:1fr}}
-.fnd-vista{width:100%;box-shadow:0 0 0 1px var(--brd),0 8px 24px rgba(0,0,0,.18)}
-.fnd-panel{position:absolute;top:0;left:0;right:0;height:7%;background:rgba(255,255,255,.18);backdrop-filter:blur(10px)}
-.fnd-dock{position:absolute;bottom:5%;left:50%;transform:translateX(-50%);display:flex;gap:5px;padding:5px 7px;border-radius:10px;background:rgba(255,255,255,.2);backdrop-filter:blur(10px)}
-.fnd-dock i{width:14px;height:14px;border-radius:4px;background:rgba(255,255,255,.75)}
-.fnd-info{margin:0;align-self:stretch;display:flex;flex-direction:column;justify-content:center;gap:4px}
+   Su columna para en 360 px, como en macOS, y la ficha se pega arriba a su lado. */
+/* Como en macOS: la vista previa a la izquierda con un ancho proporcional y la ficha ocupando el
+   resto, siempre en fila; una raya la separa de la galería. En una ventana estrecha ambas se
+   encogen a la vez en vez de apilarse. */
+.fnd-cab{display:flex;gap:20px;align-items:stretch;padding-bottom:20px;border-bottom:1px solid var(--div)}
+.fnd-vista{flex:0 0 clamp(200px,44%,560px);box-shadow:0 0 0 1px var(--brd),0 8px 24px rgba(0,0,0,.18)}
+.fnd-vista{background:#0d0d0f}
+.fnd-vista[data-encaje=ajustar] .wp-desktop-bg{object-fit:contain}
+.fnd-vista[data-encaje=estirar] .wp-desktop-bg{object-fit:fill}
+.fnd-vista[data-encaje=ancho] .wp-desktop-bg,.fnd-vista[data-encaje=centrar] .wp-desktop-bg{inset:auto;left:50%;top:50%;height:auto;transform:translate(-50%,-50%)}
+.fnd-vista[data-encaje=ancho] .wp-desktop-bg{width:100%}
+.fnd-vista[data-encaje=centrar] .wp-desktop-bg{width:var(--fnd-w,100%);max-width:none}
+.fnd-info{margin:0;flex:1 1 0;min-width:0;align-self:stretch;display:flex;flex-direction:column;gap:12px}
+/* Como en macOS: una ficha con el nombre y, debajo, las filas de ajuste; los botones quedan fuera. */
+.fnd-ficha{margin:0;flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:2px}
+.fnd-ficha-cab{display:flex;flex-direction:column;gap:2px;padding:14px 0 12px}
 .fnd-nombre{font-size:20px;font-weight:600;color:var(--tx);overflow-wrap:anywhere}
-.fnd-anadir{margin-top:14px;align-self:flex-start;display:inline-flex;align-items:center;gap:6px}
+.fnd-anadir{margin:12px 16px 16px auto;align-self:flex-end;display:inline-flex;align-items:center;gap:6px}
 .fnd-seccion{display:flex;justify-content:space-between;align-items:baseline;margin:24px 6px 10px;font-size:15px;font-weight:600;color:var(--tx)}
 .fnd-cuenta{font-size:13px;font-weight:500;color:var(--tx2)}
 .fnd-mas{border:0;background:0;padding:0;color:var(--tx2);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:color .15s}
@@ -1488,14 +1521,45 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 .upd-auth-input-bar.active{background:var(--blue);transform:scaleX(1)}
 .upd-auth-error{font-size:12px;color:var(--red,#ff3b30);margin:0;text-align:center}
 /* Fingerprint hint inside the auth modal */
-.upd-auth-fp{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 14px;background:var(--sbg);border-radius:12px;margin-top:6px;transition:.18s}
-.upd-auth-fp-icon{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--card);color:var(--tx2);transition:.18s;flex-shrink:0}
-.upd-auth-fp-icon.scanning{color:var(--blue);animation:fp-pulse 1.4s ease-in-out infinite}
-.upd-auth-fp-icon.success{color:var(--green,#34c759);background:color-mix(in srgb,var(--green,#34c759) 18%,var(--card));animation:none}
-.upd-auth-fp-icon.error{color:var(--red,#ff3b30);background:color-mix(in srgb,var(--red,#ff3b30) 18%,var(--card));animation:fp-shake-mini .3s ease}
-.upd-auth-fp-text{font-size:12px;color:var(--tx2);flex:1}
-@keyframes fp-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:.7}}
-@keyframes fp-shake-mini{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+.upd-auth-fp{display:flex;align-items:center;gap:14px;padding:12px 16px;background:var(--sbg);border-radius:16px;margin-top:10px;transition:background .2s}
+/* El anillo se dibuja con ::after para animarlo sin mover el icono. */
+.upd-auth-fp-icon{position:relative;width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--card);color:var(--blue);flex-shrink:0;transition:background .28s cubic-bezier(.2,0,0,1),color .12s linear}
+.upd-auth-fp-icon svg{position:absolute}
+/* Dos capas del mismo icono: la base, apagada, y la que se pinta encima. */
+.upd-auth-fp-icon .fp-base{opacity:.6;transition:opacity .12s linear,color .12s linear}
+.upd-auth-fp-icon .fp-dibuja path{stroke-dasharray:1;stroke-dashoffset:1}
+.fp-halo{position:absolute;inset:0;border-radius:50%;border:2px solid currentColor;opacity:0;pointer-events:none}
+/* Esperando: respira y un halo se abre despacio (seno, 2,4 s). */
+.upd-auth-fp-icon.wait .fp-base{animation:fp-respira 2.4s ease-in-out infinite}
+.upd-auth-fp-icon.wait .fp-halo{animation:fp-halo 2.4s ease-out infinite}
+@keyframes fp-respira{0%,100%{transform:scale(1);opacity:.65}50%{transform:scale(1.04);opacity:1}}
+@keyframes fp-halo{0%{transform:scale(1);opacity:.35}100%{transform:scale(1.5);opacity:0}}
+/* Reconocida: pop con rebote del 8 %, onda radial a los 60 ms e insignia con la marca a los 100 ms. */
+.upd-auth-fp-icon.ok{color:var(--green);background:color-mix(in srgb,var(--green) 18%,var(--card));animation:fp-pop 280ms cubic-bezier(.175,.885,.32,1.275)}
+.upd-auth-fp-icon.ok .fp-base{opacity:0}
+.upd-auth-fp-icon.ok .fp-dibuja path{stroke-dashoffset:0}
+.upd-auth-fp-icon.ok .fp-halo{animation:fp-onda 380ms 60ms cubic-bezier(.2,0,0,1) forwards}
+.fp-badge{position:absolute;right:-2px;bottom:-2px;width:20px;height:20px;border-radius:50%;background:var(--green);color:var(--card);display:flex;align-items:center;justify-content:center;transform:scale(0);box-shadow:0 0 0 2px var(--sbg)}
+.fp-badge svg{position:static}
+.fp-badge path{stroke-dasharray:1;stroke-dashoffset:1}
+.upd-auth-fp-icon.ok .fp-badge{animation:fp-badge 240ms 100ms cubic-bezier(.175,.885,.32,1.275) forwards}
+.upd-auth-fp-icon.ok .fp-badge path{animation:fp-traza 200ms 200ms cubic-bezier(.2,0,0,1) forwards}
+@keyframes fp-pop{0%{transform:scale(.94)}55%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes fp-onda{from{transform:scale(1);opacity:.7;border-width:3px}to{transform:scale(1.9);opacity:0;border-width:1px}}
+@keyframes fp-badge{from{transform:scale(0)}to{transform:scale(1)}}
+@keyframes fp-traza{to{stroke-dashoffset:0}}
+/* Falla: tres oscilaciones de ±10 px en 360 ms, sin rebote. */
+.upd-auth-fp-icon.fail{color:var(--red);background:color-mix(in srgb,var(--red) 16%,var(--card));animation:fp-tiembla 360ms ease-in-out}
+.upd-auth-fp-icon.fail .fp-base{opacity:0}
+.upd-auth-fp-icon.fail .fp-dibuja path{stroke-dashoffset:0}
+@keyframes fp-tiembla{0%,100%{transform:translateX(0)}17%{transform:translateX(-10px)}34%{transform:translateX(10px)}51%{transform:translateX(-8px)}68%{transform:translateX(8px)}85%{transform:translateX(-4px)}}
+/* Sensor cedido a la contraseña: el icono se atenúa. */
+.upd-auth-fp-icon.off{color:var(--tx2)}
+.upd-auth-fp-icon.off .fp-base{opacity:.5}
+.upd-auth-fp-text{font-size:14px;color:var(--tx2);flex:1;text-align:left;transition:color .12s linear}
+.upd-auth-fp:has(.ok) .upd-auth-fp-text{color:var(--green)}
+.upd-auth-fp:has(.fail) .upd-auth-fp-text{color:var(--tx)}
+@media(prefers-reduced-motion:reduce){.upd-auth-fp-icon,.upd-auth-fp-icon *{animation:none!important}.upd-auth-fp-icon.ok .fp-badge{transform:scale(1)}.upd-auth-fp-icon.ok .fp-badge path{stroke-dashoffset:0}}
 .upd-auth-btns{display:flex;gap:10px}
 .upd-auth-btn{flex:1;height:44px;border:0;border-radius:14px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;transition:.12s}
 .upd-auth-btn.cancel{background:var(--sbg);color:var(--tx)}
@@ -2021,7 +2085,7 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .dock-bar{--dock:50px;display:flex;gap:calc(var(--dock)*.18);padding:calc(var(--dock)*.16);margin-bottom:14px;border-radius:calc(var(--dock)*.5);background:color-mix(in srgb,var(--card) 70%,transparent);border:1px solid var(--brd)}
 .dock-bar i{width:var(--dock);height:var(--dock);border-radius:calc(var(--dock)*.28);box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .bk-seg{display:flex;padding:3px;gap:2px;border-radius:12px;background:var(--sbg)}
-.bk-seg-btn{min-width:38px;height:30px;border:0;border-radius:10px;background:0;color:var(--tx2);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,color .12s}
+.bk-seg-btn{min-width:38px;height:30px;padding:0 12px;border:0;border-radius:10px;background:0;color:var(--tx2);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,color .12s}
 .bk-seg-btn:hover{color:var(--tx)}
 .bk-seg-btn.active{background:var(--blue);color:#fff}
 .page-foot{margin:-4px 8px 16px;font-size:12px;line-height:1.5;color:var(--tx2)}
@@ -2320,3 +2384,175 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .dyn-strip-check svg{display:block}
 .back-btn svg{display:block}
 .search-clear svg{display:block}
+
+/* Widgets de la barra superior (Escritorio): una fila por widget con sus botones. */
+.pw-cab{padding-bottom:4px}
+.pw-cab-aparte{margin-top:6px}
+.pw-zona{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:54px;margin:6px 20px 8px;padding:10px;border:1.5px dashed var(--sbg);border-radius:14px;transition:border-color .12s,background .12s}
+.pw-zona.pw-sobre{border-color:var(--tx2);background:var(--sbg)}
+.pw-chip{height:34px;padding:0 14px;border:0;border-radius:10px;background:var(--sbg);color:var(--tx);font:inherit;font-size:13px;font-weight:600;cursor:grab;touch-action:none;user-select:none;white-space:nowrap}
+.pw-chip.pw-arrastrando{display:none}
+.pw-fantasma{position:fixed;left:0;top:0;z-index:9999;pointer-events:none;cursor:grabbing;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.pw-hueco{width:34px;height:34px;border-radius:10px;border:1.5px dashed var(--tx2);box-sizing:border-box}
+.pw-pista{display:none;color:var(--tx2);font-size:13px}
+.pw-zona:not(:has(.pw-chip:not(.pw-arrastrando))):not(:has(.pw-hueco)) .pw-pista{display:block}
+.pw-vista{height:96px;margin:6px 20px 8px;align-items:flex-start}
+.esc-panel.pw-zona-barra{justify-content:flex-end;gap:4px;height:auto!important;min-height:var(--alto);margin:0;padding:5px 20px;border:0;border-radius:0;flex-wrap:wrap;box-sizing:border-box}
+.pw-zona-barra .pw-chip{height:24px;padding:0 8px;font-size:11px;border-radius:8px;background:color-mix(in srgb,currentColor 16%,transparent);color:inherit}
+.pw-zona-barra .pw-hueco{width:24px;height:24px;border-radius:8px;border-color:currentColor;opacity:.6}
+.pw-zona-barra .pw-pista{color:inherit;opacity:.6;font-size:11px}
+.pw-zona-barra.pw-sobre{box-shadow:inset 0 0 0 1.5px currentColor}
+
+/* ── Mantenimiento ─────────────────────────────────────────────────────
+   Un solo elemento manda: el estado de arriba. Los medidores se reparten el
+   ancho para aprovechar la ventana de escritorio, y bajan a una columna solos. */
+.mt-hero{--mt-tono:var(--green);text-align:center;padding:30px 24px 28px;margin-bottom:12px;border-radius:var(--r-card);
+    background:radial-gradient(120% 90% at 50% 120%,color-mix(in srgb,var(--mt-tono) 20%,transparent),transparent 70%),var(--card)}
+.mt-hero[data-tono="aviso"]{--mt-tono:var(--orange)}
+.mt-hero[data-tono="critico"]{--mt-tono:var(--red)}
+.mt-estado{font-size:34px;font-weight:700;letter-spacing:-.5px;line-height:1.2;color:var(--mt-tono)}
+.mt-estado-texto{font-size:14px;color:var(--tx2);margin:6px auto 0;max-width:46ch}
+.mt-cta{margin-top:18px;min-width:180px;height:46px;padding:0 28px;border:0;border-radius:23px;background:var(--blue);color:var(--on-accent,#fff);
+    font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
+.mt-enlace{display:block;margin:12px auto 0;border:0;background:transparent;color:var(--tx);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.mt-enlace:hover{text-decoration:underline}
+.mt-cta:disabled{opacity:.35;cursor:default}
+.mt-cta:not(:disabled):hover{filter:brightness(1.08)}
+.mt-cta:focus-visible,.mt-enlace:focus-visible,.mt-medidor:focus-visible,.mt-ver-mas:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.mt-medidores{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:6px}
+.mt-medidor{display:flex;flex-direction:column;gap:10px;min-width:0;padding:16px 18px;border:0;border-radius:var(--r-card);background:var(--card);
+    color:var(--tx);font:inherit;text-align:left;cursor:pointer;transition:background .12s}
+.mt-medidor:hover{background:color-mix(in srgb,var(--tx) 4%,var(--card))}
+.mt-medidor-etiqueta{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--tx2)}
+.mt-medidor-fila{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--tx2)}
+.mt-medidor-fila strong{font-size:16px;font-weight:700;color:var(--tx)}
+.mt-barra{height:8px;border-radius:4px;overflow:hidden;background:var(--accent-container,var(--sbg))}
+.mt-barra-relleno{height:100%;border-radius:4px;background:var(--blue)}
+.mt-barra-relleno.aviso{background:var(--orange)}
+.mt-barra-relleno.critico{background:var(--red)}
+.mt-grande{padding:18px 20px;margin-bottom:6px;border-radius:var(--r-card);background:var(--card)}
+.mt-grande-fila{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;margin-bottom:10px}
+.mt-grande-num{font-size:34px;font-weight:700;letter-spacing:-.5px;line-height:1.2}
+.mt-grande-et{font-size:14px;color:var(--tx2)}
+.mt-grande-det{margin-left:auto;font-size:13px;color:var(--tx2)}
+.mt-grande .ds{display:block;margin-top:10px;font-size:12px;line-height:1.45}
+.mt-fila-der{display:flex;align-items:center;gap:12px;flex-shrink:0;margin-left:12px}
+.mt-tam{font-size:13px;color:var(--tx2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.mt-carpeta{gap:8px}
+.mt-carpeta-fila{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.mt-carpeta-fila .dt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mt-ver-mas{width:100%;min-height:48px;border:0;background:transparent;color:var(--blue);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.mt-ver-mas:hover{background:var(--hov)}
+.mt-ayuda{font-size:13px;line-height:1.45;color:var(--tx2);margin:0 8px 12px}
+.mt-selec{gap:12px;justify-content:flex-start;cursor:pointer}
+.mt-selec:hover{background:var(--hov)}
+.mt-selec input{appearance:none;-webkit-appearance:none;width:22px;height:22px;flex-shrink:0;border-radius:50%;border:2px solid var(--tx2);display:grid;place-items:center;cursor:pointer;transition:background .12s,border-color .12s}
+.mt-selec input:checked{background:var(--blue);border-color:var(--blue)}
+.mt-selec input:checked::after{content:"";width:5px;height:10px;margin-top:-2px;border:solid var(--on-accent,#fff);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.mt-selec input:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.mt-selec .detail-texts{flex:1;min-width:0}
+.mt-corta{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Pegado abajo: en una lista de 200 rutas, tener que bajar hasta el final para
+   actuar obligaría a perder de vista lo que se está marcando. El -32px es el
+   padding inferior de .detail-view: con 0 las filas asomaban por debajo. */
+.mt-pie{position:sticky;bottom:-32px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px;background:var(--bg);font-size:13px;color:var(--tx2)}
+.mt-pie .mt-cta{margin-top:0}
+.mt-ok{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--green)}
+.mt-mal{display:inline-flex;color:var(--orange)}
+.mt-dialogo-lista{list-style:none;margin-top:6px;text-align:left}
+.mt-dialogo-lista li{display:flex;justify-content:space-between;gap:16px;padding:4px 0}
+.mt-girando{color:var(--tx2);animation:mt-giro 1.1s linear infinite}
+@keyframes mt-giro{to{transform:rotate(360deg)}}
+
+/* ── Acerca del portátil ───────────────────────────────────────────────
+   Mismo panel tintado que Administración general: sigue a la paleta y al tema. */
+.ac-hero{display:flex;flex-direction:column;align-items:center;gap:6px;padding:24px 24px 22px;margin-bottom:12px;border-radius:25px;text-align:center;
+    background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 30%,var(--card)),color-mix(in srgb,var(--blue) 6%,var(--card)) 70%)}
+/* Marco y fondo oscuros sobre un panel oscuro: sin el filo claro el portátil se
+   confundía con el panel. */
+.ac-portatil{position:relative;height:220px;margin-bottom:12px}
+.ac-portatil img:first-child{filter:drop-shadow(0 0 1px color-mix(in srgb,var(--tx) 55%,transparent)) drop-shadow(0 10px 22px rgba(0,0,0,.35))}
+.ac-portatil img{display:block;height:100%}
+.ac-portatil .ac-fondo[hidden]{display:none}
+.ac-portatil .ac-fondo{position:absolute;object-fit:cover;border-radius:2px}
+/* El lápiz cuelga fuera del flujo: si contara, el nombre quedaría descentrado
+   respecto al portátil y los chips. */
+.ac-nombre{position:relative;max-width:calc(100% - 72px)}
+.ac-nombre .ac-icono{position:absolute;left:100%;top:50%;margin:-15px 0 0 6px}
+.ac-nombre[hidden],.ac-editor[hidden]{display:none}
+.ac-nombre h3{font-size:24px;font-weight:700;letter-spacing:-.3px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ac-icono{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border:0;border-radius:50%;background:transparent;color:var(--tx2);cursor:pointer;transition:background .12s}
+.ac-icono:hover{background:var(--hov);color:var(--tx)}
+.ac-icono:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.ac-editor{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;width:100%}
+.ac-editor input{flex:0 1 220px;min-width:0;height:34px;padding:0 12px;border:0;border-radius:10px;background:var(--card);color:var(--tx);font:inherit;font-size:14px;outline:0}
+.ac-editor input:focus{box-shadow:0 0 0 2px var(--blue)}
+.ac-editor .btn-primary{color:var(--on-accent,#fff)}
+.ac-modelo{font-size:14px;color:var(--tx2)}
+.ac-hero .gen-chips{margin-top:8px}
+.ac-baldosas{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:6px}
+.ac-baldosa{display:flex;flex-direction:column;gap:8px;min-width:0;padding:16px 18px;border-radius:var(--r-card);background:var(--card)}
+.ac-baldosa strong{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:15px;font-weight:700;line-height:1.3}
+.detail-item-row:has(>.ac-valor) .detail-texts{flex:0 0 auto}
+.ac-valor{flex:1;min-width:0;margin-left:16px;font-size:13px;color:var(--tx2);text-align:right;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+.ac-serie{display:flex;align-items:center;gap:4px;min-width:0}
+
+/* ── Recuperación ─ el mismo panel de Acerca, sin color de estado: aquí no hay urgencia. */
+.re-hero{padding:32px 24px 28px}
+.re-estado{color:var(--tx)}
+.re-hero .mt-cta{margin-top:12px}
+
+/* ── Asistente de voz ── */
+.as-panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:28px 24px 24px;text-align:center}
+.as-panel>*{width:100%;max-width:420px;box-sizing:border-box}
+.as-panel>.sudo-icon-wrap{width:56px;margin:0 auto}
+.as-ok{color:var(--green)}
+.as-titulo{margin:0;font-size:20px;font-weight:700;letter-spacing:-.2px;color:var(--tx)}
+.as-cuerpo{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.as-campo{display:flex;flex-direction:column;gap:4px;text-align:left;margin-top:6px}
+.as-vista-previa{display:flex;flex-direction:column;gap:6px;align-items:center}
+.as-llamadas{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;min-width:0;max-width:100%}
+.as-llamada{font-size:13px;font-weight:500;color:var(--tx);background:var(--sbg);border-radius:10px;padding:6px 12px;overflow-wrap:anywhere}
+.as-aviso{margin:0;font-size:13px;line-height:1.45;color:var(--red);text-align:center}
+.as-aviso[hidden]{display:none}
+.as-aviso-suelto{margin:-6px 6px 12px;text-align:left}
+.as-oido{display:block;margin-top:4px;color:var(--tx2);overflow-wrap:anywhere}
+.as-mal{color:var(--red)}
+.as-botones{display:flex;justify-content:center;gap:10px;margin-top:8px}
+.as-botones .btn{flex:1;min-height:42px;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;max-width:204px}
+.as-botones .btn:focus-visible,.as-toma .btn:focus-visible,.as-fila-aviso .btn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.as-progreso{display:flex;gap:6px}
+.as-progreso i{flex:1;height:4px;border-radius:2px;background:var(--toff);transition:background .25s cubic-bezier(.4,0,.2,1)}
+.as-progreso i.hecha{background:var(--blue)}
+.as-progreso i.actual{background:color-mix(in srgb,var(--blue) 40%,var(--toff))}
+.as-eyebrow{font-size:12px;font-weight:500;color:var(--tx2);margin-top:8px;font-variant-numeric:tabular-nums}
+.as-frase{margin:0;font-size:17px;font-weight:600;line-height:1.4;color:var(--tx);overflow-wrap:anywhere}
+.as-nivel{height:4px;border-radius:2px;background:var(--toff);overflow:hidden}
+.as-nivel[hidden]{display:none}
+.as-nivel i{display:block;height:100%;background:var(--blue);transform-origin:left;transition:transform .1s linear}
+.as-estado{margin:0;font-size:13px;line-height:1.45;color:var(--tx2);display:flex;align-items:center;justify-content:center;gap:8px}
+.as-punto{flex:none;width:8px;height:8px;border-radius:50%;background:var(--red);animation:as-latido 1.2s ease-in-out infinite}
+@keyframes as-latido{50%{opacity:.35}}
+.as-cargando{display:flex;align-items:center;justify-content:center;gap:10px;min-height:48px}
+.as-cargando .spinner{flex:none}
+.as-toma{gap:12px}
+.as-toma.actual{background:var(--hov)}
+.as-toma-marca{flex:none;width:24px;height:24px;border-radius:50%;background:var(--sbg);color:var(--tx2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.as-toma-marca.hecha{background:var(--green);color:#fff}
+.as-resumen{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.as-toma-estado{flex:none;font-size:12px;color:var(--tx2)}
+.as-nota{margin:0 6px 16px;line-height:1.45}
+.as-perfil{display:flex;align-items:center;gap:14px;padding:18px 20px;position:relative}
+.as-perfil::after{content:"";position:absolute;bottom:0;left:20px;right:20px;height:.5px;background:var(--div)}
+.as-perfil-icono{flex:none;width:44px;height:44px;border-radius:50%;background:var(--sbg);color:var(--tx2);display:flex;align-items:center;justify-content:center}
+.as-perfil-icono.bien{color:var(--green)}
+.as-perfil-icono.mal{color:var(--red)}
+.as-perfil-nombre{font-size:20px;font-weight:700;letter-spacing:-.2px;color:var(--tx);overflow-wrap:anywhere}
+.as-perfil-estado{font-size:12px;color:var(--tx2);margin-top:2px}
+.as-perfil-estado.bien{color:var(--green)}
+.as-perfil-estado.mal{color:var(--red)}
+.as-valor{color:var(--blue);font-size:14px;margin-right:6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.as-dlg-input{margin:14px 0 6px}
+.as-fila-aviso{gap:12px}
+.toggle-switch:disabled{opacity:.5;cursor:default}
+@media(prefers-reduced-motion:reduce){.as-punto{animation:none}.as-progreso i,.as-nivel i{transition:none}}
