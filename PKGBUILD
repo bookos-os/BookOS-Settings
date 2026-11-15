@@ -9,9 +9,11 @@ license=('GPL3')
 install=bookos-settings.install
 # upower: lo consulta refresh_devices_cache() para la tarjeta de bateria
 # (portatil, auriculares). El movil y la tablet entran por BookOS Link.
-depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'python' 'upower' 'imagemagick')
+# avahi: Book Share anuncia y descubre móviles por mDNS a través de él.
+depends=('webkit2gtk-4.1' 'gtk3' 'libsoup3' 'python' 'upower' 'imagemagick' 'avahi')
 optdepends=(
     'colord: ICC profile support'
+    'bluez: Book Share despierta a los Android cercanos por Bluetooth'
 )
 makedepends=('rust' 'cargo' 'protobuf' 'git')
 
@@ -25,6 +27,8 @@ build() {
     # package() busca el binario en target/release, asi que sin --release no
     # habria nada que empaquetar.
     cargo build --release
+    # Book Share es un servicio aparte con su propio target/.
+    cargo build --release --manifest-path bookshare/Cargo.toml
 }
 
 package() {
@@ -61,6 +65,16 @@ EOF
     # Notification icons used by Rust commands (notify-send -i bookos-buds, etc.)
     install -Dm644 "${_builddir}/src-tauri/icons/bookos-buds.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/bookos-buds.svg"
+
+    # Book Share: servicio de usuario con activación D-Bus. Arch no usa
+    # /usr/libexec; las unidades traen esa ruta y se reescribe aquí.
+    local _bs="${_builddir}/src-tauri/bookshare"
+    install -Dm755 "$_bs/target/release/bookos-bookshare" \
+        "$pkgdir/usr/lib/bookos/bookos-bookshare"
+    sed 's|/usr/libexec/|/usr/lib/bookos/|' "$_bs/sistema/bookos-bookshare.service" | \
+        install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/bookos-bookshare.service"
+    sed 's|/usr/libexec/|/usr/lib/bookos/|' "$_bs/sistema/org.bookos.BookShare.service" | \
+        install -Dm644 /dev/stdin "$pkgdir/usr/share/dbus-1/services/org.bookos.BookShare.service"
 
     # Systemd system units
     install -Dm644 "$_extra/bookos-battery-adaptive.service" \

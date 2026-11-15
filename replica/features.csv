@@ -1,0 +1,38 @@
+feature,area,priority,original,clone,notes
+Recibir con Ajustes cerrado (servicio en segundo plano),recibir,must,yes,yes,bookos-bookshare + unidad de systemd y activación D-Bus
+Petición entrante con nombre archivos y PIN fuera de Ajustes,recibir,must,yes,yes,notificación con Aceptar/Rechazar (bookos-comp)
+Aceptar o rechazar una petición,recibir,must,yes,yes,notificación y página
+Guardar en ~/Descargas/Book-Share,recibir,must,yes,yes,xdg-user-dir DOWNLOAD + Book-Share
+Nombre repetido sin pisar archivos,recibir,must,yes,yes,«nombre (1).ext»; .part hasta terminar
+Abrir la carpeta al terminar,recibir,should,yes,yes,botón en la notificación y fila en la página
+Lista de cercanos al momento,descubrir,must,yes,yes,Avahi; resolución en tareas aparte
+Quitar aparatos que se van,descubrir,must,yes,partial,ItemRemove de Avahi; sin caducidad propia
+Despertar a los Android con aviso BLE mientras se busca,descubrir,must,yes,yes,BlueZ LEAdvertisingManager1 mientras la página busca
+Icono y tipo de aparato (móvil tableta portátil),descubrir,should,yes,yes,bit de tipo del TXT n y de la petición de conexión
+Enviar archivos a un aparato,enviar,must,yes,yes,
+Enviar varios archivos y carpetas,enviar,must,yes,partial,varios archivos sí; carpetas no
+Progreso y cancelar envío,enviar,must,yes,yes,página e isla
+Arrastrar y soltar archivos en Book Share,enviar,should,yes,no,
+Compartir desde el explorador y el navegador,enviar,should,yes,partial,el navegador (--share-url) sí; el explorador no
+Enviar enlace o texto,enviar,should,yes,partial,enlaces sí desde la hoja del navegador; texto por D-Bus sin interfaz
+Visibilidad Todos temporal (10 min),visibilidad,must,yes,yes,10 min con caducidad propia; vuelve a «Nadie»
+Visibilidad Nadie,visibilidad,must,yes,yes,
+Recordar visibilidad y estado entre sesiones,visibilidad,must,yes,yes,~/.config/bookos/bookshare.json
+Nombre del equipo visible,ajustes,should,yes,yes,SetName; por defecto el hostname
+Enviar a iPhone por QR (web local),iphone,must,partial,no,Samsung usa su nube; aquí servidor local en la misma red
+Recibir de iPhone por QR (web local),iphone,must,no,no,propio de Book Share
+Historial de transferencias,historial,should,yes,yes,~/.local/share/bookos/bookshare-historial.jsonl; últimas 5 en la página
+Progreso en la isla de BookOS,integración,must,no,yes,movido de Ajustes al servicio
+Interfaz con componentes y tokens del HIG,interfaz,must,yes,yes,pages/bookshare.js
+Funcionar sin Bluetooth (solo mDNS),descubrir,should,yes,yes,sigue por mDNS y lo dice
+Wi-Fi Direct cuando no hay red común,descubrir,could,yes,no,p2p.rs retirado con rqs_lib; recuperable de git
+Recibir por Bluetooth sin red común,recibir,should,yes,yes,BT clásico: nombre de Nearby y RFCOMM mientras «Todos durante 10 min»; sin probar con un móvil
+LocalSend para iPhone con app,iphone,could,no,no,protocolo abierto; alternativa al QR
+Recibir texto y abrir enlaces recibidos,recibir,could,yes,yes,notificación «Abrir enlace»
+Notificación del sistema además de la isla,recibir,could,yes,yes,
+Velocidad y tiempo restante,progreso,could,yes,yes,en la isla
+Visibilidad Contactos,visibilidad,could,yes,skip,certificados de la cuenta de Google/Samsung
+Visibilidad Tus dispositivos,visibilidad,could,yes,skip,certificados de la cuenta de Google/Samsung
+Enlace en la nube de Samsung,iphone,could,yes,skip,servidor ajeno; se sustituye por web local
+AirDrop,iphone,could,no,skip,AWDL de Apple; no viable en Linux de forma fiable
+Mejora de banda dentro del protocolo (Wi-Fi Direct o hotspot),descubrir,could,yes,skip,no implementado en rqs_lib

@@ -697,7 +697,8 @@ input[type="range"].bk-range.bk-temp{background:linear-gradient(to right,rgb(255
 .bk-dialog:has(.bat-pop){width:min(420px,92vw)}
 .bk-dialog:has(.bat-pop) .bk-dialog-msg{text-align:left}
 .bk-dialog-btns{display:flex;gap:10px;margin-top:12px}
-.bk-dbtn{flex:1;height:48px;border-radius:14px;border:none;font-size:15px;font-weight:600;cursor:pointer;transition:.12s;font-family:inherit}
+.bk-dbtn{flex:1;height:48px;border-radius:14px;border:none;background:var(--sbg);color:var(--tx);font-size:15px;font-weight:600;cursor:pointer;transition:.12s;font-family:inherit}
+.bk-dialog-msg .bk-dbtn{flex:none;width:100%}
 .bk-dbtn.cancel{background:var(--sbg);color:var(--tx)}
 .bk-dbtn.cancel:hover{filter:brightness(1.06)}
 .bk-dbtn.confirm{background:var(--blue);color:#fff}
@@ -2191,12 +2192,16 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .disp-hero{background:var(--card);border-radius:var(--r-card);padding:28px 20px 20px;margin-bottom:16px;display:flex;flex-direction:column;align-items:center}
 .disp-escena{position:relative;max-width:100%}
 .disp-equipo{position:absolute;display:flex;flex-direction:column;align-items:center;background:none;border:0;padding:0;cursor:pointer;font:inherit}
+.disp-portatil-render{position:absolute;z-index:0;left:-40.7%;top:-20.4%;width:181.5%;height:180%;pointer-events:none}
+.portatil .disp-marco{z-index:1}
+.portatil .disp-base{display:none}
 .disp-equipo[tabindex="-1"]{cursor:default}
 .disp-equipo:focus-visible{outline:none}
 .disp-equipo.sel .disp-marco,.disp-equipo:focus-visible .disp-marco{outline:2px solid var(--blue);outline-offset:3px}
 /* Sin fondo legible se ve el acento: una pantalla negra parece apagada. */
 .disp-marco{position:relative;display:block;box-sizing:border-box;border:4px solid #161618;border-radius:10px;overflow:hidden;background:linear-gradient(135deg,color-mix(in srgb,var(--blue) 75%,#000),color-mix(in srgb,var(--blue) 20%,#000))}
-.portatil .disp-marco{border-bottom-width:6px;border-radius:10px 10px 3px 3px}
+.portatil .disp-marco{border:0;border-radius:1.4% / 2.2%;overflow:visible}
+.portatil .disp-fondo{inset:-.25%;width:100.5%;height:100.5%;border-radius:1.4% / 2.2%}
 .disp-fondo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .disp-base{position:relative;display:block;width:112%;height:7px;margin-top:-1px;border-radius:1px 1px 8px 8px;background:linear-gradient(#d4d4d8,#9c9ca3)}
 .disp-base::after{content:"";position:absolute;top:0;left:50%;width:16%;height:3px;transform:translateX(-50%);border-radius:0 0 4px 4px;background:#8a8a90}
@@ -2468,13 +2473,10 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
    Mismo panel tintado que Administración general: sigue a la paleta y al tema. */
 .ac-hero{display:flex;flex-direction:column;align-items:center;gap:6px;padding:24px 24px 22px;margin-bottom:12px;border-radius:25px;text-align:center;
     background:linear-gradient(160deg,color-mix(in srgb,var(--blue) 30%,var(--card)),color-mix(in srgb,var(--blue) 6%,var(--card)) 70%)}
-/* Marco y fondo oscuros sobre un panel oscuro: sin el filo claro el portátil se
-   confundía con el panel. */
 .ac-portatil{position:relative;height:220px;margin-bottom:12px}
-.ac-portatil img:first-child{filter:drop-shadow(0 0 1px color-mix(in srgb,var(--tx) 55%,transparent)) drop-shadow(0 10px 22px rgba(0,0,0,.35))}
 .ac-portatil img{display:block;height:100%}
 .ac-portatil .ac-fondo[hidden]{display:none}
-.ac-portatil .ac-fondo{position:absolute;object-fit:cover;border-radius:2px}
+.ac-portatil .ac-fondo{position:absolute;object-fit:cover;border-radius:1.4% / 2.2%}
 /* El lápiz cuelga fuera del flujo: si contara, el nombre quedaría descentrado
    respecto al portátil y los chips. */
 .ac-nombre{position:relative;max-width:calc(100% - 72px)}
@@ -2556,3 +2558,37 @@ button.toggle-switch{border:0;padding:0;font:inherit;-webkit-appearance:none;app
 .as-fila-aviso{gap:12px}
 .toggle-switch:disabled{opacity:.5;cursor:default}
 @media(prefers-reduced-motion:reduce){.as-punto{animation:none}.as-progreso i,.as-nivel i{transition:none}}
+
+/* ── Book Share ── */
+.bs-panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:28px 24px 24px;text-align:center}
+.bs-panel>*{max-width:420px}
+.bs-titulo{margin:0;font-size:20px;font-weight:700;letter-spacing:-.2px;color:var(--tx)}
+.bs-cuerpo{margin:0;font-size:13px;line-height:1.5;color:var(--tx2)}
+.bs-botones{display:flex;justify-content:flex-end;gap:10px;width:100%}
+.bs-panel .bs-botones{justify-content:center}
+.bs-botones .btn{min-width:110px}
+.bs-icono{flex:none;width:36px;height:36px;border-radius:50%;background:var(--sbg);color:var(--blue);display:flex;align-items:center;justify-content:center;margin-right:12px}
+.bs-icono.bien{color:var(--green)}
+.bs-icono.mal{color:var(--red)}
+.bs-icono.apagado{color:var(--tx2)}
+.bs-fila{display:flex;align-items:center;gap:12px;width:100%}
+.bs-fila .bs-icono{margin-right:0}
+.bs-transferencia{gap:10px}
+.bs-corta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bs-valor{color:var(--blue);font-size:14px;margin-right:6px;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bs-mal{color:var(--red)}
+.bs-progreso{height:4px;border-radius:2px;background:var(--toff);overflow:hidden;width:100%}
+.bs-progreso i{display:block;height:100%;background:var(--blue);transform-origin:left;transition:transform .25s cubic-bezier(.4,0,.2,1)}
+.bs-buscando{gap:12px;justify-content:flex-start}
+.bs-buscando .spinner{flex:none;margin:0 9px}
+.bs-aparato{gap:12px}
+.bs-aparato .bs-icono{margin-right:0}
+.bs-dlg-input{margin:6px 0 14px}
+.bs-hoja-url{word-break:break-all;margin-bottom:12px;font-size:13px;color:var(--tx2)}
+.bs-hoja-lista{display:flex;flex-direction:column;gap:8px;min-width:260px}
+.bs-hoja-aparato{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:13px;border:0;background:var(--sbg);color:var(--tx);font:inherit;font-size:14px;font-weight:500;text-align:left;cursor:pointer}
+.bs-hoja-aparato:hover{background:var(--hov)}
+.bs-hoja-aparato:focus-visible,.bs-botones .btn:focus-visible,.bs-aparato .btn:focus-visible,.bs-transferencia .btn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.bs-hoja-aparato svg{color:var(--blue)}
+.bs-hoja-vacia{display:flex;align-items:center;gap:10px;color:var(--tx2);font-size:13px}
+@media(prefers-reduced-motion:reduce){.bs-progreso i{transition:none}}

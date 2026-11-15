@@ -1,12 +1,30 @@
 # Pacman hooks for bookos-settings.
 # pacman runs these as root.
 
+# Antes de desempaquetar: sin la unidad, es la primera vez que llega Book Share
+# (instalación nueva o actualización desde una versión que no lo traía).
+pre_install() {
+    [ -e /usr/lib/systemd/user/bookos-bookshare.service ] || : > /run/bookos-bookshare-nuevo
+}
+
+pre_upgrade() {
+    pre_install
+}
+
 post_install() {
     echo ":: Setting up BookOS AI venv (xgboost, scikit-learn, ...)"
     /opt/bookos-ai/setup.sh || echo "WARN: AI venv setup failed — battery prediction disabled"
 
     echo ":: Reloading systemd"
     systemctl daemon-reload
+
+    # Book Share recibe con Ajustes cerrado solo si arranca con la sesión. Se
+    # activa la primera vez que llega (ver pre_install): al actualizar se
+    # respeta a quien lo haya desactivado con --global disable.
+    if [ -e /run/bookos-bookshare-nuevo ]; then
+        rm -f /run/bookos-bookshare-nuevo
+        systemctl --global enable bookos-bookshare.service || true
+    fi
 
     cat <<EOF
 
@@ -30,6 +48,7 @@ post_upgrade() {
 
 pre_remove() {
     echo ":: Stopping BookOS services"
+    systemctl --global disable bookos-bookshare.service 2>/dev/null || true
     for u in bookos-battery-adaptive.timer bookos-battery-logger.timer \
              bookos-battery-train.timer bookos-hw-perms.service \
              bookos-thermal-logger.service; do

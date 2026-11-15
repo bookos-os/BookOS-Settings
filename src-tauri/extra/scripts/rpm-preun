@@ -1,0 +1,6 @@
+#!/bin/sh
+# RPM %preun: $1 es 0 al desinstalar y 1 al actualizar.
+if [ "$1" -eq 0 ]; then
+    systemctl --global disable bookos-bookshare.service >/dev/null 2>&1 || true
+fi
+exit 0

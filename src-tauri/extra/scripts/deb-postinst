@@ -9,6 +9,22 @@ fi
 
 systemctl daemon-reload >/dev/null 2>&1 || true
 
+# Este guion es también el preinst. Book Share se activa solo la primera vez
+# que llega (instalación nueva o actualización desde una versión sin él): el
+# preinst lo apunta si la unidad aún no está y el postinst («configure») lo
+# activa. Así se respeta a quien lo haya desactivado con --global disable.
+case "$1" in
+    install|upgrade)
+        [ -e /usr/lib/systemd/user/bookos-bookshare.service ] || : > /run/bookos-bookshare-nuevo
+        ;;
+    configure)
+        if [ -e /run/bookos-bookshare-nuevo ]; then
+            rm -f /run/bookos-bookshare-nuevo
+            systemctl --global enable bookos-bookshare.service >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
 cat <<EOF
 BookOS Settings installed.
 Enable optional services if you want them running:

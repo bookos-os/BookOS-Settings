@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.bookos.BookShare
+Exec=/usr/libexec/bookos-bookshare
+SystemdService=bookos-bookshare.service

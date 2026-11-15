@@ -8,4 +8,8 @@ for u in bookos-battery-adaptive.timer bookos-battery-logger.timer \
     systemctl disable --now "$u" >/dev/null 2>&1 || true
 done
 
+if [ "$1" = remove ]; then
+    systemctl --global disable bookos-bookshare.service >/dev/null 2>&1 || true
+fi
+
 exit 0

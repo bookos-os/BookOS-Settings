@@ -1,0 +1,8 @@
+#!/bin/sh
+# Antes de desempaquetar: si la unidad aún no está, es la primera vez que
+# llega Book Share (instalación nueva o actualización desde una versión que
+# no lo traía) y %post lo activará.
+if [ ! -e /usr/lib/systemd/user/bookos-bookshare.service ]; then
+    : > /run/bookos-bookshare-nuevo
+fi
+exit 0

@@ -1,0 +1,19 @@
+[Unit]
+Description=Book Share: recibir y enviar a móviles cercanos (Quick Share)
+PartOf=bookos-session.target
+# Sin After=graphical-session.target: bookos-session.target arranca antes de
+# ese target y con él systemd rompía el ciclo borrando el trabajo (le pasó al
+# asistente de voz). Avahi y BlueZ son del sistema y ya están.
+After=avahi-daemon.service
+
+[Service]
+# Type=dbus: un arranque que no llega a publicar el nombre cuenta como fallido
+# y la activación devuelve error en vez de dejar a Ajustes esperando.
+Type=dbus
+BusName=org.bookos.BookShare
+ExecStart=/usr/libexec/bookos-bookshare
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=bookos-session.target

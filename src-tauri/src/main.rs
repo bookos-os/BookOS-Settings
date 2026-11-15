@@ -24,9 +24,7 @@ mod hardware_control;
 mod asistente;
 mod buds;
 mod bluez_profile;
-mod isla;
-mod quickshare;
-mod p2p;
+mod bookshare;
 mod system_extras;
 mod bookos_desktop;
 mod system_client;
@@ -5314,7 +5312,6 @@ fn ocupado(app: &tauri::AppHandle) -> bool {
                 && !fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|nombre| nombre.starts_with("WebKit"))
         }));
     app.state::<UpdateState>().lock().is_ok_and(|u| u.running)
-        || isla::hay_transferencia()
         || hijos_trabajando()
 }
 
@@ -5748,8 +5745,6 @@ fn main() {
         .on_page_load(desactivar_zoom_por_pellizco)
         .plugin(tauri_plugin_dialog::init())
         .manage(UpdateState::default())
-        .manage(quickshare::QsState::default())
-        .manage(p2p::P2PState::default())
         // Cerrar la ventana termina este proceso —lo que sigue «con la app
         // cerrada» es cosa del servicio— salvo con una operación a medias:
         // entonces solo se oculta, y sale cuando acabe.
@@ -5899,14 +5894,12 @@ fn main() {
             buds::buds_set_anc,buds::buds_set_eq,buds::buds_set_touch_lock,
             buds::gbc_is_available,buds::gbc_get_device,
             buds::gbc_execute_action,buds::gbc_activate,
-            quickshare::qs_start,quickshare::qs_stop,
-            quickshare::qs_discover,quickshare::qs_stop_discover,
-            quickshare::qs_send_files,quickshare::qs_send_url,quickshare::qs_action,
+            bookshare::get_bookshare_estado,bookshare::get_bookshare_historial,
+            bookshare::bookshare_activo,bookshare::bookshare_visibilidad,bookshare::bookshare_nombre,
+            bookshare::bookshare_buscar,bookshare::bookshare_dejar_de_buscar,
+            bookshare::bookshare_enviar,bookshare::bookshare_enviar_texto,
+            bookshare::bookshare_aceptar,bookshare::bookshare_rechazar,bookshare::bookshare_cancelar,bookshare::bookshare_abrir_carpeta,
             get_startup_share,
-            quickshare::qs_cancel,quickshare::qs_set_visibility,
-            quickshare::qs_set_download_path,
-            p2p::p2p_start_discover,p2p::p2p_stop_discover,
-            p2p::p2p_connect,p2p::p2p_disconnect,
             get_thermal_csv_data,get_charging_info,
             set_camera_enabled,get_camera_enabled,system_settings::set_mic_muted,system_settings::get_mic_muted
         ])

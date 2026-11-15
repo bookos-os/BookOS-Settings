@@ -3,13 +3,10 @@
 import {tauriInvoke,getAssetUrl,esc,toast,promptSudo,renderHeader,renderSection,renderCard,renderRowItem,renderNavRow,renderSkeleton,renderError,_tr} from './_common.js';
 import {ico} from './iconos.js';
 
-// Pantalla de cada dibujo, en coordenadas de su viewBox (los trazados
-// Vector_10, Vector_12 y Vector_3 de cada SVG): el fondo se coloca encima de
-// ella. El 360 se mira antes porque su nombre contiene el del Book5 Pro.
+// El fondo rebasa cuatro píxeles el área verde para tapar su borde suavizado.
+// El fondo real se coloca encima para que el render sirva con cualquier tema.
 const DIBUJOS=[
-    {si:'Book5 Pro 360',src:'portatil-book5-pro-360.svg',w:304,h:223,x:11,y:5.4,sw:282,sh:147},
-    {si:'Book5 Pro',src:'portatil-book5-pro.svg',w:264,h:223,x:10,y:5.4,sw:244,sh:147},
-    {si:'',src:'portatil.svg',w:380,h:217,x:29,y:6.4,sw:322,sh:181},
+    {si:'',src:'./assets/book5-pro.webp',w:2000,h:1240,x:447,y:138,sw:1106,sh:694},
 ];
 const HOSTNAME_VALIDO=/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
 const SERIE_TAPADA='••••••••••';
@@ -46,7 +43,7 @@ export async function renderAcerca(c){
     const chips=[version?`BookOS ${version}`:'BookOS',i.distro,i.product].filter(Boolean);
     c.innerHTML=cabecera+`<section class="ac-hero">
             <div class="ac-portatil" style="aspect-ratio:${d.w}/${d.h}" aria-hidden="true">
-                <img src="./assets/${d.src}" alt="">
+                <img src="${d.src}" alt="">
                 ${fondo?`<img class="ac-fondo" id="ac-fondo" alt="" decoding="async" hidden style="left:${pct(d.x,d.w)};top:${pct(d.y,d.h)};width:${pct(d.sw,d.w)};height:${pct(d.sh,d.h)}">`:''}
             </div>
             <div class="ac-nombre" id="ac-nombre">

@@ -1156,6 +1156,25 @@ function nombreAudio(desc){
     return entero;
 }
 
+/// Nombre de un perfil de tarjeta para el selector. Los de PipeWire son
+/// frases largas en inglés que se cortaban justo antes del códec, que es lo
+/// único que distingue a los de Bluetooth («High Fidelity Playback (A2DP Sink,
+/// codec A…»). Se deja el uso («Alta fidelidad» o «Llamadas») y el códec.
+function nombrePerfil(p){
+    const nombre=String(p.name||''),desc=String(p.description||'');
+    if(nombre==='off')return _tr('Apagado');
+    const uso=/^(a2dp|bap)-sink/.test(nombre)?'Alta fidelidad'
+        :/^headset-head-unit|^handsfree/.test(nombre)?'Llamadas'
+        :/^HiFi\b/.test(nombre)||/^Play HiFi/i.test(desc)?'Alta fidelidad':null;
+    if(!uso)return desc||nombre;
+    // El códec va al final de la descripción: «…, codec AAC)». El nuestro
+    // trae su propia explicación entre paréntesis y se acorta a «BASC (SSC)».
+    const m=desc.match(/codec (.+)\)$/);
+    if(!m)return _tr(uso);
+    const codec=m[1].startsWith('BASC')?'BASC (SSC)':m[1]==='MSBC'?'mSBC':m[1].replace(/-/g,' ');
+    return `${_tr(uso)} · ${codec}`;
+}
+
 /// Qué es cada dispositivo, en la columna de la derecha, como «Tipo» en macOS.
 /// Bluetooth y USB se reconocen por el nombre del nodo de PipeWire; HDMI por el
 /// tipo del puerto. Todo lo demás cuelga del chip del portátil.
@@ -1248,7 +1267,7 @@ export async function sound(c,vista){
                 const profiles=(Array.isArray(card.profiles)?card.profiles:Object.entries(card.profiles||{}).map(([name,p])=>({name,...p})))
                     .filter(p=>p.available!=='no');
                 if(profiles.length>1)avanzado.push(selectRow('Perfil de la tarjeta',esc(nombreAudio(card.properties?.['device.description']||card.name)),
-                    profile=>['set_audio_profile',{card:card.name,profile}],profiles.map(p=>({value:p.name,label:p.description||p.name})),card.active_profile));
+                    profile=>['set_audio_profile',{card:card.name,profile}],profiles.map(p=>({value:p.name,label:nombrePerfil(p)})),card.active_profile));
             }
         }
         const entrada=[];

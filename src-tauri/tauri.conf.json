@@ -6,7 +6,7 @@
   "version": "0.7.0",
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "beforeBuildCommand": "d=\"$PWD\"; until [ -f \"$d/bookshare/Cargo.toml\" ]; do [ -f \"$d/src-tauri/bookshare/Cargo.toml\" ] && d=\"$d/src-tauri\" && break; [ \"$d\" = / ] && exit 1; d=\"$(dirname \"$d\")\"; done; CARGO_TARGET_DIR=\"$d/bookshare/target\" cargo build --release --manifest-path \"$d/bookshare/Cargo.toml\"",
     "frontendDist": "../src"
   },
   "app": {
@@ -59,7 +59,8 @@
           "libgtk-3-0",
           "imagemagick",
           "python3",
-          "python3-venv"
+          "python3-venv",
+          "avahi-daemon"
         ],
         "files": {
           "/opt/bookos-ai/train.py": "extra/ai/train.py",
@@ -79,7 +80,10 @@
           "/usr/share/bookos-settings/sddm-theme/icons/next-track.svg": "extra/sddm-theme/icons/next-track.svg",
           "/usr/share/bookos-settings/sddm-theme/icons/random.svg": "extra/sddm-theme/icons/random.svg",
           "/usr/share/bookos-settings/sddm-theme/icons/random-selected.svg": "extra/sddm-theme/icons/random-selected.svg",
-          "/usr/share/bookos-settings/sddm-theme/icons/control-bookbuds.svg": "extra/sddm-theme/icons/control-bookbuds.svg"
+          "/usr/share/bookos-settings/sddm-theme/icons/control-bookbuds.svg": "extra/sddm-theme/icons/control-bookbuds.svg",
+          "/usr/libexec/bookos-bookshare": "bookshare/target/release/bookos-bookshare",
+          "/usr/lib/systemd/user/bookos-bookshare.service": "bookshare/sistema/bookos-bookshare.service",
+          "/usr/share/dbus-1/services/org.bookos.BookShare.service": "bookshare/sistema/org.bookos.BookShare.service"
         },
         "preInstallScript": "extra/scripts/deb-postinst",
         "postInstallScript": "extra/scripts/deb-postinst",
@@ -92,7 +96,8 @@
           "webkit2gtk4.1",
           "gtk3",
           "ImageMagick",
-          "python3"
+          "python3",
+          "avahi"
         ],
         "files": {
           "/opt/bookos-ai/train.py": "extra/ai/train.py",
@@ -112,8 +117,15 @@
           "/usr/share/bookos-settings/sddm-theme/icons/next-track.svg": "extra/sddm-theme/icons/next-track.svg",
           "/usr/share/bookos-settings/sddm-theme/icons/random.svg": "extra/sddm-theme/icons/random.svg",
           "/usr/share/bookos-settings/sddm-theme/icons/random-selected.svg": "extra/sddm-theme/icons/random-selected.svg",
-          "/usr/share/bookos-settings/sddm-theme/icons/control-bookbuds.svg": "extra/sddm-theme/icons/control-bookbuds.svg"
+          "/usr/share/bookos-settings/sddm-theme/icons/control-bookbuds.svg": "extra/sddm-theme/icons/control-bookbuds.svg",
+          "/usr/libexec/bookos-bookshare": "bookshare/target/release/bookos-bookshare",
+          "/usr/lib/systemd/user/bookos-bookshare.service": "bookshare/sistema/bookos-bookshare.service",
+          "/usr/share/dbus-1/services/org.bookos.BookShare.service": "bookshare/sistema/org.bookos.BookShare.service"
         },
+        "preInstallScript": "extra/scripts/rpm-pre",
+        "postInstallScript": "extra/scripts/rpm-post",
+        "preRemoveScript": "extra/scripts/rpm-preun",
+        "postRemoveScript": "extra/scripts/rpm-postun",
         "desktopTemplate": "linux/desktop.hbs"
       }
     }

@@ -183,6 +183,12 @@ async function renderEthernetDetailPage(c){
 }
 
 // ── Wi-Fi subpage ──
+// Redes ocultas llegan con SSID vacío y BlueZ pone la MAC como nombre cuando el
+// dispositivo no anuncia ninguno; ambos casos son «sin nombre».
+const MAC_RE=/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
+const sinNombreWifi=n=>!n.ssid?.trim();
+const sinNombreBT=d=>!d.name?.trim()||MAC_RE.test(d.name.trim());
+const ocultarSinNombre=k=>localStorage.getItem(k)==='1';
 export async function renderWifiPage(c,subscribe=true){
     if(subscribe)addSystemListener(()=>document.getElementById('wl')?loadWifi():renderWifiPage(c,false));
     // Con caché se pinta la página entera de una vez y se refresca por detrás:
@@ -202,6 +208,7 @@ export async function renderWifiPage(c,subscribe=true){
             ${renderToggle('wifi-page',w.enabled)}
         </div>
     </div>`;
+    h+=`<div class="detail-card">${renderRowItem('Ocultar redes sin nombre','Oculta las redes con SSID vacío',renderToggle('wifi-hide',ocultarSinNombre('bookos_wifi_hide_unnamed')))}</div>`;
     h+=renderSection(t('sec_current_net'));
     h+=`<div class="detail-card" id="wifi-current">${renderLoading('Obteniendo red...')}</div>`;
     h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Redes disponibles</p><button class="refresh-btn" id="btn-wifi-refresh" title="Buscar redes"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Buscar</button></div>`;
@@ -218,6 +225,10 @@ export async function renderWifiPage(c,subscribe=true){
     if(w.enabled)loadAll();else loadWifi();
     document.getElementById('btn-wifi-refresh')?.addEventListener('click',()=>rescanAndLoad());
 
+    setupToggle('wifi-hide',a=>{
+        localStorage.setItem('bookos_wifi_hide_unnamed',a?'1':'0');
+        _wifiSig='';if(_wifiCache)paintWifi(_wifiCache);
+    });
     setupToggle('wifi-page',async a=>{
         await tauriInvoke('toggle_wifi',{enable:a});
         const label=document.querySelector('[data-toggle="wifi-page"]')?.previousElementSibling;
@@ -248,6 +259,7 @@ export async function renderBTPage(c,subscribe=true){
         </div>
     </div>`;
     if(bt.enabled)h+=`<p class="conn-bt-hint">Busca dispositivos cercanos para emparejarlos con este equipo.</p>`;
+    h+=`<div class="detail-card">${renderRowItem('Ocultar dispositivos sin nombre','Oculta los que solo muestran su dirección MAC',renderToggle('bt-hide',ocultarSinNombre('bookos_bt_hide_unnamed')))}</div>`;
     h+=`<div class="section-header-row"><p class="section-header" style="margin:0">Dispositivos vinculados</p>${`<button class="refresh-btn" id="btn-bt-scan" title="Buscar dispositivos"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Escanear</button>`}</div>`;
     h+=`<div class="detail-card" id="bl">${renderLoading('Cargando...')}</div>`;
     c.innerHTML=h;
@@ -259,6 +271,10 @@ export async function renderBTPage(c,subscribe=true){
         try{await tauriInvoke('bluetooth_scan');await loadBT();}catch(e){toast(String(e),'❌');}finally{if(btn){btn.disabled=false;btn.classList.remove('spinning');}}
     });
 
+    setupToggle('bt-hide',a=>{
+        localStorage.setItem('bookos_bt_hide_unnamed',a?'1':'0');
+        _btSig='';if(_btCache)paintBT(_btCache);
+    });
     setupToggle('bt-page',async a=>{
         await tauriInvoke('toggle_bluetooth',{enable:a});
         const label=document.querySelector('[data-toggle="bt-page"]')?.previousElementSibling;
@@ -281,7 +297,8 @@ function paintWifi(status){
     if(!el)return;
     // Los listeners del sistema llaman cada pocos segundos; repintar sin cambios
     // reiniciaba la animación de las filas.
-    const sig=JSON.stringify(status);
+    const hide=ocultarSinNombre('bookos_wifi_hide_unnamed');
+    const sig=JSON.stringify(status)+hide;
     _wifiCache=status;
     if(sig===_wifiSig&&!el.querySelector('.loading'))return;
     _wifiSig=sig;
@@ -289,7 +306,7 @@ function paintWifi(status){
         const toggle=document.querySelector('[data-toggle="wifi-page"]');
         if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label)label.textContent=status.enabled?t('enabled'):t('disabled');}
         if(!status.enabled){if(cur)cur.innerHTML=renderInfoItem('Dispositivo Wi-Fi apagado','Activa Wi-Fi para buscar redes');el.innerHTML='';return;}
-        const nets=status.networks;
+        const nets=hide?status.networks.filter(n=>!sinNombreWifi(n)):status.networks;
         const active=nets.find(n=>n.active);
         if(cur){
             cur.innerHTML=active
@@ -365,7 +382,8 @@ async function loadBT(){
 // Igual que paintWifi: sin cambios no se repinta, o las filas pierden hover y foco.
 function paintBT(status){
     const el=document.getElementById('bl');if(!el)return;
-    const sig=JSON.stringify(status);
+    const hide=ocultarSinNombre('bookos_bt_hide_unnamed');
+    const sig=JSON.stringify(status)+hide;
     _btCache=status;
     if(sig===_btSig&&!el.querySelector('.loading'))return;
     _btSig=sig;
@@ -374,7 +392,7 @@ function paintBT(status){
         if(toggle&&!toggle.dataset.pending){toggle.classList.toggle('active',status.enabled);toggle.setAttribute('aria-checked',String(status.enabled));const label=toggle.previousElementSibling;if(label){label.textContent=status.enabled?t('enabled'):t('disabled');label.style.color=status.enabled?'var(--blue)':'var(--tx2)';}}
         const scan=document.getElementById('btn-bt-scan');if(scan)scan.disabled=!status.enabled;
         if(!status.enabled){el.innerHTML=renderInfoItem('Dispositivo Bluetooth apagado','Activa Bluetooth para buscar dispositivos');return;}
-        const devs=status.devices;
+        const devs=hide?status.devices.filter(d=>!sinNombreBT(d)):status.devices;
         if(!devs.length){el.innerHTML=renderInfoItem('No hay dispositivos vinculados','Activa el modo vinculación en el otro dispositivo');return;}
         el.innerHTML=devs.map(d=>`
             <div class="conn-bt-item ${d.connected?'conn-bt-connected':''}">
@@ -872,7 +890,7 @@ async function _renderBateriaContent(c){
     let bat={percentage:'0',state:'unknown',time:'',energy_rate:'',energy_full:'',energy_full_design:''};
     let gb={perf_supported:false,charge_limit_supported:false,performance_mode:'balanced',charge_limit:''};
     let hist=[],perfiles=[],bajo=20;
-    let bprot=false,showpct=true;
+    let bprot=false,showpct=true,showtime=true,showcolors=true;
     let savedChargeLimit=80;
     let chargingInfo={ok:false};
     try{
@@ -887,7 +905,11 @@ async function _renderBateriaContent(c){
         ]);
         bat=batRaw; gb=gbRaw; hist=histRaw; chargingInfo=chgRaw; perfiles=perfRaw; bajo=accRaw.bajo??20;
         bprot=(settingsBatch.BatteryProtection??'false')==='true';
-        showpct=(settingsBatch.ShowBatteryPercent??'true')!=='false';
+        // La verdad es panel.conf: es lo que lee el widget del panel.
+        const cfg=await tauriInvoke('bookos_get_config').then(JSON.parse).catch(()=>null);
+        showpct=cfg?.bateria_porcentaje??true;
+        showtime=cfg?.bateria_tiempo??true;
+        showcolors=cfg?.bateria_colores??true;
         savedChargeLimit=Math.min(100,Math.max(50,parseInt(settingsBatch.ChargeLimit)||80));
         Object.entries(settingsBatch).forEach(([k,v])=>{if(v!=null)primeSetting(k,v);});
     }catch(e){console.error('[Batería] Error:',e);}
@@ -1116,7 +1138,7 @@ async function _renderBateriaContent(c){
                     throw new Error(r.needs_auth?'Autorización cancelada':(r.error||'No se pudo aplicar el límite'));
                 }
                 toast(`Protección activa: hasta el ${currentLimit}%`,'✓');
-            }catch(e){toast('No se pudo aplicar el límite de carga','❌');}
+            }catch(e){toast(`No se pudo aplicar el límite de carga: ${e.message}`,'❌');}
         } else {
             try{
                 const r=await applyChargeLimit(100);
@@ -1128,12 +1150,21 @@ async function _renderBateriaContent(c){
     const _setupPopToggles=()=>{
     setupToggle('show-pct',async a=>{
         showpct=a;
-        setSetting('ShowBatteryPercent',a?'true':'false');
-        const curProfile=document.getElementById('bat-energy-profile')?.dataset.mode||'balanced';
-        const savedLim=parseInt(await getSetting('ChargeLimit','80').catch(()=>'80'))||80;
-        const state=JSON.stringify({power_profile:curProfile,charge_limit:savedLim,show_percent:a,source:'settings',ts:Date.now()});
-        tauriInvoke('write_ipc_state',{state}).catch(()=>{});
+        try{await tauriInvoke('bookos_apply_config',{config:{bateria_porcentaje:a}});}
+        catch(e){toast(_tr('No se pudo guardar'),'❌');return;}
         toast(a?'Porcentaje visible en el widget':'Porcentaje oculto en el widget');
+    });
+    setupToggle('show-time',async a=>{
+        showtime=a;
+        try{await tauriInvoke('bookos_apply_config',{config:{bateria_tiempo:a}});}
+        catch(e){toast(_tr('No se pudo guardar'),'❌');return;}
+        toast(a?'Tiempo restante visible en el widget':'Tiempo restante oculto en el widget');
+    });
+    setupToggle('show-colors',async a=>{
+        showcolors=a;
+        try{await tauriInvoke('bookos_apply_config',{config:{bateria_colores:a}});}
+        catch(e){toast(_tr('No se pudo guardar'),'❌');return;}
+        toast(a?'Icono con los colores del perfil':'Icono sólido');
     });
     };
 
@@ -1197,7 +1228,9 @@ async function _renderBateriaContent(c){
         ).join('')||`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr('Sin datos disponibles')}</span></div>`;
         const optRow=(label,id,on)=>`<div class="bat-stat-pop-row"><span class="bat-stat-pop-label">${_tr(label)}</span>${renderToggle(id,on)}</div>`;
         const optsSection=`<div class="bat-pop-section-title">${_tr('Opciones')}</div><div class="bat-stat-pop">${
-            optRow('Mostrar porcentaje batería','show-pct',showpct)}</div>`;
+            optRow('Mostrar porcentaje batería','show-pct',showpct)}${
+            optRow('Mostrar tiempo restante','show-time',showtime)}${
+            optRow('Colores según el perfil de energía','show-colors',showcolors)}</div>`;
         const statsSection=`<div class="bat-pop-section-title">${_tr('Estado')}</div><div class="bat-stat-pop">${statsRows}</div>`;
         const usbc=c.dataset.batUsbc||'';
         const body=`<div class="bat-pop">${optsSection}${statsSection}${usbc}</div>`;
@@ -3513,6 +3546,9 @@ async function _renderBudsFitTest(c, device){
     });
 }
 
+/// Conexión del canal de control en curso o fallida, por MAC. Evita lanzar
+/// otro `buds_connect` en cada repintado y guarda el motivo hasta «Reintentar».
+const _budsIntento=new Map();
 async function _renderBudsDetail(c, device){
     if(!device){console.error('[Buds] device es undefined');return;}
     c.innerHTML=renderHeader(device.name||'Buds')+renderSkeleton(2);
@@ -3533,18 +3569,32 @@ async function _renderBudsDetail(c, device){
         }catch(e){}
 
         if(!alreadyAlive){
-            // Sin modal: tapaba la página mientras conectaba y luego avisaba
-            // «No se pudo conectar» encima. Si falla, el motivo ya sale en la
-            // propia página (sppError, más abajo), donde se puede reintentar.
-            try{
-                const r = JSON.parse(await tauriInvoke('buds_connect',{mac:device.mac}));
-                if(r.connected){status=r;sppConnected=true;tauriInvoke('set_bookos_setting',{key:'BudsLastMac',value:device.mac}).catch(e=>console.error('No se pudo anotar los Buds para el reparto de audio',e));}
-            }catch(e){
-                sppError=String(e);console.warn('[Buds] SPP connect failed:',e);
-                // El error crudo de D-Bus («The name is not activatable») no
-                // le dice nada a nadie: lo que pasa es que el servicio no está.
-                if(/not activatable|ServiceUnknown|was not provided/i.test(sppError))
-                    sppError=_tr('El servicio de los auriculares (bookos-budsd) no está en marcha.');
+            // No se espera a `buds_connect`: bookos-budsd aguarda al audio
+            // (hasta 10 s) y reintenta tres veces con 10 s por perfil, así que
+            // puede pasar de un minuto (el 12-11 tardó 10,2 s en abrir y otras
+            // veces no abrió). Esperarlo dejaba la página en el esqueleto. Se
+            // pinta ya y, al resolverse, se vuelve a pintar con el canal o
+            // con el motivo del fallo.
+            const intento=_budsIntento.get(device.mac);
+            if(intento?.error!=null)sppError=intento.error;
+            else if(!intento){
+                _budsIntento.set(device.mac,{error:null});
+                tauriInvoke('buds_connect',{mac:device.mac}).then(r=>{
+                    _budsIntento.delete(device.mac);
+                    if(JSON.parse(r).connected)tauriInvoke('set_bookos_setting',{key:'BudsLastMac',value:device.mac}).catch(e=>console.error('No se pudo anotar los Buds para el reparto de audio',e));
+                },e=>{
+                    console.warn('[Buds] SPP connect failed:',e);
+                    let msg=String(e);
+                    // El error crudo de D-Bus («The name is not activatable») no
+                    // le dice nada a nadie: lo que pasa es que el servicio no está.
+                    if(/not activatable|ServiceUnknown|was not provided/i.test(msg))
+                        msg=_tr('El servicio de los auriculares (bookos-budsd) no está en marcha.');
+                    _budsIntento.set(device.mac,{error:msg});
+                }).finally(()=>{
+                    if(!document.getElementById('buds-rings'))return;
+                    window.clearPageIntervals?.();
+                    _renderBudsDetail(c,device);
+                });
             }
 
             if(!sppConnected){
@@ -3759,6 +3809,11 @@ async function _renderBudsDetail(c, device){
 
     // Sin canal de control no hay batería por auricular, ANC ni ecualizador:
     // se dice por qué en vez de enseñar los controles como si funcionaran.
+    if(device.connected&&!sppConnected&&_budsIntento.get(device.mac)?.error===null){
+        h+=`<div class="detail-card" style="margin:0 16px 10px;padding:14px 18px">
+            <span style="font-size:13px;color:var(--tx2);line-height:1.4">${_tr('Abriendo el canal de control de los auriculares…')}</span>
+        </div>`;
+    }
     if(device.connected&&!sppConnected&&!gbcAvail&&sppError){
         h+=`<div class="detail-card" style="margin:0 16px 10px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px">
             <span style="font-size:13px;color:var(--tx2);line-height:1.4">${esc(sppError)}</span>
@@ -3825,6 +3880,7 @@ async function _renderBudsDetail(c, device){
 
     // BT connect/disconnect button — master poll picks up transition + re-renders
     document.getElementById('buds-retry')?.addEventListener('click',()=>{
+        _budsIntento.delete(device.mac);
         window.clearPageIntervals?.();
         _renderBudsDetail(c,device);
     });
@@ -4048,6 +4104,19 @@ async function _renderBudsDetail(c, device){
 
         // Still connected: update battery rings
         if(nowConnected){
+            // Con un `buds_connect` en vuelo (error null) ya repinta él al acabar.
+            if(!sppConnected&&_budsIntento.get(device.mac)?.error!==null){
+                // bookos-budsd abre el canal por su cuenta al conectar el audio;
+                // sin esto la página se quedaba con la batería de UPower.
+                try{
+                    if(JSON.parse(await tauriInvoke('buds_get_status')).connected){
+                        _budsIntento.delete(device.mac);
+                        window.clearPageIntervals?.();
+                        _renderBudsDetail(c,device);
+                        return;
+                    }
+                }catch(e){}
+            }
             if(sppConnected){
                 try{
                     const r=JSON.parse(await tauriInvoke('buds_get_status'));
@@ -4208,557 +4277,9 @@ async function _renderBudsTouch(c,device,status,sppConnected,gbcAvail){
     bindPicker('tc-long','exp-long',LONG_OPTS,'long','tc-long-tg');
 }
 
-// ── Book Share sub-page ──────────────────────────────────────────────────
-// ── Hoja de compartir un enlace (bookos-settings --share-url) ──
-// La abre el botón de compartir del navegador: busca dispositivos cercanos por
-// Quick Share y manda el enlace al que se elija, que lo abre en su navegador.
-// Si Quick Share estaba apagado, se enciende solo mientras la hoja está
-// abierta y se vuelve a apagar al cerrarla.
-export async function abrirHojaCompartir(url){
-    let yaActivo=false;
-    try{
-        yaActivo=JSON.parse(await tauriInvoke('qs_start')).already===true;
-        // Se reinicia la búsqueda para que vuelvan a anunciarse los que ya
-        // estaban: la hoja no ha visto los eventos de antes.
-        await tauriInvoke('qs_stop_discover').catch(()=>{});
-        await tauriInvoke('qs_discover');
-    }catch(e){toast('No se pudo iniciar Quick Share: '+e);return;}
-
-    const dispositivos={};
-    let dejarDeEscuchar=null;
-    const cerrar=()=>{
-        dejarDeEscuchar?.();
-        if(!yaActivo){
-            tauriInvoke('qs_stop_discover').catch(()=>{});
-            tauriInvoke('qs_stop').catch(()=>{});
-        }
-    };
-    showDialog('Enviar con Book Share',
-        `<div style="word-break:break-all;margin-bottom:12px">${esc(url)}</div><div id="hoja-compartir-lista" style="display:flex;flex-direction:column;gap:8px"></div>`,
-        {confirmText:null,cancelText:'Cancelar',onCancel:cerrar});
-
-    const pintar=()=>{
-        const lista=document.getElementById('hoja-compartir-lista');
-        if(!lista)return;
-        const ids=Object.keys(dispositivos);
-        if(!ids.length){
-            lista.innerHTML=`<div style="color:var(--tx2)">Buscando dispositivos cercanos…</div>`;
-            return;
-        }
-        lista.innerHTML=ids.map(id=>`<button class="qs-pick-dev" data-id="${esc(id)}" style="padding:9px 14px;border-radius:10px;border:1.5px solid var(--brd);background:transparent;color:var(--tx);text-align:left;cursor:pointer">${esc(dispositivos[id].name||id)}</button>`).join('');
-        lista.querySelectorAll('.qs-pick-dev').forEach(btn=>btn.addEventListener('click',async()=>{
-            const d=dispositivos[btn.dataset.id];
-            document.querySelector('.bk-overlay')?.remove();
-            dejarDeEscuchar?.();
-            // Quick Share no se apaga en el acto: el envío sigue en segundo
-            // plano y apagar el servicio lo cortaría. Se apaga cuando el envío
-            // termina, bien o mal (estados finales de rqs_lib).
-            let dejarTransferencia=null;
-            if(!yaActivo){
-                dejarTransferencia=await window.__TAURI__.event.listen('qs-transfer',ev=>{
-                    if(!['Finished','Rejected','Cancelled','Disconnected'].includes(ev.payload?.state))return;
-                    dejarTransferencia?.();
-                    tauriInvoke('qs_stop_discover').catch(()=>{});
-                    tauriInvoke('qs_stop').catch(()=>{});
-                });
-            }
-            try{
-                await tauriInvoke('qs_send_url',{endpointId:btn.dataset.id,name:d.name||'',addr:d.ip||'',url});
-                toast('Enviando enlace a '+(d.name||'el dispositivo')+'…');
-            }catch(e){
-                toast('Error al enviar: '+e);
-                dejarTransferencia?.();
-                if(!yaActivo)tauriInvoke('qs_stop').catch(()=>{});
-            }
-        }));
-    };
-    pintar();
-    dejarDeEscuchar=await window.__TAURI__.event.listen('qs-device',ev=>{
-        const d=ev.payload;
-        if(!d||!d.id)return;
-        if(d.present===true)dispositivos[d.id]=d; else delete dispositivos[d.id];
-        pintar();
-    });
-}
-
-async function _renderBookShare(c){
-    c.innerHTML=renderHeader(t('hdr_book_share'))+renderSkeleton(2);
-
-    // ── Fetch KDE Connect devices ──
-    let kdeDevices=[];
-    try{kdeDevices=JSON.parse(await tauriInvoke('get_kdeconnect_devices'));}catch(e){console.error('[BookShare]',e);}
-    // Dedupe: kdeconnect a veces lista el mismo teléfono dos veces (entrada
-    // vieja + nueva con distinto id). Nos quedamos con una por nombre,
-    // prefiriendo la que esté al alcance.
-    {
-        const byName=new Map();
-        for(const d of kdeDevices){
-            const k=(d.name||'').trim().toLowerCase()||d.id;
-            const prev=byName.get(k);
-            if(!prev||(d.reachable&&!prev.reachable))byName.set(k,d);
-        }
-        kdeDevices=[...byName.values()];
-    }
-
-    const _SVG_UPLOAD=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`;
-    const _SVG_PHONE=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>`;
-    const _SVG_LAPTOP=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M0 21h24"/></svg>`;
-
-    let h=renderHeader(t('hdr_book_share'));
-
-    // ── KDE Connect / Teléfono ──
-    h+=renderSection(t('sec_paired_devices'));
-    if(kdeDevices.length===0){
-        h+=renderCard([_devRow({
-            icon:_SVG_PHONE,iconColor:'var(--tx2)',
-            title:'Sin dispositivos KDE Connect',
-            subtitle:'Instala KDE Connect en tu teléfono para vincularlos'
-        })]);
-    } else {
-        const battIcon=`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="7" width="16" height="10" rx="2"/><path d="M22 11v2"/></svg>`;
-        h+=renderCard(kdeDevices.map(d=>{
-            const batt=d.battery?`<span style="font-size:12px;color:var(--tx2);display:inline-flex;align-items:center;gap:3px;margin-left:6px">${battIcon}${esc(d.battery)}%</span>`:'';
-            return _devRow({
-                icon:_SVG_PHONE,iconColor:d.reachable?'var(--green)':'var(--tx2)',
-                title:esc(d.name)+batt,
-                subtitle:d.reachable?'Conectado y disponible':'Fuera de alcance'
-            });
-        }));
-    }
-
-    // ── Quick Share (rqs_lib built-in) ──
-    h+=renderSection(t('sec_quickshare'));
-    h+=renderCard([_devRow({
-        icon:_SVG_SHARE,iconColor:'var(--blue)',
-        title:'Compartir cercano',
-        subtitleId:'qs-status-sub',
-        subtitle:'Inactivo',
-        right:renderToggle('qs-toggle',false)
-    })]);
-    // Visibility selector (only when active)
-    h+=`<div id="qs-visibility-row" style="display:none">`;
-    h+=renderCard([_devRow({
-        icon:`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
-        iconColor:'var(--tx2)',
-        title:'Visible para otros',
-        subtitle:'Otros dispositivos pueden encontrarte',
-        right:renderToggle('qs-vis-toggle',true)
-    })]);
-    h+=`</div>`;
-
-    // ── Discovered devices (mDNS — same WiFi) ──
-    h+=`<div id="qs-discover-section" style="display:none">`;
-    h+=renderSection(t('sec_nearby'));
-    h+=`<div id="qs-devices-list">`;
-    h+=renderCard([_devRow({icon:_SVG_LAPTOP,iconColor:'var(--tx2)',title:'Buscando dispositivos…',subtitle:'Mantén Quick Share activo en el otro equipo'})]);
-    h+=`</div></div>`;
-
-    // ── Wi-Fi Direct P2P devices (no WiFi compartida necesaria) ──
-    const _SVG_WIFI_DIRECT=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/></svg>`;
-    h+=`<div id="p2p-section" style="display:none">`;
-    h+=renderSection(t('sec_wifi_direct'));
-    h+=`<div id="p2p-devices-list">`;
-    h+=renderCard([_devRow({icon:_SVG_WIFI_DIRECT,iconColor:'var(--tx2)',title:'Buscando por Wi-Fi Direct…',subtitle:'Abre Nearby Share en el S22 Ultra'})]);
-    h+=`</div></div>`;
-
-    // ── Receive section ──
-    const _SVG_DOWNLOAD=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
-    const _SVG_FOLDER=`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-    h+=`<div id="qs-recv-section" style="display:none">`;
-    h+=renderSection(t('sec_receive'));
-    h+=renderCard([
-        _devRow({
-            icon:_SVG_DOWNLOAD,iconColor:'var(--green)',
-            title:'Listo para recibir',
-            subtitle:'Este equipo es visible para dispositivos cercanos'
-        }),
-        _devRow({
-            id:'qs-recv-folder-row',extraStyle:'cursor:pointer',
-            icon:_SVG_FOLDER,iconColor:'var(--tx2)',
-            title:'Carpeta de descarga',
-            subtitleId:'qs-folder-label',subtitle:'~/Descargas',
-            right:`<div style="color:var(--tx2);flex-shrink:0">${SVGI.chevronR}</div>`
-        })
-    ]);
-    h+=`<div id="qs-incoming-list"></div>`;
-    h+=`</div>`;
-
-    // ── Send file shortcut ──
-    h+=renderSection(t('sec_send'));
-    h+=renderCard([_devRow({
-        id:'qs-send-btn',extraStyle:'cursor:pointer',
-        icon:_SVG_UPLOAD,iconColor:'var(--blue)',
-        title:'Enviar archivo',
-        subtitle:'Elige un archivo y selecciona un dispositivo cercano',
-        right:`<div style="color:var(--tx2);flex-shrink:0">${SVGI.chevronR}</div>`
-    })]);
-    h+=`<div id="qs-outbound-list"></div>`;
-
-    c.innerHTML=h;
-
-    // ── State ──
-    let qsRunning=false;
-    let _unlistenTransfer=null, _unlistenDevice=null;
-    let _unlistenP2PAdded=null, _unlistenP2PRemoved=null, _unlistenP2PConn=null;
-    const qsDevices={};       // endpointId → EndpointInfo (mDNS)
-    const p2pDevices={};      // path → P2PPeer (Wi-Fi Direct)
-    const p2pConnected=new Set(); // paths of connected P2P peers
-    const qsTransfers={};     // id → {msg, el} — inbound
-    const qsOutbound={};      // id → {msg, el} — outbound
-
-    const origClear=window.clearPageIntervals;
-    window.clearPageIntervals=()=>{
-        window.clearPageIntervals=origClear;
-        if(qsRunning){
-            tauriInvoke('qs_stop_discover').catch(()=>{});
-            tauriInvoke('qs_stop').catch(()=>{});
-        }
-        _unlistenTransfer?.(); _unlistenDevice?.();
-        _unlistenP2PAdded?.(); _unlistenP2PRemoved?.(); _unlistenP2PConn?.();
-        origClear?.();
-    };
-
-    function _renderDevicesList(){
-        const keys=Object.keys(qsDevices);
-        const el=document.getElementById('qs-devices-list');
-        if(!el)return;
-        if(keys.length===0){
-            el.innerHTML=renderCard([_devRow({icon:_SVG_LAPTOP,iconColor:'var(--tx2)',title:'Sin dispositivos encontrados',subtitle:'Asegúrate de que Quick Share esté activo en el otro equipo'})]);
-            return;
-        }
-        el.innerHTML=renderCard(keys.map(id=>{
-            const d=qsDevices[id];
-            return _devRow({
-                id:`qs-dev-${id}`,extraStyle:'cursor:pointer',
-                icon:_SVG_LAPTOP,iconColor:'var(--blue)',
-                title:esc(d.name||id),
-                subtitle:esc(d.ip||'Dispositivo cercano'),
-                right:`<button class="qs-send-to" data-id="${esc(id)}" style="padding:5px 14px;border-radius:20px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:12px;cursor:pointer">Enviar</button>`
-            });
-        }));
-        el.querySelectorAll('.qs-send-to').forEach(btn=>{
-            btn.addEventListener('click',async e=>{
-                e.stopPropagation();
-                const id=btn.dataset.id;
-                const d=qsDevices[id];
-                if(!d)return;
-                let files=[];
-                try{
-                    const picked=await elegirRuta('open',{multiple:true});
-                    if(!picked)return;
-                    files=Array.isArray(picked)?picked:[picked];
-                }catch(e){toast('No se pudo abrir el selector de archivos');return;}
-                try{
-                    await tauriInvoke('qs_send_files',{endpointId:id,name:d.name||'',addr:d.ip||'',files});
-                    toast('Enviando…');
-                }catch(e){toast('Error al enviar: '+e);}
-            });
-        });
-    }
-
-    function _renderP2PList(){
-        const el=document.getElementById('p2p-devices-list');
-        const sec=document.getElementById('p2p-section');
-        if(!el)return;
-        const keys=Object.keys(p2pDevices);
-        if(keys.length===0){
-            el.innerHTML=renderCard([_devRow({icon:_SVG_WIFI_DIRECT,iconColor:'var(--tx2)',title:'Buscando por Wi-Fi Direct…',subtitle:'Abre Nearby Share en el S22 Ultra'})]);
-            return;
-        }
-        if(sec)sec.style.display='';
-        el.innerHTML=renderCard(keys.map(path=>{
-            const d=p2pDevices[path];
-            const isConn=p2pConnected.has(path);
-            const sig=d.strength>0?` · ${d.strength}%`:'';
-            const rightBtn=isConn
-                ?`<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:600"><i style="width:7px;height:7px;border-radius:50%;background:currentColor"></i>Conectado</span>`
-                :`<button class="p2p-connect-btn" data-path="${esc(path)}" data-mac="${esc(d.mac)}" data-name="${esc(d.name||d.mac)}"
-                    style="padding:5px 14px;border-radius:20px;border:1.5px solid var(--blue);background:transparent;color:var(--blue);font-size:12px;cursor:pointer">
-                    Conectar</button>`;
-            return _devRow({
-                icon:_SVG_WIFI_DIRECT,iconColor:isConn?'var(--green)':'var(--blue)',
-                title:esc(d.name||d.mac),
-                subtitle:`Wi-Fi Direct${sig}${isConn?' — listo para recibir':''}`,
-                right:rightBtn
-            });
-        }));
-        el.querySelectorAll('.p2p-connect-btn').forEach(btn=>{
-            btn.addEventListener('click',async e=>{
-                e.stopPropagation();
-                btn.disabled=true;btn.textContent='Conectando…';
-                try{
-                    await tauriInvoke('p2p_connect',{mac:btn.dataset.mac,name:btn.dataset.name});
-                    p2pConnected.add(btn.dataset.path);
-                    _renderP2PList();
-                    toast('Wi-Fi Direct conectado con '+btn.dataset.name);
-                }catch(err){
-                    toast('Error P2P: '+err);
-                    btn.disabled=false;btn.textContent='Conectar';
-                }
-            });
-        });
-    }
-
-    function _transferTitle(meta){
-        if(!meta)return'Archivo';
-        if(meta.text_payload)return meta.text_description||'Texto';
-        if(meta.files?.length>1)return`${meta.files.length} archivos`;
-        return meta.files?.[0]||meta.text_description||'Archivo';
-    }
-    function _transferSubIcon(meta){
-        if(!meta||meta.files)return _SVG_DOWNLOAD;
-        return`<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
-    }
-    function _progressBar(pct){
-        return`<div style="width:100%;height:5px;border-radius:3px;background:var(--brd);overflow:hidden">
-            <div style="width:${pct}%;height:100%;border-radius:3px;background:var(--blue);transition:width .25s ease"></div>
-        </div>`;
-    }
-
-    function _upsertTransfer(msg){
-        // Route outbound to separate list
-        if(msg.rtype==='Outbound'){_upsertOutbound(msg);return;}
-        const list=document.getElementById('qs-incoming-list');
-        if(!list)return;
-        const id=msg.id;
-        qsTransfers[id]=qsTransfers[id]||{};
-        qsTransfers[id].msg=msg;
-
-        const stateStr=(msg.state||'').toLowerCase();
-        const isDone=stateStr==='finished'||stateStr==='cancelled'||stateStr==='rejected'||stateStr==='disconnected';
-        if(isDone){
-            if(stateStr==='finished')toast(`Archivo recibido: ${_transferTitle(msg.meta)}`,'✓');
-            qsTransfers[id].el?.remove();
-            delete qsTransfers[id];
-            return;
-        }
-        let el=qsTransfers[id].el;
-        if(!el){
-            el=document.createElement('div');
-            el.style.cssText='margin-bottom:4px';
-            list.appendChild(el);
-            qsTransfers[id].el=el;
-        }
-        const title=_transferTitle(msg.meta);
-        const from=msg.meta?.source?.name?`De: ${esc(msg.meta.source.name)}`:'';
-        const progress=(msg.meta?.ack_bytes&&msg.meta?.total_bytes&&msg.meta.total_bytes>0)?
-            Math.round(msg.meta.ack_bytes/msg.meta.total_bytes*100):null;
-        const pin=msg.meta?.pin_code;
-        const isWaiting=stateStr==='waitingforuserconsent'||stateStr==='waiting'||!stateStr;
-        el.innerHTML=renderCard([`
-            <div class="detail-item" style="flex-direction:column;align-items:flex-start;gap:10px">
-                <div style="display:flex;align-items:center;gap:10px;width:100%">
-                    <div style="color:var(--blue);flex-shrink:0">${_transferSubIcon(msg.meta)}</div>
-                    <div style="flex:1;min-width:0">
-                        <div class="dt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(title)}</div>
-                        <div class="ds">${from||'Solicitud entrante'}</div>
-                    </div>
-                    <div style="font-size:12px;color:${isWaiting?'var(--blue)':'var(--tx2)'};font-weight:600;flex-shrink:0">
-                        ${isWaiting?'Pendiente':progress!==null?progress+'%':esc(msg.state||'')}
-                    </div>
-                </div>
-                ${pin?`<div style="text-align:center;width:100%;font-size:24px;font-weight:700;letter-spacing:8px;color:var(--blue);padding:4px 0">${esc(pin)}</div>`:''}
-                ${isWaiting?`
-                <div style="display:flex;gap:8px;width:100%">
-                    <button class="qs-accept" data-tid="${esc(id)}" style="flex:1;padding:9px;border-radius:12px;border:none;background:var(--blue);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Aceptar</button>
-                    <button class="qs-reject" data-tid="${esc(id)}" style="flex:1;padding:9px;border-radius:12px;border:1.5px solid var(--brd);background:transparent;color:var(--tx);font-size:13px;cursor:pointer">Rechazar</button>
-                </div>`:progress!==null?_progressBar(progress):''}
-            </div>
-        `]);
-        el.querySelectorAll('.qs-accept').forEach(b=>b.addEventListener('click',async()=>{
-            b.disabled=true;b.textContent='Aceptando…';
-            try{await tauriInvoke('qs_action',{transferId:b.dataset.tid,accept:true});}
-            catch(e){toast('Error: '+e);b.disabled=false;b.textContent='Aceptar';}
-        }));
-        el.querySelectorAll('.qs-reject').forEach(b=>b.addEventListener('click',async()=>{
-            try{await tauriInvoke('qs_action',{transferId:b.dataset.tid,accept:false});}catch(e){toast('Error: '+e);}
-        }));
-    }
-
-    function _upsertOutbound(msg){
-        const list=document.getElementById('qs-outbound-list');
-        if(!list)return;
-        const id=msg.id;
-        qsOutbound[id]=qsOutbound[id]||{};
-        qsOutbound[id].msg=msg;
-        const stateStr=(msg.state||'').toLowerCase();
-        const isDone=stateStr==='finished'||stateStr==='cancelled'||stateStr==='rejected'||stateStr==='disconnected';
-        if(isDone){
-            if(stateStr==='finished')toast(`Archivo enviado: ${_transferTitle(msg.meta)}`,'✓');
-            qsOutbound[id].el?.remove();
-            delete qsOutbound[id];
-            return;
-        }
-        let el=qsOutbound[id].el;
-        if(!el){
-            el=document.createElement('div');
-            el.style.cssText='margin-bottom:4px';
-            list.appendChild(el);
-            qsOutbound[id].el=el;
-        }
-        const title=_transferTitle(msg.meta);
-        const to=msg.meta?.destination?`A: ${esc(msg.meta.destination.split('/').pop()||msg.meta.destination)}`:'';
-        const progress=(msg.meta?.ack_bytes&&msg.meta?.total_bytes&&msg.meta.total_bytes>0)?
-            Math.round(msg.meta.ack_bytes/msg.meta.total_bytes*100):null;
-        el.innerHTML=renderCard([`
-            <div class="detail-item" style="flex-direction:column;align-items:flex-start;gap:10px">
-                <div style="display:flex;align-items:center;gap:10px;width:100%">
-                    <div style="color:var(--blue);flex-shrink:0">${_SVG_UPLOAD}</div>
-                    <div style="flex:1;min-width:0">
-                        <div class="dt" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(title)}</div>
-                        <div class="ds">Enviando${to?' · '+to:''}</div>
-                    </div>
-                    <div style="font-size:12px;color:var(--blue);font-weight:600;flex-shrink:0">${progress!==null?progress+'%':'…'}</div>
-                </div>
-                ${progress!==null?_progressBar(progress):''}
-            </div>
-        `]);
-    }
-
-    // ── Toggle Quick Share on/off ──
-    setupToggle('qs-toggle',async(on)=>{
-        const sub=document.getElementById('qs-status-sub');
-        const visRow=document.getElementById('qs-visibility-row');
-        const discSec=document.getElementById('qs-discover-section');
-        const recvSec=document.getElementById('qs-recv-section');
-        if(on){
-            if(sub)sub.textContent='Iniciando…';
-            try{
-                await tauriInvoke('qs_start');
-                await tauriInvoke('qs_discover');
-                qsRunning=true;
-                if(sub)sub.textContent='Activo — buscando dispositivos';
-                if(visRow)visRow.style.display='';
-                if(discSec)discSec.style.display='';
-                if(recvSec)recvSec.style.display='';
-
-                // Listen to device events
-                // present=true → appeared, present=null/undefined (default) → removed
-                _unlistenDevice=await window.__TAURI__.event.listen('qs-device',ev=>{
-                    const d=ev.payload;
-                    if(!d||!d.id)return;
-                    if(d.present===true){
-                        qsDevices[d.id]=d;
-                    } else {
-                        // removal — present is null/undefined in default struct
-                        delete qsDevices[d.id];
-                    }
-                    _renderDevicesList();
-                });
-                // Listen to transfer events
-                _unlistenTransfer=await window.__TAURI__.event.listen('qs-transfer',ev=>{
-                    if(ev.payload)_upsertTransfer(ev.payload);
-                });
-                // Listen to P2P peer events (Wi-Fi Direct, no shared WiFi needed)
-                _unlistenP2PAdded=await window.__TAURI__.event.listen('p2p-peer-added',ev=>{
-                    const d=ev.payload;
-                    if(!d||!d.path)return;
-                    p2pDevices[d.path]=d;
-                    document.getElementById('p2p-section')?.style.setProperty('display','');
-                    _renderP2PList();
-                });
-                _unlistenP2PRemoved=await window.__TAURI__.event.listen('p2p-peer-removed',ev=>{
-                    if(ev.payload?.path)delete p2pDevices[ev.payload.path];
-                    _renderP2PList();
-                    if(Object.keys(p2pDevices).length===0)
-                        document.getElementById('p2p-section')?.style.setProperty('display','none');
-                });
-                _unlistenP2PConn=await window.__TAURI__.event.listen('p2p-connected',ev=>{
-                    const peer=ev.payload;
-                    if(peer?.path)p2pConnected.add(peer.path);
-                    if(sub)sub.textContent='Activo — Wi-Fi Direct conectado';
-                    _renderP2PList();
-                    toast('Wi-Fi Direct activo con '+(peer?.name||peer?.mac||'dispositivo'));
-                });
-                _renderDevicesList();
-            }catch(err){
-                document.querySelector('[data-toggle="qs-toggle"]')?.classList.remove('active');
-                if(sub)sub.textContent='Error al iniciar';
-                toast('No se pudo iniciar Quick Share: '+err);
-            }
-        } else {
-            try{await tauriInvoke('qs_stop_discover');}catch(e){}
-            try{await tauriInvoke('qs_stop');}catch(e){}
-            qsRunning=false;
-            _unlistenTransfer?.();_unlistenDevice?.();
-            _unlistenP2PAdded?.();_unlistenP2PRemoved?.();_unlistenP2PConn?.();
-            _unlistenTransfer=null;_unlistenDevice=null;
-            _unlistenP2PAdded=null;_unlistenP2PRemoved=null;_unlistenP2PConn=null;
-            p2pConnected.clear();
-            if(sub)sub.textContent='Inactivo';
-            if(visRow)visRow.style.display='none';
-            if(discSec)discSec.style.display='none';
-            if(recvSec)recvSec.style.display='none';
-            document.getElementById('p2p-section')?.style.setProperty('display','none');
-        }
-    });
-
-    // ── Visibility toggle ──
-    setupToggle('qs-vis-toggle',async visible=>{
-        try{await tauriInvoke('qs_set_visibility',{visible});}catch(err){toast('Error: '+err);}
-    });
-
-    // ── Download folder picker ──
-    document.getElementById('qs-recv-folder-row')?.addEventListener('click',async()=>{
-        if(!qsRunning){toast('Activa Quick Share primero');return;}
-        try{
-            const dir=await elegirRuta('open',{directory:true,multiple:false});
-            if(!dir)return;
-            await tauriInvoke('qs_set_download_path',{path:dir});
-            const lbl=document.getElementById('qs-folder-label');
-            if(lbl)lbl.textContent=dir.replace(/^\/home\/[^/]+/,'~');
-            toast('Carpeta actualizada');
-        }catch(e){toast('Error: '+e);}
-    });
-
-    // ── Send file button ──
-    document.getElementById('qs-send-btn')?.addEventListener('click',async()=>{
-        if(!qsRunning){toast('Activa Quick Share primero');return;}
-        const keys=Object.keys(qsDevices);
-        if(keys.length===0){toast('Sin dispositivos cercanos encontrados');return;}
-        let files=[];
-        try{
-            const picked=await elegirRuta('open',{multiple:true});
-            if(!picked)return;
-            files=Array.isArray(picked)?picked:[picked];
-        }catch(e){toast('No se pudo abrir el selector de archivos');return;}
-        if(keys.length===1){
-            const d=qsDevices[keys[0]];
-            try{await tauriInvoke('qs_send_files',{endpointId:keys[0],name:d.name||'',addr:d.ip||'',files});toast('Enviando…');}
-            catch(e){toast('Error al enviar: '+e);}
-            return;
-        }
-        // Multiple devices — show picker
-        showDialog('¿A qué dispositivo?',
-            `<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${keys.map(id=>`<button class="qs-pick-dev" data-id="${esc(id)}" style="padding:9px 14px;border-radius:10px;border:1.5px solid var(--brd);background:transparent;color:var(--tx);text-align:left;cursor:pointer">${esc(qsDevices[id].name||id)}</button>`).join('')}</div>`,
-            {confirmText:'Cancelar',cancelText:'',onConfirm:()=>{}});
-        setTimeout(()=>{
-            document.querySelectorAll('.qs-pick-dev').forEach(btn=>btn.addEventListener('click',async()=>{
-                const id=btn.dataset.id;const d=qsDevices[id];
-                document.querySelector('.bk-overlay')?.remove();
-                try{await tauriInvoke('qs_send_files',{endpointId:id,name:d.name||'',addr:d.ip||'',files});toast('Enviando…');}
-                catch(e){toast('Error al enviar: '+e);}
-            }));
-        },100);
-    });
-
-    // ── Refresh KDE Connect battery every 60s ──
-    addInterval(async()=>{
-        try{
-            const devs=JSON.parse(await tauriInvoke('get_kdeconnect_devices'));
-            // reachable al final: si hay duplicados por nombre, gana el que responde
-            devs.sort((a,b)=>(a.reachable?1:0)-(b.reachable?1:0));
-            devs.forEach(d=>{
-                document.querySelectorAll('.detail-item.detail-item-row').forEach(row=>{
-                    if(row.querySelector('.dt')?.textContent?.includes(d.name)){
-                        const sub=row.querySelector('.ds');
-                        if(sub)sub.textContent=d.reachable?'Conectado y disponible':'Fuera de alcance';
-                    }
-                });
-            });
-        }catch(e){}
-    },60000);
-}
+// ── Book Share: módulo propio, cliente del servicio bookos-bookshare ──
+export{renderBookShare,abrirHojaCompartir}from'./pages/bookshare.js';
+import{renderBookShare as _renderBookShare}from'./pages/bookshare.js';
 
 // ── Main dispositivos list ──────────────────────────────────────────────
 // ── Connected-buds shortcut (used by the Home profile card) ──────────────
@@ -5100,13 +4621,15 @@ function _bkPortada(outs,sel,fondo,ancho){
         const pie=o.integrada?'<span class="disp-base"></span>':'<span class="disp-pie"></span>';
         return `<button type="button" class="disp-equipo${o.integrada?' portatil':' monitor'}${varias&&o.id===sel.id?' sel':''}" data-out="${esc(o.id)}"
             style="left:${Math.round((o.x-minX)*f)+g}px;top:${Math.round((o.y-minY)*f)+g}px;width:${w}px" ${varias?'':'tabindex="-1"'} aria-label="${esc(o.nombre||o.conector)}">
+            ${o.integrada?`<img class="disp-portatil-render" src="./assets/book5-pro.webp" alt="" aria-hidden="true">`:''}
             <span class="disp-marco" style="width:${w}px;height:${hh}px">${img}</span>${pie}</button>`;
     }).join('');
     // Las apagadas no tienen posición: van aparte, en gris, para poder elegirlas.
     const apagadas=outs.filter(o=>!o.activa).map(o=>`<button type="button" class="disp-apagada${o.id===sel.id?' sel':''}" data-out="${esc(o.id)}">${esc(o.nombre||o.conector)} · ${_tr('apagada')}</button>`).join('');
     const ancho_=Math.round((maxX-minX)*f),alto=Math.round((maxY-minY)*f);
+    const altoConBase=Math.max(alto,...activas.filter(o=>o.integrada).map(o=>Math.round((o.y-minY+o.logico_alto*1.6)*f)));
     return `<div class="disp-hero">
-        <div class="disp-escena" style="width:${ancho_}px;height:${alto+18}px">${piezas}</div>
+        <div class="disp-escena" style="width:${ancho_}px;height:${altoConBase+18}px">${piezas}</div>
         ${apagadas?`<div class="disp-apagadas">${apagadas}</div>`:''}
         <div class="disp-nombre">${esc(sel.nombre||sel.conector)}</div>
         <div class="disp-detalle">${esc(sel.detalle||sel.conector)}</div>
